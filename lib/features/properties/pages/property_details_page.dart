@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderAbstractViewport;
 import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 import 'package:url_launcher/url_launcher.dart';
 // Mapa real da seção Localização — OSM/CARTO sem chave (paridade com o
 // PropertyMap/Leaflet do web).
@@ -31,6 +31,7 @@ import '../../documents/models/document_model.dart';
 import '../../documents/pages/create_document_page.dart';
 import '../../documents/utils/document_file_actions.dart';
 import '../../documents/utils/document_permissions.dart';
+import '../../sale_forms/pages/sale_form_detail_page.dart';
 import '../../clients/services/client_service.dart';
 import '../../documents/widgets/entity_selector.dart';
 import '../../../../core/constants/api_constants.dart';
@@ -42,6 +43,7 @@ import '../../../../shared/services/module_access_service.dart';
 import '../../../../core/constants/app_permissions.dart';
 import '../../../../core/constants/feature_visibility.dart';
 import '../services/property_approval_service.dart';
+import '../services/property_detail_extras_service.dart';
 import '../widgets/approval_action_sheets.dart';
 import '../utils/property_edit_permissions.dart';
 import '../utils/property_status_visual.dart';
@@ -52,12 +54,22 @@ import '../widgets/property_score_panel.dart';
 import '../widgets/property_share_sheet.dart';
 import '../widgets/property_presentation_pdf_sheet.dart';
 import '../widgets/details/property_activation_sheet.dart';
+import '../widgets/details/property_additional_info_section.dart';
 import '../widgets/details/property_approval_banner.dart';
+import '../widgets/details/property_history_entry_tile.dart';
 import '../widgets/details/property_details_kit.dart'
     show kPropertyDeletedReadOnlyReason;
+import '../widgets/details/property_linked_entity_section.dart';
+import '../widgets/details/property_linked_sale_form_card.dart';
+import '../widgets/details/property_owner_auth_certificate.dart';
 import '../widgets/details/property_owner_section.dart';
+import '../widgets/details/property_photo_download_sheet.dart';
+import '../widgets/details/property_revisions_section.dart';
+import '../widgets/details/property_site_tab.dart';
 import '../widgets/details/property_responsibles_section.dart';
 import '../widgets/details/property_status_change_sheet.dart';
+import '../widgets/details/property_values_section.dart';
+import '../widgets/details/property_viewers_tab.dart';
 
 // Formatter de moeda
 final _currencyFormatter = NumberFormat.currency(
@@ -67,7 +79,7 @@ final _currencyFormatter = NumberFormat.currency(
 );
 
 /// Aba interna da ficha de imóvel.
-enum _DetailsTab { details, activity, performance }
+enum _DetailsTab { details, activity, performance, viewers, site }
 
 extension _DetailsTabQuery on _DetailsTab {
   /// Aba pelo id do web (`?tab=`), com o apelido `updates` → Atividades
@@ -82,6 +94,10 @@ extension _DetailsTabQuery on _DetailsTab {
         return _DetailsTab.activity;
       case 'performance':
         return _DetailsTab.performance;
+      case 'viewers':
+        return _DetailsTab.viewers;
+      case 'site':
+        return _DetailsTab.site;
     }
     return null;
   }
@@ -94,6 +110,10 @@ extension _DetailsTabQuery on _DetailsTab {
         return 'Atividades';
       case _DetailsTab.performance:
         return 'Desempenho';
+      case _DetailsTab.viewers:
+        return 'Visualizações';
+      case _DetailsTab.site:
+        return 'Site';
     }
   }
 
@@ -105,6 +125,10 @@ extension _DetailsTabQuery on _DetailsTab {
         return Icons.history_rounded;
       case _DetailsTab.performance:
         return Icons.insights_rounded;
+      case _DetailsTab.viewers:
+        return Icons.visibility_outlined;
+      case _DetailsTab.site:
+        return Icons.public_rounded;
     }
   }
 
@@ -117,6 +141,10 @@ extension _DetailsTabQuery on _DetailsTab {
         return const Color(0xFFD97706);
       case _DetailsTab.performance:
         return const Color(0xFF10B981);
+      case _DetailsTab.viewers:
+        return const Color(0xFF0EA5E9);
+      case _DetailsTab.site:
+        return const Color(0xFF0284C7);
     }
   }
 }
@@ -176,9 +204,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   List<key_models.Key> _keys = [];
   bool _isLoadingKeys = false;
 
-  // Condomínio vinculado (só quando `condominiumId` existe — paridade web).
-  NamedEntityWithAddress? _linkedCondominium;
-  bool _loadingCondominium = false;
+  /// Responsável principal buscado por id quando a ficha não traz a lista
+  /// `responsibles` (o web faz o mesmo — a seção não some).
+  List<PropertyResponsible>? _responsibleFallback;
+  String? _responsibleFallbackFor;
+
+  /// Coordenada achada pelo "Atualizar no mapa" (ou pela geolocalização
+  /// automática) — vale até a ficha recarregar com a do servidor.
+  LatLng? _geocodedCoords;
+  bool _geocoding = false;
+  String? _autoGeocodeTriedFor;
 
   /// Aba interna ativa: Visão geral, Comercial ou Gestão.
   _DetailsTab _activeTab = _DetailsTab.details;
@@ -601,6 +636,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     _property = widget.initialProperty;
     _activeTab =
         _DetailsTabQuery.fromQuery(widget.initialTab) ?? _DetailsTab.details;
+    if (_activeTab == _DetailsTab.viewers && !_canSeeViewersTab) {
+      _activeTab = _DetailsTab.details;
+    }
+    if (_activeTab == _DetailsTab.site) {
+      _pendingSiteTab = true;
+      _activeTab = _DetailsTab.details;
+    }
     // Sempre inicia em loading para evitar "tela vazia" com `initialProperty`
     // parcial e garantir feedback visual consistente.
     _isLoading = true;
@@ -629,6 +671,292 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   // ignore: unused_element
   String? _publicPropertyUrl(Property property) =>
       PublicPropertyLink.buildUrl(property, _siteBaseUrl);
+
+  /// Mídias como o hero mostra: a galeria, ou só a principal quando a
+  /// lista vem vazia.
+  List<PropertyImage> _galleryOf(Property property) {
+    final valid = (property.images ?? const <PropertyImage>[])
+        .where((img) => img.url.trim().isNotEmpty)
+        .toList();
+    if (valid.isNotEmpty) return valid;
+    final main = property.mainImage;
+    if (main != null && main.url.trim().isNotEmpty) return [main];
+    return const <PropertyImage>[];
+  }
+
+  /// "Baixar fotos" — foto atual, todas ou escolher (web); sem
+  /// `property:download_images` a folha abre travada com o motivo.
+  void _openPhotoDownload({String? currentImageId}) {
+    final property = _property;
+    if (property == null) return;
+    final gallery = _galleryOf(property);
+    final index = _currentImageIndex.clamp(
+      0,
+      gallery.isEmpty ? 0 : gallery.length - 1,
+    );
+    final access = ModuleAccessService.instance;
+    showPropertyPhotoDownloadSheet(
+      context,
+      propertyId: property.id,
+      images: gallery,
+      canDownload: PropertyDetailExtrasService.webHasPermission(
+        role: access.userRole,
+        explicitPermissions: access.userPermissionNames,
+        permission: 'property:download_images',
+      ),
+      currentImageId: currentImageId ??
+          (gallery.isEmpty ? null : gallery[index].id),
+      propertyCode: property.code,
+      propertyTitle: property.title,
+    );
+  }
+
+  /// Folha de ações de um item (documento, cliente vinculado, mensagem):
+  /// título do item à esquerda e fechar à direita, linhas com ícone; a
+  /// travada fica à vista com cadeado e o motivo; a destrutiva em vermelho.
+  void _showActionsSheet({
+    required String title,
+    required List<_SheetAction> actions,
+  }) {
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        final isDark = theme.brightness == Brightness.dark;
+        final muted = ThemeHelpers.textSecondaryColor(sheetContext);
+        final danger =
+            isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+
+        Widget row(_SheetAction action) {
+          final reason = action.lockedReason;
+          final locked = reason != null;
+          final color = locked
+              ? muted
+              : action.destructive
+                  ? danger
+                  : ThemeHelpers.textColor(sheetContext);
+          return InkWell(
+            onTap: locked
+                ? null
+                : () {
+                    Navigator.of(sheetContext).pop();
+                    action.onTap();
+                  },
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 16, 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(action.icon, size: 20, color: color),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          action.label,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: color,
+                          ),
+                        ),
+                        if (locked) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            reason,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: muted,
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (locked)
+                    Icon(Icons.lock_outline_rounded, size: 16, color: muted),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(sheetContext).size.height * 0.88,
+          ),
+          child: Container(
+            decoration: BoxDecoration(
+              color: ThemeHelpers.cardBackgroundColor(sheetContext),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 8, 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Fechar',
+                          onPressed: () => Navigator.of(sheetContext).pop(),
+                          icon: Icon(Icons.close_rounded, color: muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    height: 1,
+                    color: ThemeHelpers.borderLightColor(sheetContext),
+                  ),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [for (final a in actions) row(a)],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ─── Chat de aprovação: editar/excluir a própria mensagem (web) ───────
+  void _showThreadMessageActions(PropertyHistoryEntry message) {
+    _showActionsSheet(
+      title: 'Sua mensagem',
+      actions: [
+        _SheetAction(
+          icon: Icons.edit_outlined,
+          label: 'Editar',
+          onTap: () => _editThreadMessage(message),
+        ),
+        _SheetAction(
+          icon: Icons.delete_outline_rounded,
+          label: 'Excluir',
+          destructive: true,
+          onTap: () => _deleteThreadMessage(message),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _editThreadMessage(PropertyHistoryEntry message) async {
+    final text = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (_) =>
+          _ThreadEditSheet(initialText: (message.description ?? '').trim()),
+    );
+    if (text == null || !mounted) return;
+    final res =
+        await PropertyApprovalService.instance.patchApprovalThreadMessage(
+      widget.propertyId,
+      message.id,
+      message: text,
+    );
+    if (!mounted) return;
+    final updated = res.data;
+    if (res.success && updated != null) {
+      setState(() {
+        _threadMessages = [
+          for (final m in _threadMessages) m.id == message.id ? updated : m,
+        ];
+      });
+      _approvalSnack('Mensagem atualizada.', ok: true);
+      return;
+    }
+    _approvalSnack(
+      res.statusCode == 403
+          ? 'Sem permissão para editar esta mensagem.'
+          : ((res.message ?? '').trim().isNotEmpty
+              ? res.message!.trim()
+              : 'Não foi possível salvar a edição.'),
+    );
+  }
+
+  Future<void> _deleteThreadMessage(PropertyHistoryEntry message) async {
+    final danger = Theme.of(context).brightness == Brightness.dark
+        ? AppColors.status.errorDarkMode
+        : AppColors.status.error;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: ThemeHelpers.cardBackgroundColor(ctx),
+        title: const Text('Excluir mensagem'),
+        content: const Text(
+          'Excluir esta mensagem? Esta ação não pode ser desfeita.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            style: TextButton.styleFrom(
+              foregroundColor: ThemeHelpers.textSecondaryColor(ctx),
+            ),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: danger,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final res =
+        await PropertyApprovalService.instance.deleteApprovalThreadMessage(
+      widget.propertyId,
+      message.id,
+    );
+    if (!mounted) return;
+    if (res.success) {
+      setState(() {
+        _threadMessages =
+            _threadMessages.where((m) => m.id != message.id).toList();
+      });
+      _approvalSnack('Mensagem excluída.', ok: true);
+      return;
+    }
+    _approvalSnack(
+      res.statusCode == 403
+          ? 'Sem permissão para excluir esta mensagem.'
+          : ((res.message ?? '').trim().isNotEmpty
+              ? res.message!.trim()
+              : 'Não foi possível excluir a mensagem.'),
+    );
+  }
 
   /// Toque numa ação travada: diz o motivo (a ação fica à vista em vez de
   /// sumir, como o botão com cadeado do web).
@@ -993,6 +1321,24 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                             });
                           },
                         ),
+                      if (property != null &&
+                          _galleryOf(property)
+                              .any((img) => !img.isVideo))
+                        tile(
+                          icon: Icons.download_rounded,
+                          label: 'Baixar fotos',
+                          subtitle: 'Foto atual, todas ou escolher',
+                          color: isDark
+                              ? AppColors.status.tealDarkMode
+                              : AppColors.status.teal,
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            Future.microtask(() {
+                              if (!mounted) return;
+                              _openPhotoDownload();
+                            });
+                          },
+                        ),
                       if (property != null)
                         tile(
                           icon: Icons.edit_rounded,
@@ -1261,28 +1607,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     }
   }
 
-  Future<void> _loadLinkedCondominium(String id) async {
-    setState(() => _loadingCondominium = true);
-    try {
-      final response = await _propertyService.getCondominiumById(id);
-      if (mounted) {
-        setState(() {
-          _loadingCondominium = false;
-          _linkedCondominium =
-              response.success ? response.data : null;
-        });
-      }
-    } catch (e) {
-      debugPrint('âŒ [PROPERTY_DETAILS] condomínio: $e');
-      if (mounted) {
-        setState(() {
-          _loadingCondominium = false;
-          _linkedCondominium = null;
-        });
-      }
-    }
-  }
-
   Color _salePriceColor(bool isDark) =>
       isDark ? const Color(0xFF4FC77D) : const Color(0xFF16A34A);
 
@@ -1370,14 +1694,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             });
             return;
           }
-          final condoId = property.condominiumId?.trim();
-          final condoChanged =
-              condoId != _property?.condominiumId?.trim();
           setState(() {
             _property = property;
             _isLoading = false;
-            if (!silent || condoChanged) _linkedCondominium = null;
+            // A coordenada do servidor manda quando existe.
+            if (_propertyCoordsRaw(property) != null) _geocodedCoords = null;
           });
+          _afterPropertyLoaded(property);
           _debugLogPropertyImageDiagnostics(
             property,
             source: 'loadProperty.success',
@@ -1388,11 +1711,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             _loadChecklists();
             _loadExpenses();
             _loadKeys();
-          }
-          if (condoId != null &&
-              condoId.isNotEmpty &&
-              (!silent || condoChanged)) {
-            _loadLinkedCondominium(condoId);
           }
           if (_activeTab == _DetailsTab.performance) {
             _ensurePerformanceLoaded();
@@ -1427,6 +1745,74 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         if (silent) _warnStaleProperty();
       }
     }
+  }
+
+  /// Complementos que dependem da ficha carregada (uma vez por imóvel):
+  /// o responsável principal por id, quando a lista não veio, e a
+  /// geolocalização automática quando falta coordenada (regras do web).
+  void _afterPropertyLoaded(Property property) {
+    _checkSiteTab();
+    final hasList = (property.responsibles ?? const []).isNotEmpty;
+    final mainId = property.responsibleUserId.trim();
+    if (!hasList && mainId.isNotEmpty && _responsibleFallbackFor != mainId) {
+      _responsibleFallbackFor = mainId;
+      PropertyDetailExtrasService.instance
+          .fetchMainResponsible(mainId)
+          .then((person) {
+        if (!mounted || person == null) return;
+        if (_responsibleFallbackFor != mainId) return;
+        setState(() => _responsibleFallback = [person]);
+      });
+    }
+    if (_propertyCoords(property) == null &&
+        PropertyDetailExtrasService.hasAddressForGeocode(property) &&
+        _autoGeocodeTriedFor != property.id) {
+      _autoGeocodeTriedFor = property.id;
+      _runGeocode(property, manual: false);
+    }
+  }
+
+  /// "Atualizar no mapa" — `POST /properties/:id/geocode-location`; a
+  /// automática não avisa quando não acha (como o web).
+  Future<void> _runGeocode(Property property, {required bool manual}) async {
+    if (_geocoding) return;
+    setState(() => _geocoding = true);
+    final res =
+        await PropertyDetailExtrasService.instance.geocodeLocation(property.id);
+    if (!mounted) return;
+    setState(() => _geocoding = false);
+    final data = res.data;
+    final lat = data?.latitude;
+    final lng = data?.longitude;
+    if (res.success &&
+        data != null &&
+        data.geocoded &&
+        lat != null &&
+        lng != null &&
+        PropertyDetailExtrasService.hasValidCoords(lat, lng)) {
+      setState(() => _geocodedCoords = LatLng(lat, lng));
+      if (manual) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Localização atualizada no mapa.'),
+            backgroundColor: AppColors.status.success,
+          ),
+        );
+      }
+      return;
+    }
+    if (!manual) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          res.success
+              ? 'Não foi possível localizar o endereço. Confira rua, bairro, '
+                  'cidade e CEP.'
+              : 'Erro ao atualizar localização no mapa.',
+        ),
+        backgroundColor: AppColors.status.error,
+      ),
+    );
   }
 
   /// A ação deu certo, mas a ficha não recarregou: a tela avisa que pode
@@ -2259,16 +2645,24 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                   controller: _imagePageController,
                   itemCount: images.length,
                   onPageChanged: (i) => setState(() => _currentImageIndex = i),
-                  itemBuilder: (_, i) => Hero(
-                    tag: 'property-image-${property.id}-$i',
-                    child: ShimmerImage(
-                      imageUrl: images[i].url,
-                      width: double.infinity,
-                      height: heroH,
-                      fit: BoxFit.cover,
-                      errorWidget: _buildHeroFallback(context, theme),
-                    ),
-                  ),
+                  itemBuilder: (_, i) => images[i].isVideo
+                      // Vídeo do anúncio: capa + play; o toque abre o
+                      // reprodutor do aparelho (o app não toca vídeo).
+                      ? _PropertyVideoTile(
+                          media: images[i],
+                          height: heroH,
+                          fallback: _buildHeroFallback(context, theme),
+                        )
+                      : Hero(
+                          tag: 'property-image-${property.id}-$i',
+                          child: ShimmerImage(
+                            imageUrl: images[i].url,
+                            width: double.infinity,
+                            height: heroH,
+                            fit: BoxFit.cover,
+                            errorWidget: _buildHeroFallback(context, theme),
+                          ),
+                        ),
                 ),
         );
 
@@ -2406,6 +2800,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           propertyId: _property?.id ?? '',
           canDelete: _canDeletePropertyImages,
           canSetMain: _canSetMainPropertyImage,
+          onDownload: (currentId) =>
+              _openPhotoDownload(currentImageId: currentId),
         ),
         transitionsBuilder: (_, anim, __, child) =>
             FadeTransition(opacity: anim, child: child),
@@ -3753,8 +4149,47 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ TABS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+  /// Aba "Site" liberada (quem administra o site e a empresa sem esteira
+  /// de aprovação); `?tab=site` espera a resposta para abrir.
+  bool _siteTabVisible = false;
+  bool _siteTabChecked = false;
+  bool _pendingSiteTab = false;
+
+  /// Histórico completo aberto ("Ver histórico completo").
+  bool _fullHistoryOpen = false;
+
+  bool get _canSeeViewersTab =>
+      PropertyViewersTab.canViewFor(ModuleAccessService.instance.userRole);
+
   /// Abas que esta pessoa vê, na ordem do web.
-  List<_DetailsTab> get _visibleTabs => _DetailsTab.values;
+  List<_DetailsTab> get _visibleTabs => [
+        _DetailsTab.details,
+        _DetailsTab.activity,
+        _DetailsTab.performance,
+        if (_canSeeViewersTab) _DetailsTab.viewers,
+        if (_siteTabVisible) _DetailsTab.site,
+      ];
+
+  /// Uma vez por tela: a aba Site depende de `public_site:manage` e da
+  /// esteira de aprovação da empresa (falha ao ler = aba escondida, web).
+  void _checkSiteTab() {
+    if (_siteTabChecked) return;
+    _siteTabChecked = true;
+    final access = ModuleAccessService.instance;
+    PropertySiteTab.shouldShow(
+      canManagePublicSite: PropertySiteTab.canManagePublicSite(
+        role: access.userRole,
+        explicitPermissions: access.userPermissionNames,
+      ),
+    ).then((show) {
+      if (!mounted) return;
+      setState(() {
+        _siteTabVisible = show;
+        if (show && _pendingSiteTab) _activeTab = _DetailsTab.site;
+        _pendingSiteTab = false;
+      });
+    });
+  }
 
   /// Abas com sublinhado na cor de cada uma (a régua proíbe pílulas):
   /// dividem a largura quando cabem; senão rolam na horizontal, com a ativa
@@ -3779,6 +4214,32 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         return _buildActivityTab(context, theme, property);
       case _DetailsTab.performance:
         return _buildPerformanceTab(context, theme, property);
+      case _DetailsTab.viewers:
+        return _buildFlushSection(
+          theme: theme,
+          title: 'Visualizações da equipe',
+          icon: Icons.visibility_outlined,
+          tone: const Color(0xFF0EA5E9),
+          isLast: true,
+          child: PropertyViewersTab(
+            propertyId: property.id,
+            canView: _canSeeViewersTab,
+          ),
+        );
+      case _DetailsTab.site:
+        return _buildFlushSection(
+          theme: theme,
+          title: 'Vitrine do site',
+          icon: Icons.public_rounded,
+          tone: const Color(0xFF0284C7),
+          isLast: true,
+          child: PropertySiteTab(
+            property: property,
+            lockedReason:
+                property.isDeleted ? kPropertyDeletedReadOnlyReason : null,
+            onSaved: (_) => _refreshAfterChange(),
+          ),
+        );
     }
   }
 
@@ -3796,7 +4257,30 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                 property.totalOffersCount! > 0));
     final hasChecklists = !_isLoadingChecklists && _checklists.isNotEmpty;
     final hasExpenses = !_isLoadingExpenses && _expenses.isNotEmpty;
-    final condoId = property.condominiumId?.trim() ?? '';
+    final access = ModuleAccessService.instance;
+    final role = access.userRole;
+    final perms = access.userPermissionNames;
+    final deletedLock =
+        property.isDeleted ? kPropertyDeletedReadOnlyReason : null;
+    final canChangeLink = PropertyDetailExtrasService.webHasPermission(
+      role: role,
+      explicitPermissions: perms,
+      permission: 'property:update',
+    );
+    final canViewCondo = PropertyLinkedEntitySection.canViewFor(
+      PropertyLinkedEntityKind.condominium,
+      role: role,
+      explicitPermissions: perms,
+    );
+    final canViewEmp = PropertyLinkedEntitySection.canViewFor(
+      PropertyLinkedEntityKind.empreendimento,
+      role: role,
+      explicitPermissions: perms,
+    );
+    final responsibles = PropertyResponsiblesSection.resolve(
+      property,
+      fallback: _responsibleFallback,
+    );
 
     final sections = <Widget>[
       // Aprovação pendente — no topo, para quem tem permissão. Integrada ao
@@ -3811,6 +4295,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           tone: const Color(0xFF6366F1),
           child: _buildDescriptionCard(context, theme, property),
         ),
+      // Valores como o web: o que a finalidade anuncia, o "não anunciado"
+      // e o bloco de negociação.
+      if (PropertyValuesSection.isVisible(property))
+        _buildFlushSection(
+          theme: theme,
+          title: 'Valores e negociação',
+          icon: Icons.sell_outlined,
+          tone: const Color(0xFF6366F1),
+          child: PropertyValuesSection(property: property),
+        ),
       _buildFlushSection(
         theme: theme,
         title: 'Características',
@@ -3818,13 +4312,49 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         tone: const Color(0xFF6366F1),
         child: _buildCharacteristicsGrid(context, theme, property),
       ),
-      if (condoId.isNotEmpty)
+      if (PropertyLinkedEntitySection.isVisible(
+        PropertyLinkedEntityKind.condominium,
+        property,
+        canView: canViewCondo,
+        canChangeLink: canChangeLink,
+      ))
         _buildFlushSection(
           theme: theme,
           title: 'Condomínio',
           icon: Icons.apartment_rounded,
           tone: const Color(0xFF10B981),
-          child: _buildCondominiumSection(context, theme, property),
+          child: PropertyLinkedEntitySection.condominium(
+            key: ValueKey('condo-${property.condominiumId}'),
+            property: property,
+            canView: canViewCondo,
+            canChangeLink: canChangeLink,
+            lockedReason: deletedLock,
+            onOpenRecord: (id) => Navigator.of(context)
+                .pushNamed(AppRoutes.condominiumEdit(id)),
+            onLinkChanged: (_) => _refreshAfterChange(),
+          ),
+        ),
+      if (PropertyLinkedEntitySection.isVisible(
+        PropertyLinkedEntityKind.empreendimento,
+        property,
+        canView: canViewEmp,
+        canChangeLink: canChangeLink,
+      ))
+        _buildFlushSection(
+          theme: theme,
+          title: 'Empreendimento',
+          icon: Icons.domain_rounded,
+          tone: const Color(0xFF10B981),
+          child: PropertyLinkedEntitySection.empreendimento(
+            key: ValueKey('emp-${property.empreendimentoId}'),
+            property: property,
+            canView: canViewEmp,
+            canChangeLink: canChangeLink,
+            lockedReason: deletedLock,
+            onOpenRecord: (id) => Navigator.of(context)
+                .pushNamed(AppRoutes.developmentDetails(id)),
+            onLinkChanged: (_) => _refreshAfterChange(),
+          ),
         ),
       if (property.features.isNotEmpty)
         _buildFlushSection(
@@ -3844,6 +4374,14 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         // no par pareado logo abaixo do mapa, dentro da seção.
         child: _buildMapSection(context, theme, property),
       ),
+      if (PropertyAdditionalInfoSection.isVisible(property))
+        _buildFlushSection(
+          theme: theme,
+          title: 'Ficha adicional',
+          icon: Icons.fact_check_outlined,
+          tone: const Color(0xFF64748B),
+          child: PropertyAdditionalInfoSection(property: property),
+        ),
       // Pessoas do imóvel em sequência: quem é o dono, quem responde e quem
       // captou (Captação segue imediatamente antes do status da chave).
       if (PropertyOwnerSection.isVisible(property))
@@ -3854,7 +4392,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           tone: _kPeopleTone,
           child: PropertyOwnerSection(property: property),
         ),
-      if (PropertyResponsiblesSection.isVisible(property))
+      if (responsibles.isNotEmpty)
         _buildFlushSection(
           theme: theme,
           title: 'Responsáveis',
@@ -3862,16 +4400,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           tone: _kPeopleTone,
           headerTrailing: _buildSectionCountBadge(
             context,
-            PropertyResponsiblesSection.resolve(property).length == 1
+            responsibles.length == 1
                 ? '1 responsável'
-                : '${PropertyResponsiblesSection.resolve(property).length} '
-                    'responsáveis',
+                : '${responsibles.length} responsáveis',
             _kPeopleTone,
           ),
           child: PropertyResponsiblesSection(
             property: property,
-            currentUserId: ModuleAccessService.instance.userId,
+            currentUserId: access.userId,
             tone: _kPeopleTone,
+            fallback: _responsibleFallback,
           ),
         ),
       // Captação — saiu do hero de identidade e virou seção própria,
@@ -3935,6 +4473,22 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           icon: Icons.checklist_rtl_rounded,
           tone: const Color(0xFF0891B2),
           child: _buildChecklistsSection(context, theme, property),
+        ),
+      if (PropertyLinkedSaleFormCard.isVisible(property))
+        _buildFlushSection(
+          theme: theme,
+          title: 'Ficha de venda',
+          icon: Icons.receipt_long_outlined,
+          tone: const Color(0xFF0284C7),
+          child: PropertyLinkedSaleFormCard(
+            propertyId: property.id,
+            form: property.linkedSaleForm!,
+            onOpenForm: (formId) => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => SaleFormDetailPage(saleFormId: formId),
+              ),
+            ),
+          ),
         ),
       // Sempre à vista, como no web: vazio ensina e oferece o primeiro.
       _buildFlushSection(
@@ -4220,6 +4774,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                       isMe: myId != null &&
                           myId.isNotEmpty &&
                           m.user?.id == myId,
+                      onActions: myId != null &&
+                              myId.isNotEmpty &&
+                              m.user?.id == myId
+                          ? () => _showThreadMessageActions(m)
+                          : null,
                     ),
                 ],
               ),
@@ -4729,35 +5288,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ),
         _buildFlushSection(
           theme: theme,
-          title: 'Histórico',
+          title: 'Histórico do imóvel',
           icon: Icons.history_rounded,
           tone: const Color(0xFF475569),
           isLast: true,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (_loadingHistory && !_historyLoaded)
-                _buildActivitySkeleton(context)
-              else if (historyFailure != null && _history.isEmpty)
-                AppErrorState.fromApi(
-                  message: historyFailure.message,
-                  statusCode: historyFailure.statusCode,
-                  error: historyFailure.error,
-                  onRetry: _retryActivity,
-                  dense: true,
-                )
-              else if (_history.isEmpty)
-                _buildActivityEmpty(
-                  context,
-                  theme,
-                  'Sem histórico registrado.',
-                  hint: 'Cada alteração no cadastro, mudança de status e '
-                      'aprovação aparece aqui, com quem fez e quando.',
-                )
-              else
-                ..._history.map((h) => _buildHistoryTile(context, theme, h)),
-            ],
-          ),
+          child: _buildHistoryBlock(context, theme, property, historyFailure),
         ),
       ],
     );
@@ -5117,72 +5652,174 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  Widget _buildHistoryTile(
+  /// Histórico como o web: frase de apoio, "Últimas atividades" (8,
+  /// compactas) e "Ver histórico completo" com antes → depois e as versões
+  /// anteriores para restaurar.
+  Widget _buildHistoryBlock(
     BuildContext context,
     ThemeData theme,
-    PropertyHistoryEntry entry,
+    Property property,
+    ApiResponse<dynamic>? historyFailure,
   ) {
     final muted = ThemeHelpers.textSecondaryColor(context);
-    const accent = Color(0xFF475569);
-    final title = propertyHistoryEventLabel(entry.event);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final access = ModuleAccessService.instance;
+    final canSign = PropertyHistoryEntryTile.canViewSignatureLink(
+      property: property,
+      currentUserId: access.userId,
+      userRole: access.userRole,
+    );
+
+    Widget entries({required bool detailed}) {
+      final list = detailed ? _history : _history.take(8).toList();
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Column(
-            children: [
-              Container(
-                width: 10,
-                height: 10,
-                margin: const EdgeInsets.only(top: 4),
-                decoration: BoxDecoration(
-                  color: accent,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              Container(
-                width: 2,
-                height: 26,
-                color: ThemeHelpers.borderColor(context),
-              ),
-            ],
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                if ((entry.description ?? '').trim().isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      entry.description!.trim(),
-                      style: theme.textTheme.bodySmall?.copyWith(color: muted),
-                    ),
-                  ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 3),
-                  child: Text(
-                    '${entry.user?.name != null ? '${entry.user!.name} · ' : ''}${_formatActivityDateTime(entry.createdAt)}',
-                    style: theme.textTheme.labelSmall?.copyWith(color: muted),
-                  ),
-                ),
-              ],
+          for (var i = 0; i < list.length; i++)
+            PropertyHistoryEntryTile(
+              entry: list[i],
+              detailed: detailed,
+              canOpenSignatureLink: canSign,
+              isLast: i == list.length - 1,
+            ),
+        ],
+      );
+    }
+
+    final children = <Widget>[
+      Text(
+        'Cadastro, alterações, autorização do proprietário, filas de '
+        'aprovação, publicação no site e demais eventos registrados '
+        'automaticamente.',
+        style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.4),
+      ),
+      const SizedBox(height: 12),
+    ];
+
+    if (_loadingHistory && !_historyLoaded) {
+      children.add(_buildActivitySkeleton(context));
+    } else if (historyFailure != null && _history.isEmpty) {
+      children.add(
+        AppErrorState.fromApi(
+          message: historyFailure.message,
+          statusCode: historyFailure.statusCode,
+          error: historyFailure.error,
+          onRetry: _retryActivity,
+          dense: true,
+        ),
+      );
+    } else if (_history.isEmpty) {
+      children.add(
+        _buildActivityEmpty(
+          context,
+          theme,
+          'Nenhum evento registrado ainda neste imóvel.',
+          hint: 'Cada alteração no cadastro, mudança de status e aprovação '
+              'aparece aqui, com quem fez e quando.',
+        ),
+      );
+    } else if (!_fullHistoryOpen) {
+      children
+        ..add(
+          Text(
+            'Últimas atividades',
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: ThemeHelpers.textColor(context),
+              fontWeight: FontWeight.w800,
             ),
           ),
-        ],
-      ),
+        )
+        ..add(const SizedBox(height: 6))
+        ..add(entries(detailed: false));
+    } else {
+      children.add(entries(detailed: true));
+    }
+
+    // "Ver histórico completo" — Mostrar/Ocultar, como o web.
+    children
+      ..add(const SizedBox(height: 10))
+      ..add(
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () => setState(() => _fullHistoryOpen = !_fullHistoryOpen),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                border: Border(
+                  top: BorderSide(color: ThemeHelpers.borderLightColor(context)),
+                  bottom:
+                      BorderSide(color: ThemeHelpers.borderLightColor(context)),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.history_rounded,
+                    size: 20,
+                    color: ThemeHelpers.textColor(context),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Ver histórico completo',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    _fullHistoryOpen ? 'Ocultar' : 'Mostrar',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: muted,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Icon(
+                    _fullHistoryOpen
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    size: 20,
+                    color: muted,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+    if (_fullHistoryOpen) {
+      children
+        ..add(const SizedBox(height: 16))
+        ..add(
+          Text(
+            'Versões anteriores (restauração)',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        )
+        ..add(const SizedBox(height: 8))
+        ..add(
+          PropertyRevisionsSection(
+            propertyId: property.id,
+            canRestore: PropertyRevisionsSection.canRestoreFor(
+              property: property,
+              userRole: access.userRole,
+            ),
+            lockedReason:
+                property.isDeleted ? kPropertyDeletedReadOnlyReason : null,
+            onRestored: _refreshAfterChange,
+          ),
+        );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: children,
     );
   }
 
-  // â”€â”€â”€ Aba DESEMPENHO (engajamento + observações) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   Widget _buildPerformanceTab(
     BuildContext context,
     ThemeData theme,
@@ -5690,6 +6327,14 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           label: 'Vagas',
           value: '${property.parkingSpaces}',
         ),
+      // Cômodos extras do cadastro (escritório, lavabo…), como o web.
+      for (final room in property.extraRooms ?? const <PropertyExtraRoom>[])
+        if (room.name.trim().isNotEmpty && room.quantity > 0)
+          (
+            icon: Icons.meeting_room_outlined,
+            label: room.name.trim(),
+            value: '${room.quantity}',
+          ),
     ];
 
     if (items.isEmpty) {
@@ -5774,117 +6419,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  Widget _buildCondominiumSection(
-    BuildContext context,
-    ThemeData theme,
-    Property property,
-  ) {
-    final muted = ThemeHelpers.textSecondaryColor(context);
-    final name = _linkedCondominium?.name.trim().isNotEmpty == true
-        ? _linkedCondominium!.name.trim()
-        : 'Condomínio vinculado';
-
-    if (_loadingCondominium) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 8),
-        child: LinearProgressIndicator(minHeight: 2),
-      );
-    }
-
-    final c = _linkedCondominium;
-    final addressParts = <String>[
-      if (c != null) ...[
-        if ((c.street ?? '').isNotEmpty) c.street!,
-        if ((c.number ?? '').isNotEmpty) c.number!,
-      ],
-      if (c != null && (c.neighborhood ?? '').isNotEmpty) c.neighborhood!,
-      if (c != null &&
-          (c.city ?? '').isNotEmpty &&
-          (c.state ?? '').isNotEmpty)
-        '${c.city}/${c.state}',
-    ];
-    final address = addressParts.where((s) => s.trim().isNotEmpty).join(', ');
-
-    final fee = property.condominiumFee;
-    final hasFee = fee != null && fee > 0;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          name,
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w800,
-            color: _salePriceColor(theme.brightness == Brightness.dark),
-          ),
-        ),
-        if (address.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          _buildCondominiumInfoRow(
-            theme,
-            Icons.location_on_outlined,
-            'Endereço',
-            address,
-            muted,
-          ),
-        ],
-        if (hasFee)
-          _buildCondominiumInfoRow(
-            theme,
-            Icons.payments_outlined,
-            'Taxa informada no imóvel',
-            _currencyFormatter.format(fee),
-            muted,
-          ),
-      ],
-    );
-  }
-
-  Widget _buildCondominiumInfoRow(
-    ThemeData theme,
-    IconData icon,
-    String label,
-    String value,
-    Color muted,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 16, color: muted.withValues(alpha: 0.85)),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: muted,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  value,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Ações rápidas como LINHAS ricas — roundel tinted 40 + título w800 +
-  /// subtítulo informativo + chevron, com hairline recuada entre elas. Cor
-  /// POR SIGNIFICADO (agendar = âmbar, matches = violeta, ofertas = cyan,
-  /// vistoria = teal). Substitui o grid de botões soltos sem contexto; zero
-  /// caixa em volta da seção.
   Widget _buildQuickActionsSection(
     BuildContext context,
     ThemeData theme,
@@ -5914,6 +6448,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             : AppColors.status.info,
         onTap: _openPresentationPdf,
       ),
+      if (_galleryOf(property).any((img) => !img.isVideo))
+        (
+          icon: Icons.download_rounded,
+          title: 'Baixar fotos',
+          subtitle: 'Foto atual, todas ou escolher, para enviar ou guardar',
+          color: theme.brightness == Brightness.dark
+              ? AppColors.status.tealDarkMode
+              : AppColors.status.teal,
+          onTap: () => _openPhotoDownload(),
+        ),
       // Matches e Ofertas ocultas no app: as linhas só voltam com os flags.
       if (FeatureVisibility.matchesEnabled)
         (
@@ -6647,161 +7191,30 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     PropertyClient client,
     String name,
   ) {
-    showModalBottomSheet<void>(
-      context: context,
-      useSafeArea: true,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black54,
-      builder: (sheetContext) {
-        final theme = Theme.of(sheetContext);
-        final isDark = theme.brightness == Brightness.dark;
-        final muted = ThemeHelpers.textSecondaryColor(sheetContext);
-        final danger =
-            isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-
-        Widget action({
-          required IconData icon,
-          required String label,
-          required VoidCallback onTap,
-          String? lockedReason,
-          bool destructive = false,
-        }) {
-          final locked = lockedReason != null;
-          final color = locked
-              ? muted
-              : destructive
-                  ? danger
-                  : ThemeHelpers.textColor(sheetContext);
-          return InkWell(
-            onTap: locked
-                ? null
-                : () {
-                    Navigator.of(sheetContext).pop();
-                    onTap();
-                  },
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 16, 12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(icon, size: 20, color: color),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          label,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: color,
-                          ),
-                        ),
-                        if (locked) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            lockedReason,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: muted,
-                              height: 1.35,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  if (locked)
-                    Icon(Icons.lock_outline_rounded, size: 16, color: muted),
-                ],
-              ),
-            ),
-          );
-        }
-
-        return ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(sheetContext).size.height * 0.88,
-          ),
-          child: Container(
-            decoration: BoxDecoration(
-              color: ThemeHelpers.cardBackgroundColor(sheetContext),
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            child: SafeArea(
-              top: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 14, 8, 8),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            name,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Fechar',
-                          onPressed: () => Navigator.of(sheetContext).pop(),
-                          icon: Icon(Icons.close_rounded, color: muted),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    height: 1,
-                    color: ThemeHelpers.borderLightColor(sheetContext),
-                  ),
-                  Flexible(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          action(
-                            icon: Icons.visibility_outlined,
-                            label: 'Visualizar',
-                            onTap: () => Navigator.of(context).pushNamed(
-                              AppRoutes.clientDetails(client.id),
-                            ),
-                          ),
-                          action(
-                            icon: Icons.edit_outlined,
-                            label: 'Editar',
-                            onTap: () => Navigator.of(context).pushNamed(
-                              AppRoutes.clientEdit(client.id),
-                            ),
-                          ),
-                          action(
-                            icon: Icons.link_off_rounded,
-                            label: 'Desvincular cliente',
-                            destructive: true,
-                            lockedReason: property.isDeleted
-                                ? kPropertyDeletedReadOnlyReason
-                                : null,
-                            onTap: () =>
-                                _confirmUnlinkClient(property, client, name),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
+    _showActionsSheet(
+      title: name,
+      actions: [
+        _SheetAction(
+          icon: Icons.visibility_outlined,
+          label: 'Visualizar',
+          onTap: () => Navigator.of(context)
+              .pushNamed(AppRoutes.clientDetails(client.id)),
+        ),
+        _SheetAction(
+          icon: Icons.edit_outlined,
+          label: 'Editar',
+          onTap: () =>
+              Navigator.of(context).pushNamed(AppRoutes.clientEdit(client.id)),
+        ),
+        _SheetAction(
+          icon: Icons.link_off_rounded,
+          label: 'Desvincular cliente',
+          destructive: true,
+          lockedReason:
+              property.isDeleted ? kPropertyDeletedReadOnlyReason : null,
+          onTap: () => _confirmUnlinkClient(property, client, name),
+        ),
+      ],
     );
   }
 
@@ -7389,6 +7802,17 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       );
     }
     final failure = _documentsFailure;
+    // A prova da autorização vem antes dos documentos enviados (web).
+    final certificate = PropertyOwnerAuthCertificate.isVisible(property)
+        ? Padding(
+            padding: const EdgeInsets.only(bottom: 14),
+            child: PropertyOwnerAuthCertificate(
+              property: property,
+              currentUserId: ModuleAccessService.instance.userId,
+              userRole: ModuleAccessService.instance.userRole,
+            ),
+          )
+        : null;
     final createLock = property.isDeleted
         ? kPropertyDeletedReadOnlyReason
         : DocumentPermissions.canCreate
@@ -7422,15 +7846,38 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     }
 
     if (_isLoadingDocuments && _documents.isEmpty) {
-      return _buildActivitySkeleton(context);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (certificate != null) certificate,
+          _buildActivitySkeleton(context),
+        ],
+      );
     }
     if (failure != null && _documents.isEmpty) {
-      return AppErrorState.fromApi(
-        message: failure.message,
-        statusCode: failure.statusCode,
-        error: failure.error,
-        onRetry: _loadDocuments,
-        dense: true,
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (certificate != null) certificate,
+          AppErrorState.fromApi(
+            message: failure.message,
+            statusCode: failure.statusCode,
+            error: failure.error,
+            onRetry: _loadDocuments,
+            dense: true,
+          ),
+        ],
+      );
+    }
+    // Com a autorização assinada o web esconde o vazio: o certificado já é
+    // o documento do imóvel.
+    if (_documents.isEmpty && certificate != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          certificate,
+          addButton('Adicionar documento'),
+        ],
       );
     }
     if (_documents.isEmpty) {
@@ -7452,6 +7899,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (certificate != null) certificate,
         for (var i = 0; i < _documents.length; i++)
           _buildDocumentRow(
             context,
@@ -7632,186 +8080,54 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ? document.title!.trim()
         : document.originalName;
     final deleted = _property?.isDeleted == true;
-    showModalBottomSheet<void>(
-      context: context,
-      useSafeArea: true,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black54,
-      builder: (sheetContext) {
-        final theme = Theme.of(sheetContext);
-        final isDark = theme.brightness == Brightness.dark;
-        final muted = ThemeHelpers.textSecondaryColor(sheetContext);
-        final danger =
-            isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-
-        Widget action({
-          required IconData icon,
-          required String label,
-          required VoidCallback onTap,
-          String? lockedReason,
-          bool destructive = false,
-        }) {
-          final locked = lockedReason != null;
-          final color = locked
-              ? muted
-              : destructive
-                  ? danger
-                  : ThemeHelpers.textColor(sheetContext);
-          return InkWell(
-            onTap: locked
-                ? null
-                : () {
-                    Navigator.of(sheetContext).pop();
-                    onTap();
-                  },
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 16, 12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(icon, size: 20, color: color),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          label,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: color,
-                          ),
-                        ),
-                        if (locked) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            lockedReason,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: muted,
-                              height: 1.35,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  if (locked)
-                    Icon(Icons.lock_outline_rounded, size: 16, color: muted),
-                ],
-              ),
-            ),
-          );
-        }
-
-        return ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(sheetContext).size.height * 0.88,
+    _showActionsSheet(
+      title: name,
+      actions: [
+        _SheetAction(
+          icon: Icons.visibility_outlined,
+          label: 'Visualizar',
+          onTap: () => _openDocument(document),
+        ),
+        _SheetAction(
+          icon: Icons.download_rounded,
+          label: 'Baixar',
+          lockedReason: DocumentPermissions.canDownload
+              ? null
+              : 'Você não tem permissão para fazer download de documentos',
+          onTap: () => DocumentFileActions.download(
+            context,
+            document.fileUrl,
+            document.originalName,
           ),
-          child: Container(
-            decoration: BoxDecoration(
-              color: ThemeHelpers.cardBackgroundColor(sheetContext),
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            child: SafeArea(
-              top: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 14, 8, 8),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            name,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Fechar',
-                          onPressed: () => Navigator.of(sheetContext).pop(),
-                          icon: Icon(Icons.close_rounded, color: muted),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    height: 1,
-                    color: ThemeHelpers.borderLightColor(sheetContext),
-                  ),
-                  Flexible(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          action(
-                            icon: Icons.visibility_outlined,
-                            label: 'Visualizar',
-                            onTap: () => _openDocument(document),
-                          ),
-                          action(
-                            icon: Icons.download_rounded,
-                            label: 'Baixar',
-                            lockedReason: DocumentPermissions.canDownload
-                                ? null
-                                : 'Você não tem permissão para fazer '
-                                    'download de documentos',
-                            onTap: () => DocumentFileActions.download(
-                              context,
-                              document.fileUrl,
-                              document.originalName,
-                            ),
-                          ),
-                          action(
-                            icon: Icons.edit_outlined,
-                            label: 'Editar',
-                            lockedReason: deleted
-                                ? kPropertyDeletedReadOnlyReason
-                                : DocumentPermissions.canUpdate
-                                    ? null
-                                    : 'Você não tem permissão para editar '
-                                        'documentos',
-                            onTap: () {
-                              Navigator.of(context)
-                                  .pushNamed(
-                                    AppRoutes.documentEdit(document.id),
-                                  )
-                                  .then((_) {
-                                if (mounted) _loadDocuments();
-                              });
-                            },
-                          ),
-                          action(
-                            icon: Icons.delete_outline_rounded,
-                            label: 'Excluir',
-                            destructive: true,
-                            lockedReason: deleted
-                                ? kPropertyDeletedReadOnlyReason
-                                : DocumentPermissions.canDelete
-                                    ? null
-                                    : 'Você não tem permissão para excluir '
-                                        'documentos',
-                            onTap: () => _confirmDeleteDocument(document),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
+        ),
+        _SheetAction(
+          icon: Icons.edit_outlined,
+          label: 'Editar',
+          lockedReason: deleted
+              ? kPropertyDeletedReadOnlyReason
+              : DocumentPermissions.canUpdate
+                  ? null
+                  : 'Você não tem permissão para editar documentos',
+          onTap: () {
+            Navigator.of(context)
+                .pushNamed(AppRoutes.documentEdit(document.id))
+                .then((_) {
+              if (mounted) _loadDocuments();
+            });
+          },
+        ),
+        _SheetAction(
+          icon: Icons.delete_outline_rounded,
+          label: 'Excluir',
+          destructive: true,
+          lockedReason: deleted
+              ? kPropertyDeletedReadOnlyReason
+              : DocumentPermissions.canDelete
+                  ? null
+                  : 'Você não tem permissão para excluir documentos',
+          onTap: () => _confirmDeleteDocument(document),
+        ),
+      ],
     );
   }
 
@@ -7909,6 +8225,14 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           // Tap-para-copiar na linha principal — mesmo padrão do telefone
           // do lead no CRM.
           onTap: () => _copyPropertyAddress(property),
+        ),
+      if ((property.sector ?? '').trim().isNotEmpty)
+        _buildLocationInfoRow(
+          theme,
+          Icons.grid_view_rounded,
+          'SETOR',
+          property.sector!.trim(),
+          mapsBlue,
         ),
       if (property.neighborhood.trim().isNotEmpty)
         _buildLocationInfoRow(
@@ -8059,7 +8383,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Sem coordenadas cadastradas',
+              _geocoding
+                  ? 'Localizando o endereço no mapa…'
+                  : 'Sem coordenadas cadastradas',
               style: theme.textTheme.bodySmall?.copyWith(
                 fontWeight: FontWeight.w700,
                 color: ThemeHelpers.textColor(context),
@@ -8112,6 +8438,35 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ),
       );
     }
+    // "Atualizar no mapa" (web): recalcula a coordenada pelo endereço.
+    if (PropertyDetailExtrasService.hasAddressForGeocode(property) &&
+        !property.isDeleted) {
+      children.add(const SizedBox(height: 4));
+      children.add(
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed:
+                _geocoding ? null : () => _runGeocode(property, manual: true),
+            style: TextButton.styleFrom(foregroundColor: mapsBlue),
+            icon: _geocoding
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(mapsBlue),
+                    ),
+                  )
+                : const Icon(Icons.my_location_rounded, size: 18),
+            label: Text(
+              _geocoding ? 'Atualizando…' : 'Atualizar no mapa',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ),
+      );
+    }
     if (infoRows.isNotEmpty) {
       children.add(const SizedBox(height: 14));
       for (var i = 0; i < infoRows.length; i++) {
@@ -8128,7 +8483,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   /// Coordenadas válidas do imóvel — mesma validação do `parseLatLng` do web
   /// (faixa geográfica), mais o descarte do (0,0) de cadastro sujo.
-  LatLng? _propertyCoords(Property property) {
+  LatLng? _propertyCoords(Property property) =>
+      _propertyCoordsRaw(property) ?? _geocodedCoords;
+
+  /// Só a coordenada que veio do servidor.
+  LatLng? _propertyCoordsRaw(Property property) {
     final lat = property.latitude;
     final lng = property.longitude;
     if (lat == null || lng == null) return null;
@@ -9506,6 +9865,7 @@ class _FullscreenGallery extends StatefulWidget {
     required this.propertyId,
     this.canDelete = false,
     this.canSetMain = false,
+    this.onDownload,
   });
 
   final List<PropertyImage> images;
@@ -9513,6 +9873,9 @@ class _FullscreenGallery extends StatefulWidget {
   final String propertyId;
   final bool canDelete;
   final bool canSetMain;
+
+  /// "Baixar fotos" com a mídia na tela (a folha trava sem permissão).
+  final void Function(String? currentImageId)? onDownload;
 
   @override
   State<_FullscreenGallery> createState() => _FullscreenGalleryState();
@@ -9554,7 +9917,7 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
   /// vez por URL. Útil pro badge "QUADRADA"/"NÃO QUADRADA" e pra mostrar
   /// "1920×1080" na pill inferior.
   void _resolveSizeFor(PropertyImage? img) {
-    if (img == null) return;
+    if (img == null || img.isVideo) return;
     if (_resolvedSizes.containsKey(img.url)) return;
     final provider = NetworkImage(img.url);
     final stream = provider.resolve(const ImageConfiguration());
@@ -9649,14 +10012,8 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
     setState(() {
       _images = _images
           .map(
-            (e) => PropertyImage(
-              id: e.id,
-              url: e.url,
-              thumbnailUrl: e.thumbnailUrl,
-              category: e.category,
-              isMain: e.id == img.id,
-              createdAt: e.createdAt,
-            ),
+            // copyWith preserva o tipo de mídia (vídeo segue vídeo).
+            (e) => e.copyWith(isMain: e.id == img.id),
           )
           .toList();
       _didMutate = true;
@@ -9807,6 +10164,18 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
                     _resolveSizeFor(_currentImage);
                   },
                   itemBuilder: (_, i) {
+                    if (_images[i].isVideo) {
+                      return Center(
+                        child: AspectRatio(
+                          aspectRatio: 16 / 9,
+                          child: _PropertyVideoTile(
+                            media: _images[i],
+                            height: double.infinity,
+                            fallback: const ColoredBox(color: Colors.black),
+                          ),
+                        ),
+                      );
+                    }
                     return Hero(
                       tag: 'property-image-${widget.propertyId}-$i',
                       child: InteractiveViewer(
@@ -9866,7 +10235,17 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
                         ),
                       ),
                     ),
-                  if (widget.canSetMain && current != null) ...[
+                  if (widget.onDownload != null && current != null) ...[
+                    const SizedBox(width: 10),
+                    _GalleryRoundIconButton(
+                      icon: Icons.download_rounded,
+                      onTap: () => widget.onDownload!(current.id),
+                      tooltip: 'Baixar fotos',
+                    ),
+                  ],
+                  if (widget.canSetMain &&
+                      current != null &&
+                      !current.isVideo) ...[
                     const SizedBox(width: 10),
                     _GalleryRoundIconButton(
                       // Amarelo "principal": estrela cheia quando já é a
@@ -10451,7 +10830,14 @@ class _ApprovalThreadBubble extends StatelessWidget {
   final PropertyHistoryEntry entry;
   final bool isMe;
 
-  const _ApprovalThreadBubble({required this.entry, required this.isMe});
+  /// Própria mensagem: Editar / Excluir (⋯ do balão ou toque longo).
+  final VoidCallback? onActions;
+
+  const _ApprovalThreadBubble({
+    required this.entry,
+    required this.isMe,
+    this.onActions,
+  });
 
   String _initials(String name) {
     final parts = name.trim().split(RegExp(r'\s+'));
@@ -10520,7 +10906,9 @@ class _ApprovalThreadBubble extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: Container(
+            child: GestureDetector(
+              onLongPress: onActions,
+              child: Container(
               padding: const EdgeInsets.fromLTRB(12, 9, 11, 10),
               decoration: BoxDecoration(
                 borderRadius: const BorderRadius.only(
@@ -10582,6 +10970,23 @@ class _ApprovalThreadBubble extends StatelessWidget {
                           letterSpacing: 0.2,
                         ),
                       ),
+                      if (onActions != null) ...[
+                        const SizedBox(width: 2),
+                        SizedBox(
+                          width: 28,
+                          height: 24,
+                          child: IconButton(
+                            tooltip: 'Editar ou excluir',
+                            padding: EdgeInsets.zero,
+                            iconSize: 18,
+                            onPressed: onActions,
+                            icon: Icon(
+                              Icons.more_horiz_rounded,
+                              color: secondary,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 5),
@@ -10606,9 +11011,167 @@ class _ApprovalThreadBubble extends StatelessWidget {
                   ],
                 ],
               ),
+              ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Ação de uma folha de ações da página.
+class _SheetAction {
+  const _SheetAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.lockedReason,
+    this.destructive = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final String? lockedReason;
+  final bool destructive;
+}
+
+/// Folha "Editar mensagem" do chat de aprovação — o texto atual no campo
+/// (até 4000, como o web), Cancelar neutro e Salvar verde; vazio não salva.
+class _ThreadEditSheet extends StatefulWidget {
+  const _ThreadEditSheet({required this.initialText});
+
+  final String initialText;
+
+  @override
+  State<_ThreadEditSheet> createState() => _ThreadEditSheetState();
+}
+
+class _ThreadEditSheetState extends State<_ThreadEditSheet> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.initialText);
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final text = _controller.text.trim();
+    if (text.isEmpty) {
+      setState(() => _error = 'Digite o texto da mensagem.');
+      return;
+    }
+    Navigator.of(context).pop(text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final mq = MediaQuery.of(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final green =
+        isDark ? AppColors.status.successDarkMode : AppColors.status.success;
+    return Padding(
+      padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: (mq.size.height - mq.viewInsets.bottom) * 0.88,
+        ),
+        child: Container(
+          decoration: BoxDecoration(
+            color: ThemeHelpers.cardBackgroundColor(context),
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 8, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Editar mensagem',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Fechar',
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: Icon(Icons.close_rounded, color: muted),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  height: 1,
+                  color: ThemeHelpers.borderLightColor(context),
+                ),
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                    child: TextField(
+                      controller: _controller,
+                      autofocus: true,
+                      minLines: 3,
+                      maxLines: 8,
+                      maxLength: 4000,
+                      onChanged: (_) {
+                        if (_error != null) setState(() => _error = null);
+                      },
+                      decoration: InputDecoration(
+                        filled: true,
+                        hintText: 'Texto da mensagem',
+                        errorText: _error,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          style:
+                              TextButton.styleFrom(foregroundColor: muted),
+                          child: const Text('Cancelar'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: _save,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: green,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Text('Salvar'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -10622,6 +11185,118 @@ class _ApprovalThreadBubble extends StatelessWidget {
 ///
 /// Avatar: foto se houver `avatar`, senão iniciais do nome em fundo gradiente
 /// derivado do accent (ou de um palette estável por hash do nome).
+/// Abre o vídeo do anúncio no reprodutor do aparelho (navegador ou app de
+/// vídeo) — o app não tem player próprio.
+Future<void> _launchPropertyVideo(
+  BuildContext context,
+  PropertyImage media,
+) async {
+  final uri = Uri.tryParse(media.url.trim());
+  var ok = false;
+  if (uri != null && uri.hasScheme) {
+    try {
+      ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      debugPrint('[PROPERTY_DETAILS] vídeo: $e');
+    }
+  }
+  if (!ok && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text(
+          'Não foi possível abrir o vídeo. Confira a conexão e tente de novo.',
+        ),
+        backgroundColor: AppColors.status.error,
+      ),
+    );
+  }
+}
+
+/// Vídeo na galeria: a capa (quando há) sob um véu, o botão de play e
+/// "Vídeo · 1:24"; o toque abre o reprodutor do aparelho.
+class _PropertyVideoTile extends StatelessWidget {
+  const _PropertyVideoTile({
+    required this.media,
+    required this.height,
+    required this.fallback,
+  });
+
+  final PropertyImage media;
+  final double height;
+  final Widget fallback;
+
+  @override
+  Widget build(BuildContext context) {
+    final poster = media.posterUrl;
+    final seconds = media.durationSeconds ?? 0;
+    final duration = seconds > 0
+        ? '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}'
+        : null;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _launchPropertyVideo(context, media),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (poster != null)
+            ShimmerImage(
+              imageUrl: poster,
+              width: double.infinity,
+              height: height,
+              fit: BoxFit.cover,
+              errorWidget: fallback,
+            )
+          else
+            fallback,
+          ColoredBox(color: Colors.black.withValues(alpha: 0.35)),
+          Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.black.withValues(alpha: 0.55),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.85),
+                      width: 2,
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.play_arrow_rounded,
+                    size: 38,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    duration == null ? 'Assistir vídeo' : 'Vídeo · $duration',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Barra de abas do detalhe — sublinhado de 2,5 na cor da aba ativa, ícone
 /// na cor e rótulo no texto do tema (contraste), filete embaixo. Mede os
 /// rótulos na escala real do texto: cabendo, as abas dividem a largura;

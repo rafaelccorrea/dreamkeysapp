@@ -1706,6 +1706,10 @@ class PropertyFilters {
   final String? city;
   final String? state;
   final String? neighborhood;
+  /// Rua exata escolhida na sugestão da busca (paridade web `street`).
+  final String? street;
+  /// Condomínio escolhido na sugestão da busca (paridade web `condominiumId`).
+  final String? condominiumId;
   final double? minPrice;
   final double? maxPrice;
   final double? minArea;
@@ -1729,6 +1733,8 @@ class PropertyFilters {
     this.city,
     this.state,
     this.neighborhood,
+    this.street,
+    this.condominiumId,
     this.minPrice,
     this.maxPrice,
     this.minArea,
@@ -1754,6 +1760,8 @@ class PropertyFilters {
     if (city != null) params['city'] = city;
     if (state != null) params['state'] = state;
     if (neighborhood != null) params['neighborhood'] = neighborhood;
+    if (street != null) params['street'] = street;
+    if (condominiumId != null) params['condominiumId'] = condominiumId;
     if (minPrice != null) params['minPrice'] = minPrice;
     if (maxPrice != null) params['maxPrice'] = maxPrice;
     if (minArea != null) params['minArea'] = minArea;
@@ -1781,6 +1789,8 @@ class PropertyFilters {
     String? city,
     String? state,
     String? neighborhood,
+    String? street,
+    String? condominiumId,
     double? minPrice,
     double? maxPrice,
     double? minArea,
@@ -1804,6 +1814,8 @@ class PropertyFilters {
       city: city ?? this.city,
       state: state ?? this.state,
       neighborhood: neighborhood ?? this.neighborhood,
+      street: street ?? this.street,
+      condominiumId: condominiumId ?? this.condominiumId,
       minPrice: minPrice ?? this.minPrice,
       maxPrice: maxPrice ?? this.maxPrice,
       minArea: minArea ?? this.minArea,
@@ -1843,6 +1855,8 @@ class PropertyFilters {
       city: city,
       state: state,
       neighborhood: neighborhood,
+      street: street,
+      condominiumId: condominiumId,
       minPrice: minPrice,
       maxPrice: maxPrice,
       minArea: minArea,

@@ -3,10 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../../core/theme/theme_helpers.dart';
+import '../../../../shared/services/api_service.dart';
 import '../../../../shared/services/property_service.dart';
+import '../../../../shared/widgets/file_delivery_sheet.dart';
 import '../../services/property_detail_extras_service.dart';
 import 'property_details_kit.dart';
-import 'property_file_delivery.dart';
 
 /// Corpo da seção "Ficha de venda vinculada" — paridade com o
 /// `LinkedSaleFormSummaryCard` do web (220-318). Vai dentro do molde flush
@@ -94,39 +95,50 @@ class _PropertyLinkedSaleFormCardState
     }
   }
 
+  /// PDF assinado pela folha de arquivo do app (Compartilhar / Salvar no
+  /// aparelho) — ZIP quando há mais de um documento assinado.
   Future<void> _downloadPdf() async {
     if (_downloading) return;
     setState(() => _downloading = true);
-    final res = await PropertyDetailExtrasService.instance
-        .downloadLinkedSaleFormSignedPdf(widget.propertyId);
-    if (!mounted) return;
-    setState(() => _downloading = false);
-    final file = res.data;
-    if (!res.success || file == null) {
-      final server = (res.message ?? '').trim();
-      pdkShowSnack(
-        context,
-        server.isNotEmpty
-            ? server
-            : 'Erro ao baixar PDF. ${pdkFailureCause(res).cause}',
-        tone: PdkSnackTone.error,
-      );
-      return;
-    }
     final number = widget.form.formNumber.trim();
-    await showPropertyFileReadySheet(
+    await showFileDeliverySheet(
       context,
-      file: file,
-      title: file.isZip ? 'PDFs assinados da ficha' : 'PDF assinado da ficha',
+      title: 'PDF assinado da ficha',
       subtitle: number.isEmpty ? null : 'Ficha de venda nº $number',
-      shareSubject: number.isEmpty
-          ? 'Ficha de venda assinada'
-          : 'Ficha de venda nº $number — assinada',
-      hint: file.isZip
+      expectedType: 'PDF',
+      generatingTitle: 'Buscando o PDF assinado…',
+      generatingHint: 'O PDF vem do Autentique com as assinaturas já feitas.',
+      readyTitle: 'PDF pronto',
+      readyNote: (file) => file.extension == 'zip'
           ? 'A ficha tem mais de um documento assinado: eles vêm juntos num '
               'arquivo compactado (.zip).'
           : null,
+      shareSubject: number.isEmpty
+          ? 'Ficha de venda assinada'
+          : 'Ficha de venda nº $number — assinada',
+      saveDialogTitle: 'Salvar PDF assinado',
+      load: () async {
+        final res = await PropertyDetailExtrasService.instance
+            .downloadLinkedSaleFormSignedPdf(widget.propertyId);
+        final file = res.data;
+        if (!res.success || file == null) {
+          return ApiResponse.error(
+            message: res.message ?? '',
+            statusCode: res.statusCode,
+            data: res.error,
+          );
+        }
+        return ApiResponse.success(
+          data: DeliverableFile(
+            bytes: file.bytes,
+            fileName: file.fileName,
+            mimeType: file.mimeType,
+          ),
+          statusCode: res.statusCode,
+        );
+      },
     );
+    if (mounted) setState(() => _downloading = false);
   }
 
   @override

@@ -6,10 +6,11 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
+import '../../../../shared/services/api_service.dart';
 import '../../../../shared/services/property_service.dart';
+import '../../../../shared/widgets/file_delivery_sheet.dart';
 import '../../services/property_detail_extras_service.dart';
 import 'property_details_kit.dart';
-import 'property_file_delivery.dart';
 
 /// Certificado da autorização do proprietário ASSINADA — paridade com o
 /// `OwnerAuthorizationCertificate` do web (92-265), o documento de forma
@@ -137,38 +138,49 @@ class _PropertyOwnerAuthCertificateState
     });
   }
 
+  /// PDF da autorização assinada pela folha de arquivo do app
+  /// (Compartilhar / Salvar no aparelho).
   Future<void> _download() async {
     if (_downloading || !_allowed) return;
     setState(() => _downloading = true);
-    final res = await PropertyDetailExtrasService.instance
-        .downloadOwnerAuthorizationSignedPdf(widget.property.id);
-    if (!mounted) return;
-    setState(() => _downloading = false);
-    final file = res.data;
-    if (!res.success || file == null) {
-      final cause = pdkFailureCause(res);
-      final server = (res.message ?? '').trim();
-      pdkShowSnack(
-        context,
-        server.isNotEmpty
-            ? server
-            : 'Não foi possível baixar a autorização assinada. ${cause.cause}',
-        tone: PdkSnackTone.error,
-      );
-      return;
-    }
     final p = widget.property;
     final code = p.code?.trim() ?? '';
-    await showPropertyFileReadySheet(
+    await showFileDeliverySheet(
       context,
-      file: file,
       title: 'Autorização assinada',
       subtitle: [
         if (code.isNotEmpty) 'Imóvel $code',
         if (p.title.trim().isNotEmpty) p.title.trim(),
       ].join(' · '),
+      expectedType: 'PDF',
+      generatingTitle: 'Buscando a autorização assinada…',
+      generatingHint: 'O PDF vem do Autentique com a assinatura do '
+          'proprietário.',
+      readyTitle: 'Autorização pronta',
       shareSubject: 'Autorização do proprietário assinada',
+      saveDialogTitle: 'Salvar autorização assinada',
+      load: () async {
+        final res = await PropertyDetailExtrasService.instance
+            .downloadOwnerAuthorizationSignedPdf(p.id);
+        final file = res.data;
+        if (!res.success || file == null) {
+          return ApiResponse.error(
+            message: res.message ?? '',
+            statusCode: res.statusCode,
+            data: res.error,
+          );
+        }
+        return ApiResponse.success(
+          data: DeliverableFile(
+            bytes: file.bytes,
+            fileName: file.fileName,
+            mimeType: file.mimeType,
+          ),
+          statusCode: res.statusCode,
+        );
+      },
     );
+    if (mounted) setState(() => _downloading = false);
   }
 
   @override

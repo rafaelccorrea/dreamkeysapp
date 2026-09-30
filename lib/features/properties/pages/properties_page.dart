@@ -129,6 +129,10 @@ class _PropertiesPageState extends State<PropertiesPage> {
   bool _errorFromException = false;
   PropertyFilters? _filters;
   String _searchQuery = '';
+  /// Tópico escolhido na sugestão (condomínio, rua, bairro). Vale só enquanto
+  /// a busca for exatamente o rótulo dele — apagar ou redigitar o texto volta
+  /// para a busca livre sem precisar limpar em cada lugar.
+  PropertyLocationSuggestion? _localDaBusca;
   final TextEditingController _searchController = TextEditingController();
   Timer? _searchDebounce;
   /// Paridade web: listagem só refaz busca ~3s após parar de digitar.
@@ -281,25 +285,41 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 
+  /// Tópico da sugestão ainda valendo (o texto não mudou desde a escolha).
+  PropertyLocationSuggestion? get _localAtivo {
+    final local = _localDaBusca;
+    if (local == null) return null;
+    return local.label.trim() == _searchQuery.trim() ? local : null;
+  }
+
   /// Monta os filtros enviados à API — paridade com `getCombinedFilters` (web).
   ///
-  /// - `search` vem do campo de busca do header.
-  /// - Aba **Todos** (`portfolioScope` nulo) sempre envia `includeInactive=true`
-  ///   para listar ativos e inativos, todos os status.
+  /// - `search` vem do campo de busca do header; com um tópico escolhido na
+  ///   sugestão vai o filtro exato dele (condomínio, rua ou bairro) no lugar.
+  /// - Nenhuma aba pede inativos: eles moram só na aba **Inativos**
+  ///   (`portfolioScope=inactive`). "Todos" = ativos + vendidos/locados.
   PropertyFilters? _buildRequestFilters() {
     final searchTrim = _searchQuery.trim();
     final base = _filters ?? PropertyFilters();
     final isTodosTab = _activeScope == null;
+    final local = _localAtivo;
 
     var combined = base.copyWith(
-      search: searchTrim.isEmpty ? null : searchTrim,
+      search: searchTrim.isEmpty || _localTemFiltroExato(local)
+          ? null
+          : searchTrim,
+      condominiumId: local?.kind == PropertyLocationSuggestionKind.condominium
+          ? local!.condominiumId
+          : null,
+      street: local?.kind == PropertyLocationSuggestionKind.street
+          ? (local!.street ?? local.label)
+          : null,
+      neighborhood: local?.kind == PropertyLocationSuggestionKind.neighborhood
+          ? (local!.neighborhood ?? local.label)
+          : null,
     );
 
-    if (isTodosTab) {
-      combined = combined.copyWith(includeInactive: true);
-    } else {
-      combined = combined.copyWithNullable(resetIncludeInactive: true);
-    }
+    combined = combined.copyWithNullable(resetIncludeInactive: true);
 
     if (isTodosTab) {
       return _normalizeListingScope(combined);
@@ -310,6 +330,22 @@ class _PropertiesPageState extends State<PropertiesPage> {
     }
 
     return _normalizeListingScope(combined);
+  }
+
+  /// Condomínio, rua e bairro filtram pelo campo exato; empreendimento e
+  /// "buscar em tudo" seguem como texto (paridade com o web).
+  bool _localTemFiltroExato(PropertyLocationSuggestion? local) {
+    if (local == null) return false;
+    switch (local.kind) {
+      case PropertyLocationSuggestionKind.condominium:
+        return (local.condominiumId ?? '').isNotEmpty;
+      case PropertyLocationSuggestionKind.street:
+      case PropertyLocationSuggestionKind.neighborhood:
+        return true;
+      case PropertyLocationSuggestionKind.empreendimento:
+      case PropertyLocationSuggestionKind.generic:
+        return false;
+    }
   }
 
   bool _filtersPayloadIsEmpty(PropertyFilters f) {
@@ -917,8 +953,12 @@ class _PropertiesPageState extends State<PropertiesPage> {
                       if (hasSearch)
                         _buildActiveContextChip(
                           context,
-                          Icons.search_rounded,
-                          _searchQuery,
+                          _localAtivo != null
+                              ? _suggestionIcon(_localAtivo!.kind)
+                              : Icons.search_rounded,
+                          _localAtivo != null
+                              ? '${_rotuloDoTopico(_localAtivo!.kind)}: ${_localAtivo!.label}'
+                              : _searchQuery,
                           onClear: () {
                             _searchController.clear();
                             setState(() => _searchQuery = '');
@@ -1847,6 +1887,8 @@ class _PropertiesPageState extends State<PropertiesPage> {
 
   void _onSearchChanged(String value) {
     _searchDebounce?.cancel();
+    // Digitou de novo: o tópico escolhido na sugestão deixa de valer.
+    _localDaBusca = null;
     final trimmed = value.trim();
 
     // Campo vazio: refaz listagem na hora (paridade web).
@@ -1894,20 +1936,40 @@ class _PropertiesPageState extends State<PropertiesPage> {
         if (!mounted || _searchController.text.trim() != q) {
           return const Iterable<PropertyLocationSuggestion>.empty();
         }
-        final results = await _propertyService.getLocationSuggestions(q);
+        final results =
+            await _propertyService.getLocationSuggestions(q, limit: 12);
         if (!mounted || _searchController.text.trim() != q) {
           return const Iterable<PropertyLocationSuggestion>.empty();
         }
-        return results;
+        return _ordenarSugestoes(q, results);
       },
       onSelected: (PropertyLocationSuggestion suggestion) {
         _searchDebounce?.cancel();
-        final label = suggestion.label.trim();
+        // "Buscar em tudo" / código: mantém o que foi digitado (o rótulo é
+        // só a frase do botão). Tópico: o texto vira o nome exato dele.
+        final generico =
+            suggestion.kind == PropertyLocationSuggestionKind.generic;
+        final label = generico
+            ? _searchController.text.trim()
+            : suggestion.label.trim();
+        final mudouTopico = _localDaBusca?.label != suggestion.label ||
+            _localDaBusca?.kind != suggestion.kind;
+        _localDaBusca = generico ? null : suggestion;
         _searchController.text = label;
         _searchController.selection = TextSelection.collapsed(
           offset: label.length,
         );
         _searchFocusNode.unfocus();
+        if (label == _searchQuery.trim() && mudouTopico) {
+          // Mesmo texto, recorte diferente (livre → rua exata): recarrega.
+          setState(() {});
+          _loadProperties(
+            refresh: true,
+            silent: _hasLoadedOnce,
+            refreshStats: false,
+          );
+          return;
+        }
         _performSearch(label);
       },
       fieldViewBuilder: (context, textController, focusNode, onFieldSubmitted) {
@@ -2017,6 +2079,118 @@ class _PropertiesPageState extends State<PropertiesPage> {
         final theme = Theme.of(context);
         final accent = _portfolioAccentColor(context);
         final borderCol = ThemeHelpers.borderColor(context);
+        final muted = ThemeHelpers.textSecondaryColor(context);
+
+        // Passos da busca: cada tipo de lugar num grupo com o seu nome, na
+        // ordem em que o corretor pensa. Escolher um tópico filtra EXATO;
+        // "Buscar em tudo" fica por último, como saída consciente.
+        final linhas = <Widget>[];
+        PropertyLocationSuggestionKind? grupoAtual;
+        for (final s in items) {
+          if (s.kind != grupoAtual) {
+            grupoAtual = s.kind;
+            final qtd = items.where((i) => i.kind == s.kind).length;
+            linhas.add(
+              Container(
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
+                decoration: linhas.isEmpty
+                    ? null
+                    : BoxDecoration(
+                        border: Border(
+                          top: BorderSide(
+                            color: borderCol.withValues(alpha: 0.6),
+                          ),
+                        ),
+                      ),
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        _grupoDaSugestao(s.kind),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: muted,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.9,
+                        ),
+                      ),
+                    ),
+                    if (s.kind != PropertyLocationSuggestionKind.generic) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        '$qtd',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: muted.withValues(alpha: 0.75),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          }
+          final detalhe = _detalheDaSugestao(s);
+          final generico = s.kind == PropertyLocationSuggestionKind.generic;
+          linhas.add(
+            InkWell(
+              onTap: () => onSelected(s),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 9, 12, 9),
+                child: Row(
+                  children: [
+                    Icon(
+                      _suggestionIcon(s.kind),
+                      size: 18,
+                      color: generico ? muted : accent,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            s.label,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight:
+                                  generico ? FontWeight.w600 : FontWeight.w700,
+                            ),
+                          ),
+                          if (detalhe != null)
+                            Text(
+                              detalhe,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: muted,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      generico ? 'buscar' : 'filtrar',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: generico ? muted : accent,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
+        final alturaTela = MediaQuery.sizeOf(context).height;
+        final teclado = MediaQuery.viewInsetsOf(context).bottom;
+        final alturaMax =
+            ((alturaTela - teclado) * 0.5).clamp(180.0, 360.0).toDouble();
 
         return Align(
           alignment: Alignment.topLeft,
@@ -2028,78 +2202,93 @@ class _PropertiesPageState extends State<PropertiesPage> {
               borderRadius: BorderRadius.circular(14),
               side: BorderSide(color: borderCol),
             ),
+            clipBehavior: Clip.antiAlias,
             child: ConstrainedBox(
               constraints: BoxConstraints(
-                maxHeight: 280,
+                maxHeight: alturaMax,
                 maxWidth: MediaQuery.sizeOf(context).width - 40,
               ),
-              child: ListView.separated(
-                padding: EdgeInsets.zero,
+              child: ListView(
+                padding: const EdgeInsets.only(bottom: 4),
                 shrinkWrap: true,
-                itemCount: items.length,
-                separatorBuilder: (_, _) => Divider(
-                  height: 1,
-                  color: borderCol.withValues(alpha: 0.5),
-                ),
-                itemBuilder: (context, index) {
-                  final s = items[index];
-                  return InkWell(
-                    onTap: () => onSelected(s),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 11,
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            _suggestionIcon(s.kind),
-                            size: 18,
-                            color: accent,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  s.label,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                if ((s.subtitle ?? '').trim().isNotEmpty)
-                                  Text(
-                                    s.subtitle!.trim(),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: ThemeHelpers
-                                          .textSecondaryColor(context),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                          Icon(
-                            Icons.north_west_rounded,
-                            size: 14,
-                            color: ThemeHelpers.textSecondaryColor(context),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
+                children: linhas,
               ),
             ),
           ),
         );
       },
     );
+  }
+
+  /// Rótulo curto do tópico no chip da busca ativa ("Rua: Av. Rio Branco").
+  String _rotuloDoTopico(PropertyLocationSuggestionKind kind) {
+    switch (kind) {
+      case PropertyLocationSuggestionKind.condominium:
+        return 'Condomínio';
+      case PropertyLocationSuggestionKind.street:
+        return 'Rua';
+      case PropertyLocationSuggestionKind.neighborhood:
+        return 'Bairro';
+      case PropertyLocationSuggestionKind.empreendimento:
+        return 'Empreendimento';
+      case PropertyLocationSuggestionKind.generic:
+        return 'Busca';
+    }
+  }
+
+  /// Nome do passo (grupo) no painel de sugestões.
+  String _grupoDaSugestao(PropertyLocationSuggestionKind kind) {
+    switch (kind) {
+      case PropertyLocationSuggestionKind.condominium:
+        return 'CONDOMÍNIO';
+      case PropertyLocationSuggestionKind.street:
+        return 'RUA';
+      case PropertyLocationSuggestionKind.neighborhood:
+        return 'BAIRRO';
+      case PropertyLocationSuggestionKind.empreendimento:
+        return 'EMPREENDIMENTO';
+      case PropertyLocationSuggestionKind.generic:
+        return 'BUSCA LIVRE';
+    }
+  }
+
+  /// Linha de apoio sem repetir o grupo: "Rua · Marília" vira "Marília".
+  String? _detalheDaSugestao(PropertyLocationSuggestion s) {
+    final sub = (s.subtitle ?? '').trim();
+    if (sub.isEmpty) return null;
+    final partes = sub.split(' · ');
+    if (partes.length > 1) return partes.sublist(1).join(' · ');
+    const soOTipo = {'condomínio', 'rua', 'bairro', 'empreendimento'};
+    return soOTipo.contains(sub.toLowerCase()) ? null : sub;
+  }
+
+  /// Ordem dos passos: condomínio, rua, bairro, empreendimento; a busca livre
+  /// sempre por último (e sempre presente, para o corretor escolher de
+  /// propósito buscar em todos os campos).
+  List<PropertyLocationSuggestion> _ordenarSugestoes(
+    String digitado,
+    List<PropertyLocationSuggestion> brutas,
+  ) {
+    const ordem = [
+      PropertyLocationSuggestionKind.condominium,
+      PropertyLocationSuggestionKind.street,
+      PropertyLocationSuggestionKind.neighborhood,
+      PropertyLocationSuggestionKind.empreendimento,
+      PropertyLocationSuggestionKind.generic,
+    ];
+    final out = <PropertyLocationSuggestion>[
+      for (final kind in ordem) ...brutas.where((s) => s.kind == kind),
+    ];
+    if (!out.any((s) => s.kind == PropertyLocationSuggestionKind.generic)) {
+      out.add(
+        PropertyLocationSuggestion(
+          kind: PropertyLocationSuggestionKind.generic,
+          label: 'Buscar "$digitado" em tudo',
+          subtitle: 'Endereço, título, proprietário e código',
+        ),
+      );
+    }
+    return out;
   }
 
   IconData _suggestionIcon(PropertyLocationSuggestionKind kind) {
