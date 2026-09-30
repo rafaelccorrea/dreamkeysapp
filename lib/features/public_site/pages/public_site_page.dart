@@ -17,13 +17,31 @@ import '../widgets/public_site_shared.dart';
 
 enum _SiteTab { overview, sections, content, domain }
 
-/// Tela **Meu Site** — aqui o PREVIEW do site é o herói: uma moldura de
-/// navegador (três pontinhos + campo de URL com o domínio real) emoldura um
-/// mini-mock da identidade configurada — logo, cores da marca, tagline, CTA
-/// e as seções ativas da home. Abaixo, as configurações seguem sóbrias em
-/// abas com sublinhado, conteúdo flush nas margens e ações no próprio item.
-/// Paridade com `PublicSiteConfigPage.tsx` (as etapas viáveis em mobile —
-/// template/preview completos ficam no painel web).
+/// Item do "o que falta para ir ao ar"; [tab] = aba onde ele se resolve
+/// (null = não se resolve no app).
+typedef _CheckItem = ({
+  String label,
+  String value,
+  SiteCheckState state,
+  _SiteTab? tab,
+});
+
+/// Tela **Meu Site** — responde de cara às três perguntas de quem abre: o
+/// site está no ar? em qual endereço? o que falta?
+///
+/// No alto, o PREVIEW do site é o herói: uma moldura de navegador com o
+/// endereço real emoldura um mini-site montado só com dados reais (logo,
+/// tintas, frase, botão e seções ligadas). Logo abaixo, a situação (no ar /
+/// fora do ar, domínio) com abrir e copiar, e o PRÓXIMO PASSO numa frase,
+/// com o atalho até onde ele se resolve. As configurações seguem em abas com
+/// sublinhado: Resumo (publicar, o que falta, identidade), Seções, Textos e
+/// Domínio (roteiro de 3 passos numerados). Paridade com
+/// `PublicSiteConfigPage.tsx` nas etapas viáveis no celular — modelo, marca
+/// e prévia ao vivo seguem no web.
+///
+/// Revisão 30/09/2026: coluna de 720 no tablet, barra de salvar fixa no pé
+/// (desce para o fim do painel com pouca altura útil), folga para o botão do
+/// chat, cores só por token e nada espremido em 320dp com texto a 130%.
 class PublicSitePage extends StatefulWidget {
   const PublicSitePage({super.key});
 
@@ -31,13 +49,70 @@ class PublicSitePage extends StatefulWidget {
   State<PublicSitePage> createState() => _PublicSitePageState();
 }
 
+/// Uma das três tintas do site já resolvida: a escolhida no painel ou, sem
+/// escolha, a de fábrica do modelo.
+class _SitePaint {
+  final String name;
+  final String caption;
+  final Color color;
+  final String code;
+  final bool isDefault;
+
+  const _SitePaint({
+    required this.name,
+    required this.caption,
+    required this.color,
+    required this.code,
+    required this.isDefault,
+  });
+}
+
+/// O passo que destrava o site agora — a frase do alto da tela.
+class _NextStep {
+  final IconData icon;
+  final Color tone;
+  final String title;
+  final String body;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  const _NextStep({
+    required this.icon,
+    required this.tone,
+    required this.title,
+    required this.body,
+    this.actionLabel,
+    this.onAction,
+  });
+}
+
 class _PublicSitePageState extends State<PublicSitePage> {
   static const double _kPagePadH = 16;
   static const double _kPagePadTop = 10;
-  static const double _kPagePadBottom = 88;
+
+  /// Folga no fim da rolagem: o botão flutuante do chat (56dp, a 80dp do pé)
+  /// não cobre o último campo nem a barra de salvar que entra no painel.
+  static const double _kPagePadBottom = 140;
   static const double _kSectionGap = 12;
 
+  /// Coluna de leitura no tablet e na paisagem larga — nada estica em 1000dp.
+  static const double _kMaxContentWidth = 720;
+
+  /// Abaixo desta altura útil (paisagem, teclado aberto) a barra de salvar
+  /// sai do pé da tela e entra no fim do painel: fixa, ela espremeria os
+  /// campos até sumirem.
+  static const double _kDockMinHeight = 300;
+
+  /// Tela baixa (celular deitado): o alto mostra só a barra de endereço, a
+  /// situação e o próximo passo — o mini-site passaria da altura da tela.
+  static const double _kCompactHeroHeight = 480;
+
+  static const String _readOnlyText =
+      'Somente leitura — quem libera a edição é o administrador da empresa, '
+      'na permissão “Gerenciar o Meu Site e o Link in Bio”.';
+
   _SiteTab _activeTab = _SiteTab.overview;
+  final GlobalKey _tabsKey = GlobalKey();
 
   PublicSiteConfig? _config;
   List<PublicSiteTemplateInfo> _templates = const [];
@@ -56,7 +131,7 @@ class _PublicSitePageState extends State<PublicSitePage> {
   bool _blocksDirty = false;
   bool _blocksSaving = false;
 
-  // Conteúdo & SEO
+  // Textos, contato e Google
   final _taglineController = TextEditingController();
   final _whatsappController = TextEditingController();
   final _phoneController = TextEditingController();
@@ -68,10 +143,18 @@ class _PublicSitePageState extends State<PublicSitePage> {
   bool _contentDirty = false;
   bool _contentSaving = false;
 
+  /// E-mail recusado no último "Salvar" — a MESMA checagem de sempre (só
+  /// quando preenchido), agora escrita também sob o próprio campo.
+  String? _emailError;
+
   // Domínio
   final _domainController = TextEditingController();
   bool _domainSaving = false;
   bool _dnsVerifying = false;
+
+  /// Guia do provedor (passo a passo + onde criar) aberto ou fechado. `null`
+  /// = automático: aberto enquanto o DNS ainda não foi encontrado.
+  bool? _dnsGuideOpen;
 
   bool get _canView =>
       ModuleAccessService.instance.hasPermission(PublicSiteAccess.permView);
@@ -99,61 +182,143 @@ class _PublicSitePageState extends State<PublicSitePage> {
     super.dispose();
   }
 
-  // ─── Cores ────────────────────────────────────────────────────────────────
+  // ─── Cores (só tokens) ────────────────────────────────────────────────────
 
-  Color _accentColor(BuildContext context) {
-    return Theme.of(context).brightness == Brightness.dark
-        ? AppColors.primary.primaryDarkMode
-        : AppColors.primary.primary;
-  }
+  bool _isDark(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark;
+
+  Color _accentColor(BuildContext context) => _isDark(context)
+      ? AppColors.primary.primaryDarkMode
+      : AppColors.primary.primary;
+
+  Color _green(BuildContext context) => _isDark(context)
+      ? AppColors.status.greenDarkMode
+      : AppColors.status.green;
+
+  Color _amber(BuildContext context) => _isDark(context)
+      ? AppColors.status.warningDarkMode
+      : AppColors.status.warning;
+
+  Color _blue(BuildContext context) =>
+      _isDark(context) ? AppColors.status.infoDarkMode : AppColors.status.info;
+
+  Color _red(BuildContext context) => _isDark(context)
+      ? AppColors.status.errorDarkMode
+      : AppColors.status.error;
 
   Color _tone(BuildContext context, _SiteTab tab) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     switch (tab) {
       case _SiteTab.overview:
         return _accentColor(context);
       case _SiteTab.sections:
-        return isDark
+        return _isDark(context)
             ? AppColors.status.purpleDarkMode
             : AppColors.status.purple;
       case _SiteTab.content:
-        return isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
+        return _blue(context);
       case _SiteTab.domain:
-        return isDark
-            ? AppColors.status.warningDarkMode
-            : AppColors.status.warning;
+        return _amber(context);
     }
   }
 
   Color _domainStatusColor(BuildContext context, PublicSiteDomainStatus st) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     switch (st) {
       case PublicSiteDomainStatus.active:
-        return isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
+        return _green(context);
       case PublicSiteDomainStatus.pendingDns:
-        return isDark
-            ? AppColors.status.warningDarkMode
-            : AppColors.status.warning;
-      // 29/09/2026: "Emitindo HTTPS" é processamento do nosso lado (azul,
-      // como a revisão); "Falhou" é erro (vermelho). Sem estes casos o
-      // switch exaustivo não compila desde que o enum ganhou os dois.
+        return _amber(context);
+      // 29/09/2026: "Emitindo HTTPS" e "Revisão manual" são processamento
+      // do nosso lado (azul); "Falhou" e "Desativado" são erro (vermelho).
       case PublicSiteDomainStatus.pendingSsl:
       case PublicSiteDomainStatus.pendingReview:
-        return isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
+        return _blue(context);
       case PublicSiteDomainStatus.failed:
       case PublicSiteDomainStatus.disabled:
-        return isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+        return _red(context);
+    }
+  }
+
+  /// Situação do domínio em palavras — o rótulo cru ("Ativo", "Falhou")
+  /// ficava ambíguo ao lado de "No ar".
+  String _domainStateTitle(PublicSiteDomainStatus st) {
+    switch (st) {
+      case PublicSiteDomainStatus.active:
+        return 'Domínio ativo';
+      case PublicSiteDomainStatus.pendingDns:
+        return 'Aguardando DNS';
+      case PublicSiteDomainStatus.pendingSsl:
+        return 'Emitindo HTTPS';
+      case PublicSiteDomainStatus.pendingReview:
+        return 'Em revisão manual';
+      case PublicSiteDomainStatus.failed:
+        return 'HTTPS não emitido';
+      case PublicSiteDomainStatus.disabled:
+        return 'Domínio desativado';
+    }
+  }
+
+  IconData _domainStateIcon(PublicSiteDomainStatus st) {
+    switch (st) {
+      case PublicSiteDomainStatus.active:
+        return LucideIcons.circleCheckBig;
+      case PublicSiteDomainStatus.pendingDns:
+        return LucideIcons.clock3;
+      case PublicSiteDomainStatus.pendingSsl:
+      case PublicSiteDomainStatus.pendingReview:
+        return LucideIcons.hourglass;
+      case PublicSiteDomainStatus.failed:
+        return LucideIcons.circleAlert;
+      case PublicSiteDomainStatus.disabled:
+        return LucideIcons.circleX;
+    }
+  }
+
+  /// O que a situação do domínio quer dizer e o que fazer, numa frase.
+  String _domainExplanation(
+    PublicSiteConfig cfg,
+    PublicSiteDnsInstructions dns,
+  ) {
+    switch (cfg.domainStatus) {
+      case PublicSiteDomainStatus.active:
+        return 'Domínio ativo — o site responde em '
+            '${(cfg.customDomain ?? '').trim()}.';
+      case PublicSiteDomainStatus.pendingDns:
+        // 29/09/2026 (integ-02): cita o que o back pede de verdade (hoje,
+        // registro A em www E em @), nunca "CNAME" fixo.
+        return 'Crie ${dns.recordsToCreateLabel} no seu provedor e toque em '
+            '"Verificar DNS" — quando o DNS propagar, o domínio é ativado '
+            'sozinho.';
+      case PublicSiteDomainStatus.pendingSsl:
+        return 'O DNS já aponta para o site. Falta o certificado de '
+            'segurança (HTTPS), que sai sozinho em 1 a 5 minutos — depois, '
+            'toque em "Verificar DNS".';
+      case PublicSiteDomainStatus.pendingReview:
+        return 'O DNS já aponta para o site e o domínio está em revisão '
+            'manual pela equipe de suporte. Você não precisa fazer nada '
+            'agora.';
+      case PublicSiteDomainStatus.failed:
+        return 'O DNS está certo, mas o certificado HTTPS não foi emitido no '
+            'prazo. Toque em "Verificar DNS" para tentar de novo.';
+      case PublicSiteDomainStatus.disabled:
+        return 'Este domínio foi desativado e o site não responde nele. Fale '
+            'com o suporte para reativar.';
     }
   }
 
   // ─── Dados ────────────────────────────────────────────────────────────────
 
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-      _errorStatus = 0;
-    });
+  /// [silent] = puxar para atualizar com a tela montada: recarrega os mesmos
+  /// três GETs sem trocar o site pelo esqueleto e sem descartar rascunho
+  /// não salvo; se falhar, a tela fica como estava e o aviso diz a causa.
+  Future<void> _load({bool silent = false}) async {
+    final quiet = silent && _config != null;
+    if (!quiet) {
+      setState(() {
+        _loading = true;
+        _error = null;
+        _errorStatus = 0;
+      });
+    }
     final results = await Future.wait([
       PublicSiteService.instance.getConfig(),
       PublicSiteService.instance.getTemplates(),
@@ -164,13 +329,16 @@ class _PublicSitePageState extends State<PublicSitePage> {
     final cfgRes = results[0] as dynamic;
     final tplRes = results[1] as dynamic;
     final dns = results[2] as PublicSiteDnsInstructions;
+    final ok = cfgRes.success == true && cfgRes.data != null;
 
     setState(() {
       _loading = false;
       _dns = dns;
-      if (cfgRes.success && cfgRes.data != null) {
-        _applyConfig(cfgRes.data as PublicSiteConfig, resetDrafts: true);
-      } else {
+      if (ok) {
+        _applyConfig(cfgRes.data as PublicSiteConfig, resetDrafts: !quiet);
+        _error = null;
+        _errorStatus = 0;
+      } else if (!quiet) {
         _error = cfgRes.message ?? 'Erro ao carregar configuração do site';
         _errorStatus = cfgRes.statusCode;
       }
@@ -178,6 +346,16 @@ class _PublicSitePageState extends State<PublicSitePage> {
         _templates = tplRes.data as List<PublicSiteTemplateInfo>;
       }
     });
+    if (quiet && !ok) {
+      _showSnack(
+        siteFailureMessage(
+          cfgRes.message as String?,
+          cfgRes.statusCode as int,
+          fallback: 'Não foi possível atualizar agora — tente de novo.',
+        ),
+        tone: SiteSnackTone.error,
+      );
+    }
   }
 
   void _applyConfig(PublicSiteConfig cfg, {bool resetDrafts = false}) {
@@ -214,36 +392,51 @@ class _PublicSitePageState extends State<PublicSitePage> {
 
   // ─── Ações ────────────────────────────────────────────────────────────────
 
-  void _showSnack(String message, {Color? tone}) {
+  void _showSnack(String message, {SiteSnackTone tone = SiteSnackTone.info}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: tone,
-        content: Text(message),
-      ),
-    );
+    siteShowSnack(context, message, tone: tone);
+  }
+
+  /// Troca de aba. [reveal] = veio do "próximo passo" ou do "o que falta":
+  /// rola até as abas, para a pessoa ver o painel que abriu (em tela baixa
+  /// ele fica abaixo da dobra).
+  void _openTab(_SiteTab tab, {bool reveal = false}) {
+    if (_activeTab != tab) setState(() => _activeTab = tab);
+    if (!reveal) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final target = _tabsKey.currentContext;
+      if (!mounted || target == null) return;
+      Scrollable.ensureVisible(
+        target,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOutCubic,
+      );
+    });
   }
 
   Future<void> _copyUrl() async {
     final url = _config?.bestPublicUrl;
     if (url == null) return;
     await Clipboard.setData(ClipboardData(text: url));
-    _showSnack('URL copiada');
+    _showSnack('Endereço do site copiado', tone: SiteSnackTone.success);
   }
 
   Future<void> _openSite() async {
     final url = _config?.bestPublicUrl;
     if (url == null) return;
+    await _openExternal(url, failure: 'Não foi possível abrir o site');
+  }
+
+  Future<void> _openExternal(String url, {required String failure}) async {
     final uri = Uri.tryParse(url);
     if (uri == null) return;
     final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok) _showSnack('Não foi possível abrir o site');
+    if (!ok) _showSnack(failure, tone: SiteSnackTone.error);
   }
 
   Future<void> _copyText(String value, {String? feedback}) async {
     await Clipboard.setData(ClipboardData(text: value));
-    _showSnack(feedback ?? 'Copiado');
+    _showSnack(feedback ?? 'Copiado', tone: SiteSnackTone.success);
   }
 
   Future<void> _togglePublish() async {
@@ -253,33 +446,42 @@ class _PublicSitePageState extends State<PublicSitePage> {
     if (cfg.isPublished) {
       final confirmed = await showDialog<bool>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          title: const Text('Despublicar site?'),
-          content: const Text(
-            'Seu site sai do ar imediatamente e os visitantes deixam de '
-            'acessá-lo. Você pode publicar de novo quando quiser.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancelar'),
+        builder: (ctx) {
+          final red = Theme.of(ctx).brightness == Brightness.dark
+              ? AppColors.status.errorDarkMode
+              : AppColors.status.error;
+          return AlertDialog(
+            scrollable: true,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
             ),
-            FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(ctx).brightness == Brightness.dark
-                    ? AppColors.status.errorDarkMode
-                    : AppColors.status.error,
+            title: const Text('Tirar o site do ar?'),
+            content: const Text(
+              'O site sai do ar na hora e os visitantes deixam de acessá-lo. '
+              'Você pode publicar de novo quando quiser.',
+            ),
+            actions: [
+              // Cancelar NEUTRO — o tema pinta TextButton de vermelho.
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                style: TextButton.styleFrom(
+                  foregroundColor: ThemeHelpers.textSecondaryColor(ctx),
+                ),
+                child: const Text('Cancelar'),
               ),
-              child: const Text('Despublicar'),
-            ),
-          ],
-        ),
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: siteSolid(red),
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Tirar do ar'),
+              ),
+            ],
+          );
+        },
       );
-      if (confirmed != true) return;
+      if (confirmed != true || !mounted) return;
     }
 
     setState(() => _publishing = true);
@@ -291,10 +493,20 @@ class _PublicSitePageState extends State<PublicSitePage> {
       _publishing = false;
       if (res.success && res.data != null) _applyConfig(res.data!);
     });
-    if (res.success) {
-      _showSnack(res.data!.isPublished ? 'Site no ar' : 'Site despublicado');
+    if (res.success && res.data != null) {
+      _showSnack(
+        res.data!.isPublished ? 'Site no ar' : 'Site fora do ar',
+        tone: SiteSnackTone.success,
+      );
     } else {
-      _showSnack(res.message ?? 'Erro ao alterar publicação');
+      _showSnack(
+        siteFailureMessage(
+          res.message,
+          res.statusCode,
+          fallback: 'Não foi possível alterar a publicação — tente de novo.',
+        ),
+        tone: SiteSnackTone.error,
+      );
     }
   }
 
@@ -314,9 +526,25 @@ class _PublicSitePageState extends State<PublicSitePage> {
         _blocksDraft = List.of(res.data!.editorHomeBlocks);
       }
     });
-    _showSnack(
-      res.success ? 'Seções salvas' : (res.message ?? 'Erro ao salvar seções'),
-    );
+    if (res.success) {
+      _showSnack('Seções salvas', tone: SiteSnackTone.success);
+    } else {
+      _showSnack(
+        siteFailureMessage(
+          res.message,
+          res.statusCode,
+          fallback: 'Não foi possível salvar as seções — tente de novo.',
+        ),
+        tone: SiteSnackTone.error,
+      );
+    }
+  }
+
+  void _discardBlocks() {
+    setState(() {
+      _blocksDraft = List.of(_config!.editorHomeBlocks);
+      _blocksDirty = false;
+    });
   }
 
   /// Formato mínimo de e-mail (algo@dominio.tld) — o `@IsEmail` do back é a
@@ -334,10 +562,15 @@ class _PublicSitePageState extends State<PublicSitePage> {
     // desta aba.
     final email = _emailController.text.trim();
     if (email.isNotEmpty && !_emailPattern.hasMatch(email)) {
-      _showSnack('E-mail inválido — corrija ou deixe o campo vazio');
+      const reason = 'E-mail inválido — corrija ou deixe o campo vazio';
+      setState(() => _emailError = reason);
+      _showSnack(reason, tone: SiteSnackTone.error);
       return;
     }
-    setState(() => _contentSaving = true);
+    setState(() {
+      _contentSaving = true;
+      _emailError = null;
+    });
 
     // Parte do conteúdo carregado; o toJson manda só os campos desta aba e o
     // merge raso do back preserva o resto (redes sociais, endereço, selos,
@@ -363,22 +596,47 @@ class _PublicSitePageState extends State<PublicSitePage> {
     setState(() {
       _contentSaving = false;
       if (res.success && res.data != null) {
+        // Só o rascunho DESTA aba volta ao que o servidor gravou; seções
+        // alteradas e ainda não salvas continuam como estão (antes o
+        // `resetDrafts: true` descartava as duas coisas juntas).
         _contentDirty = false;
-        _applyConfig(res.data!, resetDrafts: true);
+        _applyConfig(res.data!);
       }
     });
-    _showSnack(
-      res.success ? 'Conteúdo salvo' : (res.message ?? 'Erro ao salvar'),
-    );
+    if (res.success) {
+      _showSnack('Textos salvos', tone: SiteSnackTone.success);
+    } else {
+      _showSnack(
+        siteFailureMessage(
+          res.message,
+          res.statusCode,
+          fallback: 'Não foi possível salvar os textos — tente de novo.',
+        ),
+        tone: SiteSnackTone.error,
+      );
+    }
+  }
+
+  void _discardContent() {
+    setState(() {
+      // Idem: descartar os textos não mexe nas seções em rascunho.
+      _contentDirty = false;
+      _emailError = null;
+      _applyConfig(_config!);
+    });
   }
 
   Future<void> _saveDomain() async {
     final domain = _domainController.text.trim();
     if (domain.isEmpty) {
-      _showSnack('Informe o domínio do site (ex.: www.suaimobiliaria.com.br)');
+      _showSnack(
+        'Informe o domínio do site (ex.: www.suaimobiliaria.com.br)',
+        tone: SiteSnackTone.error,
+      );
       return;
     }
     if (_domainSaving) return;
+    FocusScope.of(context).unfocus();
     setState(() => _domainSaving = true);
     final res = await PublicSiteService.instance.updateCustomDomain(domain);
     if (!mounted) return;
@@ -389,12 +647,22 @@ class _PublicSitePageState extends State<PublicSitePage> {
     // 29/09/2026 (integ-02): o sucesso dizia "configure o CNAME"; agora diz
     // os registros que o back pede de verdade (A em www e em @ hoje).
     final dns = _dns ?? PublicSiteDnsInstructions.fromJson(null);
-    _showSnack(
-      res.success
-          ? 'Domínio salvo — crie ${dns.recordsToCreateLabel} e toque em '
-                '"Verificar DNS"'
-          : (res.message ?? 'Erro ao salvar domínio'),
-    );
+    if (res.success) {
+      _showSnack(
+        'Domínio salvo — crie ${dns.recordsToCreateLabel} e toque em '
+        '"Verificar DNS"',
+        tone: SiteSnackTone.success,
+      );
+    } else {
+      _showSnack(
+        siteFailureMessage(
+          res.message,
+          res.statusCode,
+          fallback: 'Não foi possível salvar o domínio — tente de novo.',
+        ),
+        tone: SiteSnackTone.error,
+      );
+    }
   }
 
   Future<void> _verifyDns() async {
@@ -406,539 +674,40 @@ class _PublicSitePageState extends State<PublicSitePage> {
       await _refresh();
       if (!mounted) return;
       setState(() => _dnsVerifying = false);
+      final result = res.data!;
       _showSnack(
-        res.data!.message.isNotEmpty
-            ? res.data!.message
-            : (res.data!.verified
+        result.message.isNotEmpty
+            ? result.message
+            : (result.verified
                   ? 'Domínio verificado e ativo'
                   : 'O DNS ainda não propagou — tente de novo em alguns '
                         'minutos'),
+        tone: result.verified ? SiteSnackTone.success : SiteSnackTone.info,
       );
     } else {
       setState(() => _dnsVerifying = false);
-      _showSnack(res.message ?? 'Erro ao verificar DNS');
-    }
-  }
-
-  // ─── Build ────────────────────────────────────────────────────────────────
-
-  @override
-  Widget build(BuildContext context) {
-    if (!_canView) {
-      return const AppScaffold(
-        title: 'Meu Site',
-        showBottomNavigation: false,
-        body: SiteDeniedView(
-          message: 'Você não tem acesso à configuração do site.',
-          permissionLabel: PublicSiteAccess.permView,
+      _showSnack(
+        siteFailureMessage(
+          res.message,
+          res.statusCode,
+          fallback: 'Não foi possível verificar o DNS agora — tente de novo.',
         ),
+        tone: SiteSnackTone.error,
       );
     }
-    return AppScaffold(
-      title: 'Meu Site',
-      showBottomNavigation: false,
-      body: RefreshIndicator(
-        color: _accentColor(context),
-        onRefresh: () async {
-          await _load();
-        },
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: EdgeInsets.zero,
-          children: _loading
-              ? [_buildPageSkeleton(context)]
-              : _error != null
-              ? [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      _kPagePadH,
-                      48,
-                      _kPagePadH,
-                      _kPagePadBottom,
-                    ),
-                    child: SiteErrorState(
-                      message: _error!,
-                      statusCode: _errorStatus,
-                      onRetry: _load,
-                    ),
-                  ),
-                ]
-              : [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      _kPagePadH,
-                      _kPagePadTop,
-                      _kPagePadH,
-                      0,
-                    ),
-                    child: _buildBrowserHero(context),
-                  ),
-                  const SizedBox(height: _kSectionGap + 2),
-                  _buildTabsRail(context),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      _kPagePadH,
-                      _kSectionGap,
-                      _kPagePadH,
-                      _kPagePadBottom,
-                    ),
-                    child: _buildActivePanel(context),
-                  ),
-                ],
-        ),
-      ),
-    );
   }
 
-  // ─── Hero: o site é o protagonista (moldura de navegador) ────────────────
+  // ─── Auxiliares de leitura ────────────────────────────────────────────────
 
-  Widget _buildBrowserHero(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final accent = _accentColor(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final emerald = isDark
-        ? AppColors.status.greenDarkMode
-        : AppColors.status.green;
-    final amber = isDark
-        ? AppColors.status.warningDarkMode
-        : AppColors.status.warning;
+  String _displayUrl(String url) => url
+      .replaceFirst(RegExp(r'^https?://'), '')
+      .replaceFirst(RegExp(r'/+$'), '');
 
-    final cfg = _config!;
-    final published = cfg.isPublished;
-    final statusTone = published ? emerald : amber;
-    final url = cfg.bestPublicUrl;
-    final hasUrl = url != null;
-    final hasDomain = (cfg.customDomain ?? '').trim().isNotEmpty;
-    final domainTone = _domainStatusColor(context, cfg.domainStatus);
-
-    final domainLabel = hasDomain
-        ? cfg.customDomain!.trim()
-        : (hasUrl
-              ? url
-                    .replaceFirst(RegExp(r'^https?://'), '')
-                    .replaceFirst(RegExp(r'/+$'), '')
-              : 'domínio ainda não definido');
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _buildBrowserFrame(
-          context,
-          domainLabel: domainLabel,
-          hasAddress: hasUrl || hasDomain,
-          published: published,
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            SiteMiniPill(
-              label: published ? 'No ar' : 'Rascunho',
-              tone: statusTone,
-              icon: published
-                  ? LucideIcons.circleCheckBig
-                  : LucideIcons.circleDashed,
-            ),
-            if (hasDomain) ...[
-              const SizedBox(width: 7),
-              Flexible(
-                child: SiteMiniPill(
-                  label: cfg.domainStatus.label,
-                  tone: domainTone,
-                  icon: cfg.domainStatus == PublicSiteDomainStatus.active
-                      ? LucideIcons.check
-                      : LucideIcons.clock3,
-                ),
-              ),
-            ],
-            const Spacer(),
-            SiteRowAction(
-              icon: LucideIcons.externalLink,
-              tooltip: 'Ver site',
-              tone: accent,
-              onTap: hasUrl ? _openSite : null,
-            ),
-            SiteRowAction(
-              icon: LucideIcons.copy,
-              tooltip: 'Copiar URL',
-              tone: secondary,
-              onTap: hasUrl ? _copyUrl : null,
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text(
-          published
-              ? 'É assim que os visitantes encontram seu site agora.'
-              : 'Só você vê este preview — publique na aba Visão geral para '
-                    'colocar o site no ar.',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: secondary,
-            height: 1.35,
-            fontSize: 11.5,
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// Moldura de "navegador": barra com três pontinhos + campo de URL com o
-  /// domínio real, emoldurando um mini-preview da identidade do site montado
-  /// só com dados reais (logo, cores da marca, tagline, CTA e seções ativas).
-  Widget _buildBrowserFrame(
-    BuildContext context, {
-    required String domainLabel,
-    required bool hasAddress,
-    required bool published,
-  }) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final emerald = isDark
-        ? AppColors.status.greenDarkMode
-        : AppColors.status.green;
-    final amber = isDark
-        ? AppColors.status.warningDarkMode
-        : AppColors.status.warning;
-    final rose = isDark
-        ? AppColors.status.errorDarkMode
-        : AppColors.status.error;
-
-    final cfg = _config!;
-    final brand =
-        siteParseHexColor(cfg.branding.primaryColor) ?? _accentColor(context);
-    final swatches = [
-      cfg.branding.primaryColor,
-      cfg.branding.secondaryColor,
-      cfg.branding.accentColor,
-    ].map(siteParseHexColor).whereType<Color>().toList(growable: false);
-
-    final templateName =
-        _templates
-            .where((t) => t.id == cfg.templateId)
-            .map((t) => t.name)
-            .firstOrNull ??
-        _fallbackTemplateLabel(cfg.templateId);
-    final siteTitle = (cfg.seo.title ?? '').trim();
-    final tagline = (cfg.content.tagline ?? '').trim();
-    final cta = (cfg.content.ctaText ?? '').trim();
-    final enabledBlocks = _blocksDraft
-        .where((b) => b.enabled)
-        .toList(growable: false);
-    final onBrand =
-        ThemeData.estimateBrightnessForColor(brand) == Brightness.dark
-        ? Colors.white
-        : const Color(0xFF1F2937);
-
-    Widget browserDot(Color tone) => Container(
-      width: 8,
-      height: 8,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: tone.withValues(alpha: 0.8),
-      ),
-    );
-
-    return Container(
-      decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.08)
-              : Colors.black.withValues(alpha: 0.06),
-        ),
-        boxShadow: ThemeHelpers.cardShadow(context),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Barra do navegador — três pontinhos + campo de URL real.
-          Container(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(
-                  color: ThemeHelpers.borderLightColor(context),
-                ),
-              ),
-            ),
-            child: Row(
-              children: [
-                browserDot(rose),
-                const SizedBox(width: 5),
-                browserDot(amber),
-                const SizedBox(width: 5),
-                browserDot(emerald),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isDark
-                          ? Colors.white.withValues(alpha: 0.05)
-                          : Colors.black.withValues(alpha: 0.04),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          published
-                              ? LucideIcons.lock
-                              : LucideIcons.circleDashed,
-                          size: 10,
-                          color: published ? emerald : secondary,
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            domainLabel,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: -0.1,
-                              color: hasAddress
-                                  ? ThemeHelpers.textColor(context)
-                                  : secondary,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Mini-preview da identidade — somente dados reais configurados.
-          Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    _previewLogo(context, brand),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            siteTitle.isNotEmpty
-                                ? siteTitle
-                                : 'Seu site imobiliário',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.2,
-                              color: siteTitle.isNotEmpty
-                                  ? ThemeHelpers.textColor(context)
-                                  : secondary,
-                            ),
-                          ),
-                          const SizedBox(height: 1),
-                          Text(
-                            'Template $templateName'
-                            '${cfg.premiumTemplateUnlocked ? ' · Premium' : ''}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w600,
-                              color: secondary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (swatches.isNotEmpty) ...[
-                      const SizedBox(width: 8),
-                      for (var i = 0; i < swatches.length; i++)
-                        Container(
-                          width: 14,
-                          height: 14,
-                          margin: EdgeInsets.only(left: i == 0 ? 0 : 4),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: swatches[i],
-                            border: Border.all(
-                              color: ThemeHelpers.cardBackgroundColor(context),
-                              width: 1.5,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 12),
-                // "Banner" do site — tagline + CTA nas cores da marca.
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    gradient: LinearGradient(
-                      begin: Alignment.centerLeft,
-                      end: Alignment.centerRight,
-                      colors: [
-                        brand.withValues(alpha: isDark ? 0.22 : 0.14),
-                        brand.withValues(alpha: isDark ? 0.08 : 0.05),
-                      ],
-                    ),
-                    border: Border.all(color: brand.withValues(alpha: 0.22)),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          tagline.isNotEmpty
-                              ? tagline
-                              : 'Sua frase de destaque aparece aqui',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.1,
-                            height: 1.25,
-                            color: tagline.isNotEmpty
-                                ? ThemeHelpers.textColor(context)
-                                : secondary,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: brand,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          cta.isNotEmpty ? cta : 'Fale conosco',
-                          maxLines: 1,
-                          style: TextStyle(
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 0.2,
-                            color: onBrand,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (enabledBlocks.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      for (
-                        var i = 0;
-                        i < enabledBlocks.length && i < 4;
-                        i++
-                      ) ...[
-                        if (i > 0) const SizedBox(width: 6),
-                        Expanded(
-                          child: Tooltip(
-                            message: PublicSiteBlockCatalog.labelOf(
-                              enabledBlocks[i].type,
-                            ),
-                            child: Container(
-                              height: 30,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(9),
-                                color: isDark
-                                    ? Colors.white.withValues(alpha: 0.05)
-                                    : Colors.black.withValues(alpha: 0.04),
-                              ),
-                              child: Icon(
-                                PublicSiteBlockCatalog.iconOf(
-                                  enabledBlocks[i].type,
-                                ),
-                                size: 13,
-                                color: secondary,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                      if (enabledBlocks.length > 4) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          height: 30,
-                          padding: const EdgeInsets.symmetric(horizontal: 9),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(9),
-                            color: brand.withValues(
-                              alpha: isDark ? 0.16 : 0.09,
-                            ),
-                          ),
-                          child: Center(
-                            child: Text(
-                              '+${enabledBlocks.length - 4}',
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w900,
-                                color: brand,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '${enabledBlocks.length} '
-                    '${enabledBlocks.length == 1 ? 'seção ativa' : 'seções ativas'} na home',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: secondary,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    ).animate().fadeIn(duration: 300.ms).moveY(begin: 8, end: 0, curve: Curves.easeOut);
-  }
-
-  Widget _previewLogo(BuildContext context, Color brand) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final logo = (_config!.branding.logoUrl ?? '').trim();
-    return Container(
-      width: 38,
-      height: 38,
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        color: brand.withValues(alpha: isDark ? 0.2 : 0.12),
-        border: Border.all(color: brand.withValues(alpha: 0.3)),
-      ),
-      child: logo.isNotEmpty
-          ? Image.network(
-              logo,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) =>
-                  Icon(LucideIcons.building2, size: 18, color: brand),
-            )
-          : Icon(LucideIcons.building2, size: 18, color: brand),
-    );
+  String _templateName(PublicSiteConfig cfg) {
+    for (final t in _templates) {
+      if (t.id == cfg.templateId) return t.name;
+    }
+    return _fallbackTemplateLabel(cfg.templateId);
   }
 
   String _fallbackTemplateLabel(String id) {
@@ -960,16 +729,740 @@ class _PublicSitePageState extends State<PublicSitePage> {
     }
   }
 
+  /// As três tintas que o site usa de verdade — mesma regra do web (Ato 03):
+  /// a cor escolhida no painel ou, sem escolha, a de fábrica do modelo.
+  List<_SitePaint> _paints(PublicSiteConfig cfg) {
+    final factoryPaints =
+        kPublicSiteFactoryPaints[cfg.templateId] ??
+        kPublicSiteFactoryPaints['classic']!;
+    _SitePaint paint(
+      String name,
+      String caption,
+      String? chosen,
+      String factoryHex,
+    ) {
+      final chosenColor = siteParseHexColor(chosen);
+      final hex = chosenColor != null ? chosen!.trim() : factoryHex;
+      return _SitePaint(
+        name: name,
+        caption: caption,
+        color:
+            chosenColor ??
+            siteParseHexColor(factoryHex) ??
+            _accentColor(context),
+        code: '#${hex.replaceFirst('#', '').toUpperCase()}',
+        isDefault: chosenColor == null,
+      );
+    }
+
+    return [
+      paint(
+        'Primária',
+        'botões e destaques',
+        cfg.branding.primaryColor,
+        factoryPaints.primary,
+      ),
+      paint(
+        'Secundária',
+        'fundos e apoios',
+        cfg.branding.secondaryColor,
+        factoryPaints.secondary,
+      ),
+      paint(
+        'Acento',
+        'detalhes e links',
+        cfg.branding.accentColor,
+        factoryPaints.accent,
+      ),
+    ];
+  }
+
+  // ─── Build ────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_canView) {
+      return const AppScaffold(
+        title: 'Meu Site',
+        showBottomNavigation: false,
+        body: SiteDeniedView(
+          message: 'Você não tem acesso à configuração do site.',
+          permissionLabel: PublicSiteAccess.permView,
+        ),
+      );
+    }
+    return AppScaffold(
+      title: 'Meu Site',
+      showBottomNavigation: false,
+      // LayoutBuilder FORA do RefreshIndicator (entre ele e a lista, crasha).
+      body: LayoutBuilder(
+        builder: (context, box) {
+          final sidePad = box.maxWidth > _kMaxContentWidth + _kPagePadH * 2
+              ? (box.maxWidth - _kMaxContentWidth) / 2
+              : _kPagePadH;
+          final dockBar = box.maxHeight >= _kDockMinHeight;
+          final compactHero =
+              MediaQuery.sizeOf(context).height < _kCompactHeroHeight;
+          final ready = !_loading && _error == null && _config != null;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: RefreshIndicator(
+                  color: _accentColor(context),
+                  onRefresh: () => _load(silent: true),
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    padding: EdgeInsets.zero,
+                    children: _loading
+                        ? [_buildPageSkeleton(context, sidePad)]
+                        : _error != null
+                        ? [
+                            Padding(
+                              padding: EdgeInsets.fromLTRB(
+                                sidePad,
+                                48,
+                                sidePad,
+                                _kPagePadBottom,
+                              ),
+                              child: SiteErrorState(
+                                message: _error!,
+                                statusCode: _errorStatus,
+                                onRetry: _load,
+                              ),
+                            ),
+                          ]
+                        : [
+                            Padding(
+                              padding: EdgeInsets.fromLTRB(
+                                sidePad,
+                                _kPagePadTop,
+                                sidePad,
+                                0,
+                              ),
+                              child: _buildBrowserHero(
+                                context,
+                                compact: compactHero,
+                              ),
+                            ),
+                            const SizedBox(height: _kSectionGap + 4),
+                            _buildTabsRail(context, sidePad),
+                            Padding(
+                              padding: EdgeInsets.fromLTRB(
+                                sidePad,
+                                _kSectionGap + 4,
+                                sidePad,
+                                _kPagePadBottom,
+                              ),
+                              child: _buildActivePanel(
+                                context,
+                                inlineSave: !dockBar,
+                              ),
+                            ),
+                          ],
+                  ),
+                ),
+              ),
+              if (ready && dockBar) _buildSaveBar(context, docked: true),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // ─── Alto: o site é o protagonista (moldura de navegador) ────────────────
+
+  Widget _buildBrowserHero(BuildContext context, {required bool compact}) {
+    final cfg = _config!;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final published = cfg.isPublished;
+    final url = cfg.bestPublicUrl;
+    final hasUrl = url != null;
+    final domain = (cfg.customDomain ?? '').trim();
+    final hasDomain = domain.isNotEmpty;
+    final address = hasDomain
+        ? domain
+        : (url != null ? _displayUrl(url) : null);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildBrowserFrame(
+          context,
+          address: address,
+          published: published,
+          compact: compact,
+        ),
+        const SizedBox(height: 12),
+        // Situação em selos (quebram de linha em vez de estourar) + abrir e
+        // copiar o endereço, sempre à mão em qualquer aba.
+        Row(
+          children: [
+            Expanded(
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  SiteMiniPill(
+                    label: published ? 'No ar' : 'Fora do ar',
+                    tone: published ? _green(context) : _amber(context),
+                    icon: published
+                        ? LucideIcons.circleCheckBig
+                        : LucideIcons.circleDashed,
+                  ),
+                  SiteMiniPill(
+                    label: hasDomain
+                        ? _domainStateTitle(cfg.domainStatus)
+                        : 'Sem domínio',
+                    tone: hasDomain
+                        ? _domainStatusColor(context, cfg.domainStatus)
+                        : secondary,
+                    icon: hasDomain
+                        ? _domainStateIcon(cfg.domainStatus)
+                        : LucideIcons.globe,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 4),
+            SiteRowAction(
+              icon: LucideIcons.externalLink,
+              tooltip: 'Abrir o site',
+              tone: _accentColor(context),
+              onTap: hasUrl ? _openSite : null,
+            ),
+            SiteRowAction(
+              icon: LucideIcons.copy,
+              tooltip: 'Copiar o endereço',
+              tone: secondary,
+              onTap: hasUrl ? _copyUrl : null,
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        _buildNextStep(context),
+      ],
+    );
+  }
+
+  /// Moldura de "navegador": três pontinhos NEUTROS (dizem "janela" sem
+  /// arco-íris) + campo de endereço com o domínio real; embaixo, o mini-site.
+  Widget _buildBrowserFrame(
+    BuildContext context, {
+    required String? address,
+    required bool published,
+    required bool compact,
+  }) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final hairline = siteHairline(context);
+    final secure = published && address != null;
+
+    Widget browserDot() => Container(
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(shape: BoxShape.circle, color: hairline),
+    );
+
+    final bar = Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      child: Row(
+        children: [
+          browserDot(),
+          const SizedBox(width: 5),
+          browserDot(),
+          const SizedBox(width: 5),
+          browserDot(),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: siteFieldFill(context),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    secure ? LucideIcons.lock : LucideIcons.globe,
+                    size: 12,
+                    color: secure
+                        ? siteInk(context, _green(context))
+                        : secondary,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      address ?? 'Endereço ainda não definido',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: address != null
+                            ? FontWeight.w800
+                            : FontWeight.w600,
+                        letterSpacing: -0.1,
+                        color: address != null
+                            ? ThemeHelpers.textColor(context)
+                            : secondary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    final frame = Container(
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: hairline),
+        boxShadow: ThemeHelpers.cardShadow(context),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          bar,
+          if (!compact) ...[
+            Divider(
+              height: 1,
+              thickness: 1,
+              color: ThemeHelpers.borderLightColor(context),
+            ),
+            _buildSitePreview(context),
+          ],
+        ],
+      ),
+    );
+    return frame
+        .animate()
+        .fadeIn(duration: 300.ms)
+        .moveY(begin: 8, end: 0, curve: Curves.easeOut);
+  }
+
+  /// Mini-site montado só com dados reais: logo, título, modelo, as três
+  /// tintas, a frase e o botão do banner e as seções ligadas.
+  Widget _buildSitePreview(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = _isDark(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final fill = siteFieldFill(context);
+    final cfg = _config!;
+    final paints = _paints(cfg);
+    final brand = paints.first.color;
+    final siteTitle = (cfg.seo.title ?? '').trim();
+    final tagline = (cfg.content.tagline ?? '').trim();
+    final cta = (cfg.content.ctaText ?? '').trim();
+    final enabledBlocks = _blocksDraft
+        .where((b) => b.enabled)
+        .toList(growable: false);
+
+    return Padding(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              _buildLogoBox(context, size: 40, brand: brand),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      siteTitle.isNotEmpty ? siteTitle : 'Seu site imobiliário',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.2,
+                        color: siteTitle.isNotEmpty
+                            ? ThemeHelpers.textColor(context)
+                            : secondary,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      'Modelo ${_templateName(cfg)}'
+                      '${cfg.premiumTemplateUnlocked ? ' · Premium' : ''}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: secondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              for (var i = 0; i < paints.length; i++)
+                Container(
+                  width: 14,
+                  height: 14,
+                  margin: EdgeInsets.only(left: i == 0 ? 0 : 4),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: paints[i].color,
+                    border: Border.all(color: siteHairline(context)),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // "Banner" do site — frase + botão na cor da marca, em tinta
+          // chapada (o degradê de antes era enfeite inventado).
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              color: brand.withValues(alpha: isDark ? 0.18 : 0.08),
+              border: Border.all(color: brand.withValues(alpha: 0.24)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    tagline.isNotEmpty
+                        ? tagline
+                        : 'Sua frase de destaque aparece aqui',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.1,
+                      height: 1.25,
+                      color: tagline.isNotEmpty
+                          ? ThemeHelpers.textColor(context)
+                          : secondary,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 120),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: brand,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      cta.isNotEmpty ? cta : 'Fale conosco',
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.1,
+                        color: siteOnColor(brand),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (enabledBlocks.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                for (var i = 0; i < enabledBlocks.length && i < 4; i++) ...[
+                  if (i > 0) const SizedBox(width: 6),
+                  Expanded(
+                    child: Tooltip(
+                      message: PublicSiteBlockCatalog.labelOf(
+                        enabledBlocks[i].type,
+                      ),
+                      child: Container(
+                        height: 30,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(9),
+                          color: fill,
+                        ),
+                        child: Icon(
+                          PublicSiteBlockCatalog.iconOf(enabledBlocks[i].type),
+                          size: 13,
+                          color: secondary,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+                if (enabledBlocks.length > 4) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    constraints: const BoxConstraints(minHeight: 30),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 6,
+                    ),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(9),
+                      color: fill,
+                    ),
+                    child: Text(
+                      '+${enabledBlocks.length - 4}',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w900,
+                        color: ThemeHelpers.textColor(context),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${enabledBlocks.length} '
+              '${enabledBlocks.length == 1 ? 'seção' : 'seções'} na página '
+              'inicial',
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+                color: secondary,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Logo numa caixa de tamanho FIXO: a imagem cabe inteira (contain, sem
+  /// cortar a marca); sem logo, o prédio em cinza sobre o tom da marca.
+  Widget _buildLogoBox(
+    BuildContext context, {
+    required double size,
+    required Color brand,
+  }) {
+    final isDark = _isDark(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final logo = (_config!.branding.logoUrl ?? '').trim();
+    final hasLogo = logo.isNotEmpty;
+    final placeholder = Icon(
+      LucideIcons.building2,
+      size: size * 0.45,
+      color: secondary,
+    );
+    return Container(
+      width: size,
+      height: size,
+      padding: EdgeInsets.all(hasLogo ? size * 0.1 : 0),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(size * 0.3),
+        color: hasLogo
+            ? ThemeHelpers.cardBackgroundColor(context)
+            : brand.withValues(alpha: isDark ? 0.2 : 0.1),
+        border: Border.all(
+          color: hasLogo ? siteHairline(context) : brand.withValues(alpha: 0.3),
+        ),
+      ),
+      child: hasLogo
+          ? Image.network(
+              logo,
+              fit: BoxFit.contain,
+              errorBuilder: (_, _, _) => placeholder,
+            )
+          : placeholder,
+    );
+  }
+
+  /// O passo que destrava o site agora — mesma ordem do "conselheiro" do
+  /// web: domínio → DNS → publicar → no ar.
+  _NextStep _nextStep(BuildContext context) {
+    final cfg = _config!;
+    final dns = _dns ?? PublicSiteDnsInstructions.fromJson(null);
+    final domain = (cfg.customDomain ?? '').trim();
+    void goDomain() => _openTab(_SiteTab.domain, reveal: true);
+
+    if (domain.isEmpty) {
+      return _NextStep(
+        icon: LucideIcons.globe,
+        tone: _amber(context),
+        title: 'Próximo passo: informe o domínio do site',
+        body:
+            'É o endereço em que os visitantes vão abrir o site (ex.: '
+            'www.suaimobiliaria.com.br).',
+        actionLabel: 'Configurar o domínio',
+        onAction: goDomain,
+      );
+    }
+    switch (cfg.domainStatus) {
+      case PublicSiteDomainStatus.pendingDns:
+        return _NextStep(
+          icon: LucideIcons.network,
+          tone: _amber(context),
+          title: 'Próximo passo: crie ${dns.recordsToCreateLabel}',
+          body:
+              'No painel de DNS do seu domínio. Depois, toque em "Verificar '
+              'DNS" — o domínio é ativado sozinho quando propagar.',
+          actionLabel: 'Ver como fazer',
+          onAction: goDomain,
+        );
+      case PublicSiteDomainStatus.pendingSsl:
+        return _NextStep(
+          icon: LucideIcons.hourglass,
+          tone: _blue(context),
+          title: 'Quase lá: emitindo o HTTPS do domínio',
+          body:
+              'O DNS já aponta para o site. O certificado sai em 1 a 5 '
+              'minutos — depois, toque em "Verificar DNS".',
+          actionLabel: 'Verificar o DNS',
+          onAction: goDomain,
+        );
+      case PublicSiteDomainStatus.pendingReview:
+        return _NextStep(
+          icon: LucideIcons.hourglass,
+          tone: _blue(context),
+          title: 'Domínio em revisão manual',
+          body:
+              'O DNS já aponta para o site; a liberação é feita pela equipe '
+              'de suporte. Você não precisa fazer nada agora.',
+          actionLabel: 'Ver o domínio',
+          onAction: goDomain,
+        );
+      case PublicSiteDomainStatus.failed:
+        return _NextStep(
+          icon: LucideIcons.circleAlert,
+          tone: _red(context),
+          title: 'O HTTPS do domínio não foi emitido',
+          body:
+              'O DNS está certo, mas o certificado não saiu no prazo. Toque em '
+              '"Verificar DNS" para tentar de novo.',
+          actionLabel: 'Resolver',
+          onAction: goDomain,
+        );
+      case PublicSiteDomainStatus.disabled:
+        return _NextStep(
+          icon: LucideIcons.circleX,
+          tone: _red(context),
+          title: 'Domínio desativado',
+          body:
+              'O site não responde neste domínio. Fale com o suporte para '
+              'reativar.',
+          actionLabel: 'Ver o domínio',
+          onAction: goDomain,
+        );
+      case PublicSiteDomainStatus.active:
+        break;
+    }
+    if (!cfg.isPublished) {
+      return _NextStep(
+        icon: LucideIcons.rocket,
+        tone: _green(context),
+        title: 'Tudo pronto — falta publicar',
+        body: _canManage
+            ? 'O domínio já está ativo. Visitantes só veem o site depois de '
+                  'publicado.'
+            : 'O domínio já está ativo. Peça a quem gerencia o site para '
+                  'publicar.',
+        actionLabel: _canManage ? 'Publicar o site' : null,
+        onAction: _canManage && !_publishing ? _togglePublish : null,
+      );
+    }
+    return _NextStep(
+      icon: LucideIcons.circleCheckBig,
+      tone: _green(context),
+      title: 'Site no ar em $domain',
+      body: 'Alterações salvas nas abas abaixo entram direto no site.',
+    );
+  }
+
+  Widget _buildNextStep(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = _isDark(context);
+    final step = _nextStep(context);
+    final ink = siteInk(context, step.tone);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: step.tone.withValues(alpha: isDark ? 0.12 : 0.07),
+        border: Border.all(
+          color: step.tone.withValues(alpha: isDark ? 0.32 : 0.28),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(step.icon, size: 18, color: ink),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  step.title,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: ThemeHelpers.textColor(context),
+                    letterSpacing: -0.2,
+                    height: 1.3,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  step.body,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    height: 1.4,
+                  ),
+                ),
+                if (step.actionLabel != null) ...[
+                  const SizedBox(height: 2),
+                  TextButton.icon(
+                    onPressed: step.onAction,
+                    iconAlignment: IconAlignment.end,
+                    style: TextButton.styleFrom(
+                      foregroundColor: ink,
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      minimumSize: const Size(44, 40),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    icon: const Icon(LucideIcons.arrowRight, size: 15),
+                    label: SiteButtonLabel(step.actionLabel!),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ─── Abas flush ───────────────────────────────────────────────────────────
 
-  Widget _buildTabsRail(BuildContext context) {
+  Widget _buildTabsRail(BuildContext context, double sidePad) {
     return Container(
+      key: _tabsKey,
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
         ),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: _kPagePadH - 8),
+      padding: EdgeInsets.symmetric(horizontal: sidePad - 8),
       child: Row(
         children: [
           for (final tab in _SiteTab.values)
@@ -979,7 +1472,11 @@ class _PublicSitePageState extends State<PublicSitePage> {
                 label: _tabLabel(tab),
                 tone: _tone(context, tab),
                 selected: _activeTab == tab,
-                onTap: () => setState(() => _activeTab = tab),
+                // Ponto âmbar estático: rascunho não salvo nesta aba.
+                dirty:
+                    (tab == _SiteTab.sections && _blocksDirty) ||
+                    (tab == _SiteTab.content && _contentDirty),
+                onTap: () => _openTab(tab),
               ),
             ),
         ],
@@ -1000,14 +1497,16 @@ class _PublicSitePageState extends State<PublicSitePage> {
     }
   }
 
+  /// Rótulos curtos: 4 abas em 320dp com fonte a 130% sem encolher até
+  /// ficar ilegível ("Visão geral" virava ~8px).
   String _tabLabel(_SiteTab tab) {
     switch (tab) {
       case _SiteTab.overview:
-        return 'Visão geral';
+        return 'Resumo';
       case _SiteTab.sections:
         return 'Seções';
       case _SiteTab.content:
-        return 'Conteúdo';
+        return 'Textos';
       case _SiteTab.domain:
         return 'Domínio';
     }
@@ -1015,17 +1514,17 @@ class _PublicSitePageState extends State<PublicSitePage> {
 
   // ─── Painéis ──────────────────────────────────────────────────────────────
 
-  Widget _buildActivePanel(BuildContext context) {
+  Widget _buildActivePanel(BuildContext context, {required bool inlineSave}) {
     final Widget child;
     switch (_activeTab) {
       case _SiteTab.overview:
         child = _buildOverviewPanel(context);
         break;
       case _SiteTab.sections:
-        child = _buildSectionsPanel(context);
+        child = _buildSectionsPanel(context, inlineSave: inlineSave);
         break;
       case _SiteTab.content:
-        child = _buildContentPanel(context);
+        child = _buildContentPanel(context, inlineSave: inlineSave);
         break;
       case _SiteTab.domain:
         child = _buildDomainPanel(context);
@@ -1042,27 +1541,34 @@ class _PublicSitePageState extends State<PublicSitePage> {
       case _SiteTab.overview:
         return (
           icon: LucideIcons.panelsTopLeft,
-          title: 'Status do seu site',
-          hint: 'Publicação, endereço e um resumo do que está configurado.',
+          title: 'Resumo do site',
+          hint:
+              'Se está no ar, o que falta para ir ao ar e como o site se '
+              'apresenta.',
         );
       case _SiteTab.sections:
         return (
           icon: LucideIcons.layoutList,
-          title: 'Monte a página inicial',
+          title: 'Seções da página inicial',
           hint:
-              'Ative, desative e reordene os blocos que aparecem no seu site.',
+              'O que aparece na página inicial e em que ordem — de cima para '
+              'baixo, como no site.',
         );
       case _SiteTab.content:
         return (
           icon: LucideIcons.penLine,
           title: 'Textos e contato',
-          hint: 'O que os visitantes leem — e como o Google encontra o site.',
+          hint:
+              'O que o visitante lê, como fala com você e como o site aparece '
+              'no Google.',
         );
       case _SiteTab.domain:
         return (
           icon: LucideIcons.globe,
           title: 'Endereço do site',
-          hint: 'Aponte o seu domínio com os registros DNS e ative automaticamente.',
+          hint:
+              'Use o seu domínio em 3 passos: informe, crie os registros no '
+              'provedor e verifique.',
         );
     }
   }
@@ -1078,340 +1584,669 @@ class _PublicSitePageState extends State<PublicSitePage> {
           hint: meta.hint,
           tone: _tone(context, tab),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 16),
         ...body,
       ],
     );
   }
 
-  // ── Visão geral ──
+  /// Barra de salvar da aba aberta (Seções ou Textos); nas outras, nada.
+  Widget _buildSaveBar(BuildContext context, {required bool docked}) {
+    const maxWidth = _kMaxContentWidth + _kPagePadH * 2;
+    switch (_activeTab) {
+      case _SiteTab.sections:
+        return SiteSaveBar(
+          docked: docked,
+          maxContentWidth: maxWidth,
+          visible: _canManage && _blocksDirty,
+          saving: _blocksSaving,
+          label: 'Salvar seções',
+          pendingText: 'Seções alteradas — o site só muda depois de salvar.',
+          onSave: _saveBlocks,
+          onDiscard: _discardBlocks,
+        );
+      case _SiteTab.content:
+        return SiteSaveBar(
+          docked: docked,
+          maxContentWidth: maxWidth,
+          visible: _canManage && _contentDirty,
+          saving: _contentSaving,
+          label: 'Salvar textos',
+          pendingText: 'Textos alterados — o site só muda depois de salvar.',
+          onSave: _saveContent,
+          onDiscard: _discardContent,
+        );
+      case _SiteTab.overview:
+      case _SiteTab.domain:
+        return const SizedBox.shrink();
+    }
+  }
+
+  // ── Resumo ──
 
   Widget _buildOverviewPanel(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final cfg = _config!;
-    final emerald = isDark
-        ? AppColors.status.greenDarkMode
-        : AppColors.status.green;
-    final amber = isDark
-        ? AppColors.status.warningDarkMode
-        : AppColors.status.warning;
-    final danger = isDark
-        ? AppColors.status.errorDarkMode
-        : AppColors.status.error;
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final statusTone = cfg.isPublished ? emerald : amber;
-    final domainTone = _domainStatusColor(context, cfg.domainStatus);
-    final dateFmt = DateFormat("dd/MM/yyyy 'às' HH:mm", 'pt_BR');
-    final url = cfg.bestPublicUrl;
-
     return _panelShell(context, _SiteTab.overview, [
-      // Card de publicação — ação principal no próprio card.
-      Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: statusTone.withValues(alpha: isDark ? 0.12 : 0.07),
-          border: Border.all(color: statusTone.withValues(alpha: 0.25)),
+      _buildPublishCard(context),
+      const SizedBox(height: 22),
+      _buildReadiness(context),
+      const SizedBox(height: 22),
+      _buildIdentity(context),
+    ]);
+  }
+
+  /// Publicação: a situação em manchete e a ação principal no próprio
+  /// cartão (sem permissão, travada com o cadeado e o motivo).
+  Widget _buildPublishCard(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = _isDark(context);
+    final cfg = _config!;
+    final published = cfg.isPublished;
+    final tone = published ? _green(context) : _amber(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final dateFmt = DateFormat("dd/MM/yyyy 'às' HH:mm", 'pt_BR');
+
+    final String body;
+    if (published) {
+      body = cfg.publishedAt != null
+          ? 'Publicado em ${dateFmt.format(cfg.publishedAt!.toLocal())}. '
+                'Alterações salvas entram direto no site.'
+          : 'Visível para qualquer visitante. Alterações salvas entram '
+                'direto no site.';
+    } else {
+      body =
+          'Publique quando o DNS estiver ativo — visitantes só veem o site '
+          'depois de publicado.';
+    }
+
+    Widget spinner(Color color) => SizedBox(
+      width: 15,
+      height: 15,
+      child: CircularProgressIndicator(strokeWidth: 2, color: color),
+    );
+
+    final Widget action;
+    if (!_canManage) {
+      action = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          OutlinedButton.icon(
+            onPressed: null,
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: ThemeHelpers.borderColor(context)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+            ),
+            icon: const Icon(LucideIcons.lock, size: 16),
+            label: SiteButtonLabel(
+              published ? 'Tirar o site do ar' : 'Publicar site',
+            ),
+          ),
+          const SizedBox(height: 8),
+          const SiteReadOnlyNotice(
+            dense: true,
+            text:
+                'Quem publica ou tira o site do ar é quem tem a permissão '
+                '“Gerenciar o Meu Site e o Link in Bio”.',
+          ),
+        ],
+      );
+    } else if (published) {
+      // Tirar do ar é destrutivo mas raro: vermelho VAZADO aqui; a
+      // confirmação tem o vermelho cheio com texto branco.
+      final red = _red(context);
+      action = OutlinedButton.icon(
+        onPressed: _publishing ? null : _togglePublish,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: siteInk(context, red),
+          side: BorderSide(color: red.withValues(alpha: 0.5)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  cfg.isPublished
+        icon: _publishing
+            ? spinner(siteInk(context, red))
+            : const Icon(LucideIcons.cloudOff, size: 17),
+        label: SiteButtonLabel(_publishing ? 'Aguarde…' : 'Tirar o site do ar'),
+      );
+    } else {
+      // Publicar = confirmar → verde, escurecido até o branco passar de
+      // 4,5:1 nos dois temas.
+      final solid = siteSolid(_green(context));
+      action = FilledButton.icon(
+        onPressed: _publishing ? null : _togglePublish,
+        style: FilledButton.styleFrom(
+          backgroundColor: solid,
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: solid.withValues(alpha: 0.6),
+          disabledForegroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        ),
+        icon: _publishing
+            ? spinner(Colors.white)
+            : const Icon(LucideIcons.rocket, size: 17),
+        label: SiteButtonLabel(_publishing ? 'Publicando…' : 'Publicar site'),
+      );
+    }
+
+    return SiteCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Selo em caixa FIXA; o texto ao lado é que quebra.
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(13),
+                  color: tone.withValues(alpha: isDark ? 0.18 : 0.1),
+                  border: Border.all(color: tone.withValues(alpha: 0.3)),
+                ),
+                child: Icon(
+                  published
                       ? LucideIcons.circleCheckBig
                       : LucideIcons.circleDashed,
-                  size: 18,
-                  color: statusTone,
+                  size: 21,
+                  color: siteInk(context, tone),
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  cfg.isPublished ? 'SITE PUBLICADO' : 'SITE EM RASCUNHO',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: statusTone,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.4,
-                    fontSize: 10.5,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              cfg.isPublished
-                  ? (cfg.publishedAt != null
-                        ? 'Publicado em ${dateFmt.format(cfg.publishedAt!.toLocal())}.'
-                        : 'Seu site está visível para qualquer visitante.')
-                  : 'Quando estiver satisfeito com as seções, conteúdo e '
-                        'domínio, publique para colocar o site no ar.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: secondary,
-                height: 1.4,
               ),
-            ),
-            if (_canManage) ...[
-              const SizedBox(height: 14),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _publishing ? null : _togglePublish,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: cfg.isPublished ? danger : emerald,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      published
+                          ? 'Seu site está no ar'
+                          : 'Seu site está fora do ar',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: ThemeHelpers.textColor(context),
+                        letterSpacing: -0.3,
+                        height: 1.25,
+                      ),
                     ),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                  icon: _publishing
-                      ? const SizedBox(
-                          width: 15,
-                          height: 15,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : Icon(
-                          cfg.isPublished
-                              ? LucideIcons.cloudOff
-                              : LucideIcons.rocket,
-                          size: 17,
-                        ),
-                  label: Text(
-                    _publishing
-                        ? 'Aguarde…'
-                        : (cfg.isPublished
-                              ? 'Despublicar site'
-                              : 'Publicar site'),
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
+                    const SizedBox(height: 3),
+                    Text(
+                      body,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: secondary,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
-          ],
-        ),
-      ),
-      const SizedBox(height: 14),
-      SiteCard(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        child: Column(
-          children: [
-            SiteInfoRow(
-              icon: LucideIcons.link,
-              label: 'URL pública',
-              value: url ?? 'Defina um domínio para gerar a URL',
-              valueTone: url == null ? secondary : null,
-              actions: [
-                SiteRowAction(
-                  icon: LucideIcons.copy,
-                  tooltip: 'Copiar URL',
-                  tone: _accentColor(context),
-                  onTap: url == null ? null : _copyUrl,
-                ),
-                SiteRowAction(
-                  icon: LucideIcons.externalLink,
-                  tooltip: 'Abrir site',
-                  tone: _accentColor(context),
-                  onTap: url == null ? null : _openSite,
-                ),
-              ],
-            ),
-            Divider(height: 1, color: ThemeHelpers.borderLightColor(context)),
-            SiteInfoRow(
-              icon: LucideIcons.globe,
-              label: 'Domínio próprio',
-              value: (cfg.customDomain ?? '').trim().isNotEmpty
-                  ? cfg.customDomain!.trim()
-                  : 'Não configurado',
-              valueTone: (cfg.customDomain ?? '').trim().isNotEmpty
-                  ? null
-                  : secondary,
-              actions: [
-                if ((cfg.customDomain ?? '').trim().isNotEmpty)
-                  SiteMiniPill(
-                    label: cfg.domainStatus.label,
-                    tone: domainTone,
-                    icon: cfg.domainStatus == PublicSiteDomainStatus.active
-                        ? LucideIcons.check
-                        : LucideIcons.clock3,
-                  ),
-              ],
-            ),
-            Divider(height: 1, color: ThemeHelpers.borderLightColor(context)),
-            SiteInfoRow(
-              icon: LucideIcons.paintbrush,
-              label: 'Template',
-              value:
-                  _templates
-                      .where((t) => t.id == cfg.templateId)
-                      .map((t) => t.name)
-                      .firstOrNull ??
-                  _fallbackTemplateLabel(cfg.templateId),
-              actions: [
-                if (cfg.templateId == 'premium')
-                  SiteMiniPill(
-                    label: 'Premium',
-                    tone: isDark
-                        ? AppColors.status.warningDarkMode
-                        : AppColors.status.warning,
-                    icon: LucideIcons.star,
-                  ),
-              ],
-            ),
-          ],
-        ),
-      ),
-      const SizedBox(height: 14),
-      // Nota de escopo mobile — template e preview completos ficam no painel.
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(LucideIcons.info, size: 14, color: secondary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'A troca de template e o preview ao vivo ficam no painel web — '
-              'aqui você acompanha o status e ajusta seções, conteúdo e domínio.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: secondary,
-                height: 1.4,
-              ),
-            ),
           ),
+          const SizedBox(height: 14),
+          action,
         ],
       ),
-    ]);
+    );
+  }
+
+  /// "O que falta para ir ao ar" — os mesmos itens da prontidão do web
+  /// (domínio, DNS, seções, identidade) mais os textos que o app edita. Cada
+  /// item que se resolve numa aba leva até ela.
+  Widget _buildReadiness(BuildContext context) {
+    final cfg = _config!;
+    final dns = _dns ?? PublicSiteDnsInstructions.fromJson(null);
+    final domain = (cfg.customDomain ?? '').trim();
+    final hasDomain = domain.isNotEmpty;
+    final blocks = cfg.editorHomeBlocks;
+    final blocksOn = blocks.where((b) => b.enabled).length;
+    final hasTagline = (cfg.content.tagline ?? '').trim().isNotEmpty;
+    final hasContact = [
+      cfg.content.whatsapp,
+      cfg.content.phone,
+      cfg.content.email,
+    ].any((v) => (v ?? '').trim().isNotEmpty);
+    final hasLogo = (cfg.branding.logoUrl ?? '').trim().isNotEmpty;
+
+    final SiteCheckState dnsState;
+    final String dnsValue;
+    if (!hasDomain) {
+      dnsState = SiteCheckState.missing;
+      dnsValue = 'Vem depois do domínio';
+    } else {
+      switch (cfg.domainStatus) {
+        case PublicSiteDomainStatus.active:
+          dnsState = SiteCheckState.done;
+          dnsValue = 'Ativo — o site responde no domínio';
+        case PublicSiteDomainStatus.pendingDns:
+          dnsState = SiteCheckState.missing;
+          dnsValue = 'Crie ${dns.recordsToCreateLabel} e verifique';
+        case PublicSiteDomainStatus.pendingSsl:
+          dnsState = SiteCheckState.waiting;
+          dnsValue = 'DNS certo — emitindo o HTTPS';
+        case PublicSiteDomainStatus.pendingReview:
+          dnsState = SiteCheckState.waiting;
+          dnsValue = 'DNS certo — em revisão manual';
+        case PublicSiteDomainStatus.failed:
+          dnsState = SiteCheckState.problem;
+          dnsValue = 'O HTTPS não foi emitido — verifique de novo';
+        case PublicSiteDomainStatus.disabled:
+          dnsState = SiteCheckState.problem;
+          dnsValue = 'Domínio desativado';
+      }
+    }
+
+    final missingTexts = [
+      if (!hasTagline) 'a frase de destaque',
+      if (!hasContact) 'um contato (WhatsApp, telefone ou e-mail)',
+    ];
+
+    final rows = <_CheckItem>[
+      (
+        label: 'Domínio',
+        value: hasDomain ? domain : 'Não configurado',
+        state: hasDomain ? SiteCheckState.done : SiteCheckState.missing,
+        tab: _SiteTab.domain,
+      ),
+      (
+        label: 'DNS do domínio',
+        value: dnsValue,
+        state: dnsState,
+        tab: _SiteTab.domain,
+      ),
+      (
+        label: 'Seções da página inicial',
+        value: blocksOn > 0
+            ? '$blocksOn de ${blocks.length} ligadas'
+            : 'Nenhuma seção ligada',
+        state: blocksOn > 0 ? SiteCheckState.done : SiteCheckState.missing,
+        tab: _SiteTab.sections,
+      ),
+      (
+        label: 'Textos e contato',
+        value: missingTexts.isEmpty
+            ? 'Frase de destaque e contato preenchidos'
+            : 'Falta ${missingTexts.join(' e ')}',
+        state: missingTexts.isEmpty
+            ? SiteCheckState.done
+            : SiteCheckState.missing,
+        tab: _SiteTab.content,
+      ),
+      (
+        label: 'Logo',
+        value: hasLogo ? 'Enviada' : 'Sem logo',
+        state: hasLogo ? SiteCheckState.done : SiteCheckState.missing,
+        tab: null,
+      ),
+    ];
+    final done = rows.where((r) => r.state == SiteCheckState.done).length;
+    final allDone = done == rows.length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SiteSubsectionHeader(
+          label: 'O que falta para ir ao ar',
+          icon: LucideIcons.listChecks,
+          hint: 'Os itens com seta levam direto até onde se resolvem.',
+          trailing: Text(
+            allDone ? 'Tudo pronto' : '$done de ${rows.length} prontos',
+            maxLines: 2,
+            textAlign: TextAlign.end,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w900,
+              color: allDone
+                  ? siteInk(context, _green(context))
+                  : ThemeHelpers.textSecondaryColor(context),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SiteCard(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          child: Column(
+            children: [
+              for (var i = 0; i < rows.length; i++)
+                SiteCheckRow(
+                  label: rows[i].label,
+                  value: rows[i].value,
+                  state: rows[i].state,
+                  divider: i < rows.length - 1,
+                  onTap: rows[i].tab == null
+                      ? null
+                      : () => _openTab(rows[i].tab!, reveal: true),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Identidade visual (só leitura no app): logo e tintas em caixas de
+  /// tamanho FIXO — o texto ao lado encolhe, a amostra nunca é espremida.
+  Widget _buildIdentity(BuildContext context) {
+    final theme = Theme.of(context);
+    final cfg = _config!;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final paints = _paints(cfg);
+    final hasLogo = (cfg.branding.logoUrl ?? '').trim().isNotEmpty;
+    final divider = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Divider(height: 1, color: ThemeHelpers.borderLightColor(context)),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SiteSubsectionHeader(
+          label: 'Identidade visual',
+          icon: LucideIcons.palette,
+          hint:
+              'Como o site se apresenta: a logo e as três cores da marca, do '
+              'jeito que aparecem para o visitante.',
+        ),
+        const SizedBox(height: 10),
+        SiteCard(
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  _buildLogoBox(context, size: 56, brand: paints.first.color),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Logo',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: ThemeHelpers.textColor(context),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          hasLogo
+                              ? 'Enviada — aparece no cabeçalho do site.'
+                              : 'Nenhuma logo enviada ainda.',
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: secondary,
+                            height: 1.35,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              divider,
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final scale = siteTextScale(context);
+                  final tiles = [
+                    for (final p in paints)
+                      SiteSwatchTile(
+                        label: p.name,
+                        caption: p.caption,
+                        color: p.color,
+                        code: p.code,
+                        isDefault: p.isDefault,
+                      ),
+                  ];
+                  // Três lado a lado só quando cada amostra tem espaço para
+                  // o nome e o código inteiros; senão, uma embaixo da outra.
+                  if (constraints.maxWidth >= 3 * 190 * scale + 20) {
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: tiles[0]),
+                        const SizedBox(width: 10),
+                        Expanded(child: tiles[1]),
+                        const SizedBox(width: 10),
+                        Expanded(child: tiles[2]),
+                      ],
+                    );
+                  }
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      tiles[0],
+                      const SizedBox(height: 10),
+                      tiles[1],
+                      const SizedBox(height: 10),
+                      tiles[2],
+                    ],
+                  );
+                },
+              ),
+              divider,
+              Row(
+                children: [
+                  Icon(LucideIcons.paintbrush, size: 15, color: secondary),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: 'Modelo ',
+                            style: TextStyle(
+                              color: secondary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          TextSpan(
+                            text: _templateName(cfg),
+                            style: TextStyle(
+                              color: ThemeHelpers.textColor(context),
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ),
+                  if (cfg.templateId == 'premium') ...[
+                    const SizedBox(width: 8),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 110),
+                      child: SiteMiniPill(
+                        label: 'Premium',
+                        tone: _amber(context),
+                        icon: LucideIcons.star,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 12),
+              _noteLine(
+                context,
+                LucideIcons.info,
+                'Por enquanto, logo, cores e modelo mudam só pelo painel web — '
+                'lá também fica a prévia ao vivo do site.',
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
   // ── Seções ──
 
-  Widget _buildSectionsPanel(BuildContext context) {
+  Widget _buildSectionsPanel(BuildContext context, {required bool inlineSave}) {
+    final theme = Theme.of(context);
     final tone = _tone(context, _SiteTab.sections);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final theme = Theme.of(context);
 
     if (_blocksDraft.isEmpty) {
       return _panelShell(context, _SiteTab.sections, [
         SiteEmptyState(
           icon: LucideIcons.layoutList,
-          title: 'Sem seções configuradas',
+          title: 'Nenhuma seção por aqui',
           body:
-              'As seções padrão do template aparecem aqui assim que o site '
-              'for configurado no painel.',
+              'As seções padrão do modelo aparecem aqui assim que o site for '
+              'configurado. Puxe a tela para baixo para atualizar.',
           tone: tone,
         ),
       ]);
     }
 
+    final total = _blocksDraft.length;
+    final on = _blocksDraft.where((b) => b.enabled).length;
+
     return _panelShell(context, _SiteTab.sections, [
-      if (!_canManage)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: _readOnlyNotice(context),
-        ),
-      ReorderableListView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        buildDefaultDragHandles: false,
-        itemCount: _blocksDraft.length,
-        proxyDecorator: (child, index, animation) =>
-            Material(color: Colors.transparent, child: child),
-        onReorder: !_canManage
-            ? (_, __) {}
-            : (oldIndex, newIndex) {
-                setState(() {
-                  if (newIndex > oldIndex) newIndex -= 1;
-                  final item = _blocksDraft.removeAt(oldIndex);
-                  _blocksDraft.insert(newIndex, item);
-                  _blocksDirty = true;
-                });
-              },
-        itemBuilder: (context, index) {
-          final block = _blocksDraft[index];
-          return Padding(
-            key: ValueKey('block-${block.id}'),
-            padding: const EdgeInsets.only(bottom: 8),
-            child: _buildBlockTile(context, block, index, tone),
-          );
-        },
-      ),
-      Padding(
-        padding: const EdgeInsets.only(top: 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      if (!_canManage) ...[
+        const SiteReadOnlyNotice(text: _readOnlyText),
+        const SizedBox(height: 14),
+      ],
+      // O número que importa em destaque, com o rótulo curto ao lado.
+      Text.rich(
+        TextSpan(
           children: [
-            Icon(LucideIcons.gripVertical, size: 13, color: secondary),
-            const SizedBox(width: 7),
-            Expanded(
-              child: Text(
-                'Arraste pela alça para reordenar. A ordem daqui é a ordem '
-                'da página inicial do site.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: secondary,
-                  height: 1.35,
-                  fontSize: 11.5,
-                ),
+            TextSpan(
+              text: '$on',
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                color: ThemeHelpers.textColor(context),
+                letterSpacing: -0.5,
+                height: 1.1,
+              ),
+            ),
+            TextSpan(
+              text:
+                  ' de $total ${total == 1 ? 'seção' : 'seções'} '
+                  '${on == 1 ? 'aparece' : 'aparecem'} no site',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: secondary,
               ),
             ),
           ],
         ),
       ),
-      SiteSaveBar(
-        visible: _canManage && _blocksDirty,
-        saving: _blocksSaving,
-        label: 'Salvar seções',
-        onSave: _saveBlocks,
-        onDiscard: () {
-          setState(() {
-            _blocksDraft = List.of(_config!.editorHomeBlocks);
-            _blocksDirty = false;
-          });
-        },
+      const SizedBox(height: 4),
+      Text(
+        _canManage
+            ? 'Ligue ou desligue cada seção e arraste pela alça para mudar a '
+                  'ordem.'
+            : 'A ordem abaixo é a ordem da página inicial.',
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: secondary,
+          height: 1.4,
+        ),
       ),
+      const SizedBox(height: 12),
+      SiteCard(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: ReorderableListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          buildDefaultDragHandles: false,
+          itemCount: _blocksDraft.length,
+          // A linha arrastada ganha o fundo do cartão e o filete — sem isso
+          // ela "flutuava" transparente sobre as outras.
+          proxyDecorator: (child, index, animation) => Material(
+            color: Colors.transparent,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: ThemeHelpers.cardBackgroundColor(context),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: siteHairline(context)),
+                boxShadow: ThemeHelpers.cardShadow(context, strength: 2),
+              ),
+              child: child,
+            ),
+          ),
+          onReorder: !_canManage
+              ? (_, _) {}
+              : (oldIndex, newIndex) {
+                  setState(() {
+                    if (newIndex > oldIndex) newIndex -= 1;
+                    final item = _blocksDraft.removeAt(oldIndex);
+                    _blocksDraft.insert(newIndex, item);
+                    _blocksDirty = true;
+                  });
+                },
+          itemBuilder: (context, index) {
+            final block = _blocksDraft[index];
+            final position = block.enabled
+                ? _blocksDraft.take(index).where((b) => b.enabled).length + 1
+                : 0;
+            return KeyedSubtree(
+              key: ValueKey('block-${block.id}'),
+              child: _buildBlockRow(
+                context,
+                block,
+                index,
+                position: position,
+                tone: tone,
+                last: index == _blocksDraft.length - 1,
+              ),
+            );
+          },
+        ),
+      ),
+      if (inlineSave) _buildSaveBar(context, docked: false),
     ]);
   }
 
-  Widget _buildBlockTile(
+  /// Linha flush de uma seção: alça, ícone, nome, "3ª na página · o que
+  /// mostra" e a chave verde (ligada = aparece no site).
+  Widget _buildBlockRow(
     BuildContext context,
     PublicSiteHomeBlock block,
-    int index,
-    Color tone,
-  ) {
+    int index, {
+    required int position,
+    required Color tone,
+    required bool last,
+  }) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final isDark = _isDark(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final enabled = block.enabled;
-    final fg = enabled ? tone : secondary.withValues(alpha: 0.7);
+    final description = PublicSiteBlockCatalog.descriptionOf(block.type);
+    final where = enabled ? '$positionª na página' : 'Fora da página';
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(6, 10, 12, 10),
-      decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: enabled
-              ? tone.withValues(alpha: isDark ? 0.28 : 0.2)
-              : (isDark
-                    ? Colors.white.withValues(alpha: 0.06)
-                    : Colors.black.withValues(alpha: 0.05)),
-        ),
-        boxShadow: ThemeHelpers.cardShadow(context, strength: 0.7),
-      ),
+      padding: const EdgeInsets.fromLTRB(0, 10, 10, 10),
+      decoration: last
+          ? null
+          : BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: ThemeHelpers.borderLightColor(context),
+                ),
+              ),
+            ),
       child: Row(
         children: [
           ReorderableDragStartListener(
             index: index,
             enabled: _canManage,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
               child: Icon(
                 LucideIcons.gripVertical,
-                size: 16,
-                color: secondary.withValues(alpha: _canManage ? 0.7 : 0.3),
+                size: 18,
+                color: secondary.withValues(alpha: _canManage ? 0.85 : 0.3),
+                semanticLabel: _canManage
+                    ? 'Arrastar para mudar a ordem'
+                    : null,
               ),
             ),
           ),
@@ -1420,37 +2255,45 @@ class _PublicSitePageState extends State<PublicSitePage> {
             height: 36,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(11),
-              color: fg.withValues(alpha: isDark ? 0.16 : 0.1),
+              color: (enabled ? tone : secondary).withValues(
+                alpha: isDark ? 0.16 : 0.1,
+              ),
             ),
             child: Icon(
               PublicSiteBlockCatalog.iconOf(block.type),
               size: 17,
-              color: fg,
+              color: enabled
+                  ? siteInk(context, tone)
+                  : secondary.withValues(alpha: 0.75),
             ),
           ),
-          const SizedBox(width: 11),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   PublicSiteBlockCatalog.labelOf(block.type),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w800,
                     color: enabled
                         ? ThemeHelpers.textColor(context)
                         : secondary,
                     letterSpacing: -0.1,
+                    height: 1.25,
                   ),
                 ),
-                const SizedBox(height: 1),
+                const SizedBox(height: 2),
                 Text(
-                  PublicSiteBlockCatalog.descriptionOf(block.type),
-                  maxLines: 1,
+                  description.isEmpty ? where : '$where · $description',
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: secondary,
                     fontSize: 11.5,
+                    height: 1.35,
                   ),
                 ),
               ],
@@ -1459,7 +2302,8 @@ class _PublicSitePageState extends State<PublicSitePage> {
           const SizedBox(width: 8),
           Switch.adaptive(
             value: enabled,
-            activeColor: tone,
+            activeTrackColor: siteSolid(_green(context)),
+            activeThumbColor: Colors.white,
             onChanged: !_canManage
                 ? null
                 : (v) {
@@ -1474,29 +2318,45 @@ class _PublicSitePageState extends State<PublicSitePage> {
     );
   }
 
-  // ── Conteúdo & SEO ──
+  // ── Textos, contato e Google ──
 
-  Widget _buildContentPanel(BuildContext context) {
+  Widget _buildContentPanel(BuildContext context, {required bool inlineSave}) {
     void markDirty(String _) {
       if (!_contentDirty) setState(() => _contentDirty = true);
     }
 
+    // Título e descrição alimentam a prévia do Google: redesenha a cada letra.
+    void markDirtyLive(String _) => setState(() => _contentDirty = true);
+
     return _panelShell(context, _SiteTab.content, [
-      if (!_canManage)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: _readOnlyNotice(context),
-        ),
+      if (!_canManage) ...[
+        const SiteReadOnlyNotice(text: _readOnlyText),
+        const SizedBox(height: 16),
+      ],
       const SiteSubsectionHeader(
         label: 'Apresentação',
         icon: LucideIcons.sparkles,
+        hint:
+            'O que o visitante lê primeiro: a frase do banner, o botão de '
+            'contato e o texto "Sobre nós".',
       ),
       const SizedBox(height: 12),
       SiteFilledField(
         controller: _taglineController,
-        label: 'Frase de destaque (tagline)',
+        label: 'Frase de destaque',
         hint: 'Encontre o imóvel dos seus sonhos',
         icon: LucideIcons.sparkles,
+        helperText: 'A frase grande do banner, no alto da página.',
+        enabled: _canManage,
+        onChanged: markDirty,
+      ),
+      const SizedBox(height: 12),
+      SiteFilledField(
+        controller: _ctaController,
+        label: 'Texto do botão de contato',
+        hint: 'Fale com um corretor',
+        icon: LucideIcons.megaphone,
+        helperText: 'O botão principal do banner e da chamada final.',
         enabled: _canManage,
         onChanged: markDirty,
       ),
@@ -1506,48 +2366,40 @@ class _PublicSitePageState extends State<PublicSitePage> {
         label: 'Sobre a imobiliária',
         hint: 'Conte a história e os diferenciais da empresa…',
         maxLines: 4,
+        helperText: 'Aparece na seção "Sobre nós".',
         enabled: _canManage,
         onChanged: markDirty,
       ),
-      const SizedBox(height: 12),
-      SiteFilledField(
-        controller: _ctaController,
-        label: 'Texto do botão de contato (CTA)',
-        hint: 'Fale com um corretor',
-        icon: LucideIcons.megaphone,
-        enabled: _canManage,
-        onChanged: markDirty,
+      const SizedBox(height: 24),
+      const SiteSubsectionHeader(
+        label: 'Contato',
+        icon: LucideIcons.phone,
+        hint: 'Por onde o visitante fala com você. Deixe vazio o que não usa.',
       ),
-      const SizedBox(height: 18),
-      const SiteSubsectionHeader(label: 'Contato', icon: LucideIcons.phone),
       const SizedBox(height: 12),
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: SiteFilledField(
-              controller: _whatsappController,
-              label: 'WhatsApp',
-              hint: '(11) 99999-9999',
-              icon: LucideIcons.messageCircle,
-              keyboardType: TextInputType.phone,
-              enabled: _canManage,
-              onChanged: markDirty,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: SiteFilledField(
-              controller: _phoneController,
-              label: 'Telefone',
-              hint: '(11) 3333-3333',
-              icon: LucideIcons.phone,
-              keyboardType: TextInputType.phone,
-              enabled: _canManage,
-              onChanged: markDirty,
-            ),
-          ),
-        ],
+      // Lado a lado só com ~120dp úteis para "(11) 99999-9999" em cada
+      // campo (ícone + recuo comem ~60): a 360dp eles empilham em vez de o
+      // número rolar escondido.
+      SiteRow2(
+        minColumnWidth: 176,
+        left: SiteFilledField(
+          controller: _whatsappController,
+          label: 'WhatsApp',
+          hint: '(11) 99999-9999',
+          icon: LucideIcons.messageCircle,
+          keyboardType: TextInputType.phone,
+          enabled: _canManage,
+          onChanged: markDirty,
+        ),
+        right: SiteFilledField(
+          controller: _phoneController,
+          label: 'Telefone',
+          hint: '(11) 3333-3333',
+          icon: LucideIcons.phone,
+          keyboardType: TextInputType.phone,
+          enabled: _canManage,
+          onChanged: markDirty,
+        ),
       ),
       const SizedBox(height: 12),
       SiteFilledField(
@@ -1556,262 +2408,329 @@ class _PublicSitePageState extends State<PublicSitePage> {
         hint: 'contato@suaimobiliaria.com.br',
         icon: LucideIcons.mail,
         keyboardType: TextInputType.emailAddress,
+        errorText: _emailError,
         enabled: _canManage,
-        onChanged: markDirty,
+        onChanged: (v) {
+          markDirty(v);
+          if (_emailError != null) setState(() => _emailError = null);
+        },
       ),
-      const SizedBox(height: 18),
+      const SizedBox(height: 24),
       const SiteSubsectionHeader(
-        label: 'SEO · Google',
+        label: 'Google (busca)',
         icon: LucideIcons.search,
+        hint:
+            'Como o site aparece nos resultados do Google: um título curto e '
+            'uma descrição de uma ou duas frases.',
       ),
       const SizedBox(height: 12),
       SiteFilledField(
         controller: _seoTitleController,
-        label: 'Título da página (SEO)',
+        label: 'Título na busca',
         hint: 'Sua Imobiliária — Imóveis em São Paulo',
         icon: LucideIcons.heading,
         enabled: _canManage,
-        onChanged: markDirty,
+        onChanged: markDirtyLive,
       ),
       const SizedBox(height: 12),
       SiteFilledField(
         controller: _seoDescriptionController,
-        label: 'Descrição (aparece na busca)',
+        label: 'Descrição na busca',
         hint: 'Compra, venda e locação de imóveis com atendimento completo…',
         maxLines: 3,
         enabled: _canManage,
-        onChanged: markDirty,
+        onChanged: markDirtyLive,
       ),
-      SiteSaveBar(
-        visible: _canManage && _contentDirty,
-        saving: _contentSaving,
-        label: 'Salvar conteúdo',
-        onSave: _saveContent,
-        onDiscard: () {
-          setState(() {
-            _contentDirty = false;
-            _applyConfig(_config!, resetDrafts: true);
-          });
-        },
-      ),
+      const SizedBox(height: 12),
+      _buildGooglePreview(context),
+      if (inlineSave) _buildSaveBar(context, docked: false),
     ]);
+  }
+
+  /// Prévia do resultado no Google, ao vivo com o que está digitado.
+  Widget _buildGooglePreview(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = _isDark(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final cfg = _config!;
+    final title = _seoTitleController.text.trim();
+    final description = _seoDescriptionController.text.trim();
+    final url = cfg.bestPublicUrl;
+    final domain = (cfg.customDomain ?? '').trim();
+    final host = url != null
+        ? _displayUrl(url)
+        : (domain.isNotEmpty ? domain : 'seudominio.com.br');
+    final link = isDark
+        ? AppColors.message.infoTextDarkMode
+        : AppColors.message.infoText;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: ThemeHelpers.cardBackgroundColor(context),
+        border: Border.all(color: siteHairline(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(LucideIcons.search, size: 13, color: secondary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'COMO APARECE NO GOOGLE',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: secondary,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: siteFieldFill(context),
+                  border: Border.all(color: siteHairline(context)),
+                ),
+                child: Icon(LucideIcons.globe, size: 12, color: secondary),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  host,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: ThemeHelpers.textColor(context),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            title.isNotEmpty ? title : 'Preencha o título para ver como fica',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: title.isNotEmpty ? FontWeight.w600 : FontWeight.w500,
+              height: 1.3,
+              color: title.isNotEmpty ? siteInk(context, link) : secondary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            description.isNotEmpty
+                ? description
+                : 'A descrição aparece aqui, logo abaixo do título.',
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: secondary,
+              height: 1.45,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── Domínio ──
 
   Widget _buildDomainPanel(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final cfg = _config!;
-    final secondary = ThemeHelpers.textSecondaryColor(context);
     final tone = _tone(context, _SiteTab.domain);
-    final emerald = isDark
-        ? AppColors.status.greenDarkMode
-        : AppColors.status.green;
-    final hasDomain = (cfg.customDomain ?? '').trim().isNotEmpty;
-    final domainTone = _domainStatusColor(context, cfg.domainStatus);
     final dns = _dns ?? PublicSiteDnsInstructions.fromJson(null);
-    final isActive = cfg.domainStatus == PublicSiteDomainStatus.active;
-    // 29/09/2026 (integ-02): o aviso dizia "Aguardando o CNAME propagar"
-    // logo acima dos cartões de registro A. Agora cita o que o back pede:
-    // hoje, registro A em www E em @ (criados juntos).
+    final savedDomain = (cfg.customDomain ?? '').trim();
+    final hasDomain = savedDomain.isNotEmpty;
+    final status = cfg.domainStatus;
+    final isActive = status == PublicSiteDomainStatus.active;
+    // DNS encontrado: o registro já aponta para cá (o que falta, se falta, é
+    // do nosso lado — HTTPS ou revisão).
+    final dnsFound =
+        hasDomain &&
+        (isActive ||
+            status == PublicSiteDomainStatus.pendingSsl ||
+            status == PublicSiteDomainStatus.pendingReview ||
+            status == PublicSiteDomainStatus.failed);
+    final editing = _domainController.text.trim() != savedDomain;
+    // 29/09/2026 (integ-02): tipo, host e valor vêm do payload do back
+    // (`recordType/recordHost/recordValue`). Hoje é registro A para o IP,
+    // em `www` E em `@` (raiz), criados juntos — o card antigo mostrava
+    // "CNAME → sites.intellisysbr.com" fixo e o domínio nunca ativava.
     final twoARecords = dns.needsRootRecord;
-    final pendingHint =
-        'Crie ${dns.recordsToCreateLabel} no seu provedor e toque em '
-        '"Verificar DNS" — quando o DNS propagar, o domínio é ativado '
-        'sozinho.';
+
+    final step1 = hasDomain && !editing
+        ? SiteStepState.done
+        : SiteStepState.now;
+    final step2 = !hasDomain
+        ? SiteStepState.todo
+        : (dnsFound ? SiteStepState.done : SiteStepState.now);
+    final SiteStepState step3;
+    if (!hasDomain) {
+      step3 = SiteStepState.todo;
+    } else if (isActive) {
+      step3 = SiteStepState.done;
+    } else if (status == PublicSiteDomainStatus.failed ||
+        status == PublicSiteDomainStatus.disabled) {
+      step3 = SiteStepState.problem;
+    } else {
+      step3 = dnsFound ? SiteStepState.now : SiteStepState.todo;
+    }
 
     return _panelShell(context, _SiteTab.domain, [
-      if (!_canManage)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: _readOnlyNotice(context),
+      if (!_canManage) ...[
+        const SiteReadOnlyNotice(text: _readOnlyText),
+        const SizedBox(height: 16),
+      ],
+      SiteStep(
+        number: 1,
+        title: 'Informe o domínio',
+        subtitle: !hasDomain
+            ? 'O endereço que você já tem, de preferência com www.'
+            : (editing
+                  ? 'Salvo: $savedDomain — toque em "Salvar domínio" para '
+                        'trocar.'
+                  : 'Salvo: $savedDomain'),
+        state: step1,
+        tone: tone,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SiteFilledField(
+              controller: _domainController,
+              label: 'Domínio do site',
+              hint: 'www.suaimobiliaria.com.br',
+              icon: LucideIcons.globe,
+              keyboardType: TextInputType.url,
+              enabled: _canManage,
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 10),
+            _buildSaveDomainButton(context),
+          ],
         ),
-      SiteFilledField(
-        controller: _domainController,
-        label: 'Domínio do site',
-        hint: 'www.suaimobiliaria.com.br',
-        icon: LucideIcons.globe,
-        keyboardType: TextInputType.url,
-        enabled: _canManage,
       ),
-      const SizedBox(height: 10),
-      Row(
-        children: [
-          Expanded(
-            child: FilledButton.icon(
-              onPressed: _canManage && !_domainSaving ? _saveDomain : null,
-              style: FilledButton.styleFrom(
-                backgroundColor: _accentColor(context),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-              icon: _domainSaving
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(LucideIcons.save, size: 16),
-              label: Text(
-                _domainSaving ? 'Salvando…' : 'Salvar domínio',
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
+      SiteStep(
+        number: 2,
+        title: 'Crie ${dns.recordsToCreateLabel} no provedor',
+        subtitle:
+            'No painel de DNS do domínio (Registro.br, GoDaddy, Hostinger, '
+            'Cloudflare…) — nem sempre é onde o domínio foi comprado.',
+        state: step2,
+        tone: tone,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildDnsRecordCard(
+              context,
+              dns: dns,
+              host: dns.recordHost,
+              tone: tone,
+              caption: twoARecords ? 'Registro 1 · subdomínio' : null,
             ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: _canManage && hasDomain && !_dnsVerifying && !isActive
-                  ? _verifyDns
-                  : null,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: emerald,
-                side: BorderSide(color: emerald.withValues(alpha: 0.45)),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-              icon: _dnsVerifying
-                  ? SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: emerald,
-                      ),
-                    )
-                  : const Icon(LucideIcons.radar, size: 16),
-              label: Text(
-                _dnsVerifying ? 'Verificando…' : 'Verificar DNS',
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-            ),
-          ),
-        ],
-      ),
-      if (hasDomain) ...[
-        const SizedBox(height: 14),
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            color: domainTone.withValues(alpha: isDark ? 0.12 : 0.07),
-            border: Border.all(color: domainTone.withValues(alpha: 0.25)),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                isActive ? LucideIcons.circleCheckBig : LucideIcons.clock3,
-                size: 18,
-                color: domainTone,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      cfg.domainStatus.label.toUpperCase(),
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: domainTone,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.2,
-                        fontSize: 10,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      isActive
-                          ? 'Domínio ativo — o site responde em '
-                                '${cfg.customDomain!.trim()}.'
-                          : pendingHint,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: secondary,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
+            if (twoARecords) ...[
+              const SizedBox(height: 12),
+              _buildDnsRecordCard(
+                context,
+                dns: dns,
+                host: '@',
+                tone: tone,
+                caption: 'Registro 2 · domínio raiz (crie junto)',
               ),
             ],
-          ),
+            const SizedBox(height: 10),
+            _noteLine(
+              context,
+              LucideIcons.timer,
+              'TTL (tempo de cache): ${dns.ttlRecommendation}',
+            ),
+            const SizedBox(height: 6),
+            _noteLine(context, LucideIcons.info, dns.propagationNote),
+            const SizedBox(height: 8),
+            _buildDnsGuide(
+              context,
+              dns,
+              tone,
+              open: _dnsGuideOpen ?? !dnsFound,
+            ),
+          ],
         ),
-      ],
-      const SizedBox(height: 18),
-      // 29/09/2026 (integ-02): tipo, host e valor vêm do payload do back
-      // (`recordType/recordHost/recordValue`). Hoje é registro A para o IP,
-      // em `www` E em `@` (raiz), criados juntos — o card antigo mostrava
-      // "CNAME → sites.intellisysbr.com" fixo e o domínio nunca ativava.
-      SiteSubsectionHeader(
-        label: twoARecords ? 'Registros A' : 'Registro ${dns.recordType}',
-        icon: LucideIcons.network,
       ),
-      const SizedBox(height: 12),
-      _buildDnsRecordCard(
-        context,
-        dns: dns,
-        host: dns.recordHost,
+      SiteStep(
+        number: 3,
+        title: 'Verifique o DNS',
+        subtitle: 'Quando o DNS propagar, o domínio é ativado sozinho.',
+        state: step3,
         tone: tone,
-        caption: twoARecords ? 'Registro 1 · subdomínio' : null,
-      ),
-      if (twoARecords) ...[
-        const SizedBox(height: 10),
-        _buildDnsRecordCard(
+        last: true,
+        child: _buildVerifyBlock(
           context,
           dns: dns,
-          host: '@',
-          tone: tone,
-          caption: 'Registro 2 · domínio raiz (crie junto)',
+          hasDomain: hasDomain,
+          isActive: isActive,
         ),
-      ],
-      const SizedBox(height: 10),
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(LucideIcons.info, size: 14, color: secondary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              dns.propagationNote,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: secondary,
-                height: 1.4,
-                fontSize: 11.5,
-              ),
-            ),
-          ),
-        ],
       ),
-      const SizedBox(height: 18),
-      const SiteSubsectionHeader(
-        label: 'Passo a passo',
-        icon: LucideIcons.listOrdered,
-      ),
-      const SizedBox(height: 12),
-      for (final step in dns.steps) _buildDnsStep(context, step, tone),
-      if (dns.providerHints.isNotEmpty) ...[
-        const SizedBox(height: 6),
-        const SiteSubsectionHeader(
-          label: 'Onde criar, por provedor',
-          icon: LucideIcons.server,
-        ),
-        const SizedBox(height: 12),
-        for (final hint in dns.providerHints)
-          _buildProviderHint(context, hint, tone),
-      ],
     ]);
   }
 
-  /// Cartão de um registro DNS (tipo · host · valor · TTL), com copiar em
-  /// host e valor. Usado duas vezes no registro A: `www` e `@`.
+  Widget _buildSaveDomainButton(BuildContext context) {
+    if (!_canManage) {
+      return OutlinedButton.icon(
+        onPressed: null,
+        style: OutlinedButton.styleFrom(
+          side: BorderSide(color: ThemeHelpers.borderColor(context)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        ),
+        icon: const Icon(LucideIcons.lock, size: 16),
+        label: const SiteButtonLabel('Salvar domínio'),
+      );
+    }
+    // Salvar = confirmar → verde (era o vermelho da marca).
+    final solid = siteSolid(_green(context));
+    return FilledButton.icon(
+      onPressed: _domainSaving ? null : _saveDomain,
+      style: FilledButton.styleFrom(
+        backgroundColor: solid,
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: solid.withValues(alpha: 0.6),
+        disabledForegroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      ),
+      icon: _domainSaving
+          ? const SizedBox(
+              width: 15,
+              height: 15,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            )
+          : const Icon(LucideIcons.save, size: 16),
+      label: SiteButtonLabel(_domainSaving ? 'Salvando…' : 'Salvar domínio'),
+    );
+  }
+
+  /// Cartão de um registro DNS (tipo · nome/host · valor), com copiar no
+  /// nome e no valor. Usado duas vezes no registro A: `www` e `@`.
   Widget _buildDnsRecordCard(
     BuildContext context, {
     required PublicSiteDnsInstructions dns,
@@ -1820,14 +2739,18 @@ class _PublicSitePageState extends State<PublicSitePage> {
     String? caption,
   }) {
     final secondary = ThemeHelpers.textSecondaryColor(context);
+    final line = Divider(
+      height: 1,
+      color: ThemeHelpers.borderLightColor(context),
+    );
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (caption != null) ...[
           Text(
             caption,
             style: TextStyle(
-              fontSize: 11,
+              fontSize: 11.5,
               fontWeight: FontWeight.w800,
               color: secondary,
               letterSpacing: 0.2,
@@ -1836,55 +2759,181 @@ class _PublicSitePageState extends State<PublicSitePage> {
           const SizedBox(height: 6),
         ],
         SiteCard(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
           child: Column(
             children: [
               SiteInfoRow(
                 icon: LucideIcons.tag,
                 label: 'Tipo',
                 value: dns.recordType,
+                mono: true,
               ),
-              Divider(height: 1, color: ThemeHelpers.borderLightColor(context)),
+              line,
               SiteInfoRow(
                 icon: LucideIcons.atSign,
-                label: 'Host / Nome',
+                label: 'Nome / host',
                 value: host,
+                mono: true,
                 actions: [
                   SiteRowAction(
                     icon: LucideIcons.copy,
-                    tooltip: 'Copiar host',
+                    tooltip: 'Copiar o nome (host)',
                     tone: tone,
-                    onTap: () => _copyText(host, feedback: 'Host copiado'),
+                    onTap: () =>
+                        _copyText(host, feedback: 'Nome (host) copiado'),
                   ),
                 ],
               ),
-              Divider(height: 1, color: ThemeHelpers.borderLightColor(context)),
+              line,
               SiteInfoRow(
                 icon: LucideIcons.arrowRight,
                 label: dns.isARecord ? 'Aponta para (IP)' : 'Aponta para',
                 value: dns.recordValue,
+                mono: true,
                 actions: [
                   SiteRowAction(
                     icon: LucideIcons.copy,
-                    tooltip: 'Copiar valor',
+                    tooltip: 'Copiar o valor',
                     tone: tone,
-                    onTap: () => _copyText(
-                      dns.recordValue,
-                      feedback: 'Valor copiado',
-                    ),
+                    onTap: () =>
+                        _copyText(dns.recordValue, feedback: 'Valor copiado'),
                   ),
                 ],
-              ),
-              Divider(height: 1, color: ThemeHelpers.borderLightColor(context)),
-              SiteInfoRow(
-                icon: LucideIcons.timer,
-                label: 'TTL recomendado',
-                value: dns.ttlRecommendation,
               ),
             ],
           ),
         ),
       ],
+    );
+  }
+
+  /// Passo a passo do back + onde criar por provedor, recolhível: aberto
+  /// enquanto o DNS não foi encontrado, fechado depois (continua à mão).
+  Widget _buildDnsGuide(
+    BuildContext context,
+    PublicSiteDnsInstructions dns,
+    Color tone, {
+    required bool open,
+  }) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Semantics(
+          button: true,
+          expanded: open,
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () => setState(() => _dnsGuideOpen = !open),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Row(
+                  children: [
+                    Icon(LucideIcons.listOrdered, size: 15, color: secondary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        open
+                            ? 'Passo a passo no provedor'
+                            : 'Ver o passo a passo no provedor',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 13.5,
+                          color: ThemeHelpers.textColor(context),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(
+                      open ? LucideIcons.chevronUp : LucideIcons.chevronDown,
+                      size: 17,
+                      color: secondary,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (open) ...[
+          const SizedBox(height: 6),
+          for (final step in dns.steps) _buildDnsStepLine(context, step),
+          if (dns.providerHints.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            const SiteSubsectionHeader(
+              label: 'Onde criar, por provedor',
+              icon: LucideIcons.server,
+            ),
+            const SizedBox(height: 12),
+            for (final hint in dns.providerHints)
+              _buildProviderHint(context, hint, tone),
+          ],
+        ],
+      ],
+    );
+  }
+
+  Widget _buildDnsStepLine(BuildContext context, PublicSiteDnsStep step) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 22,
+            height: 22,
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: siteFieldFill(context),
+              border: Border.all(color: siteHairline(context)),
+            ),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                '${step.order}',
+                style: TextStyle(
+                  color: secondary,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  step.title,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13.5,
+                    color: ThemeHelpers.textColor(context),
+                    letterSpacing: -0.1,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  step.description,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: secondary,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1903,7 +2952,11 @@ class _PublicSitePageState extends State<PublicSitePage> {
         children: [
           Padding(
             padding: const EdgeInsets.only(top: 2),
-            child: Icon(LucideIcons.server, size: 14, color: tone),
+            child: Icon(
+              LucideIcons.server,
+              size: 14,
+              color: siteInk(context, tone),
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -1933,69 +2986,74 @@ class _PublicSitePageState extends State<PublicSitePage> {
               icon: LucideIcons.externalLink,
               tooltip: 'Abrir ${hint.name}',
               tone: tone,
-              onTap: () async {
-                final uri = Uri.tryParse(url);
-                if (uri == null) return;
-                final ok = await launchUrl(
-                  uri,
-                  mode: LaunchMode.externalApplication,
-                );
-                if (!ok) _showSnack('Não foi possível abrir ${hint.name}');
-              },
+              onTap: () => _openExternal(
+                url,
+                failure: 'Não foi possível abrir ${hint.name}',
+              ),
             ),
         ],
       ),
     );
   }
 
-  Widget _buildDnsStep(
-    BuildContext context,
-    PublicSiteDnsStep step,
-    Color tone,
-  ) {
+  /// Passo 3: a situação da verificação em palavras e o "Verificar DNS"
+  /// (mesma regra de sempre: só com domínio salvo e ainda não ativo).
+  Widget _buildVerifyBlock(
+    BuildContext context, {
+    required PublicSiteDnsInstructions dns,
+    required bool hasDomain,
+    required bool isActive,
+  }) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final isDark = _isDark(context);
+    final cfg = _config!;
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+
+    if (!hasDomain) {
+      return Text(
+        'Depois de salvar o domínio e criar os registros, é aqui que você '
+        'confere se deu certo.',
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: secondary,
+          height: 1.4,
+        ),
+      );
+    }
+
+    final statusTone = _domainStatusColor(context, cfg.domainStatus);
+    final box = Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        color: statusTone.withValues(alpha: isDark ? 0.12 : 0.07),
+        border: Border.all(color: statusTone.withValues(alpha: 0.28)),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 26,
-            height: 26,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: tone.withValues(alpha: isDark ? 0.18 : 0.12),
-              border: Border.all(color: tone.withValues(alpha: 0.35)),
-            ),
-            child: Center(
-              child: Text(
-                '${step.order}',
-                style: TextStyle(
-                  color: tone,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 12,
-                ),
-              ),
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(
+              _domainStateIcon(cfg.domainStatus),
+              size: 17,
+              color: siteInk(context, statusTone),
             ),
           ),
-          const SizedBox(width: 11),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  step.title,
+                  _domainStateTitle(cfg.domainStatus),
                   style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w900,
                     color: ThemeHelpers.textColor(context),
-                    letterSpacing: -0.1,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  step.description,
+                  _domainExplanation(cfg, dns),
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: secondary,
                     height: 1.4,
@@ -2007,52 +3065,97 @@ class _PublicSitePageState extends State<PublicSitePage> {
         ],
       ),
     );
-  }
 
-  // ─── Auxiliares ───────────────────────────────────────────────────────────
+    if (isActive) return box;
 
-  Widget _readOnlyNotice(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final amber = isDark
-        ? AppColors.status.warningDarkMode
-        : AppColors.status.warning;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        color: amber.withValues(alpha: isDark ? 0.12 : 0.08),
-        border: Border.all(color: amber.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        children: [
-          Icon(LucideIcons.lock, size: 14, color: amber),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'Somente leitura — a edição exige a permissão '
-              '"${PublicSiteAccess.permManage}".',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context),
-                height: 1.3,
-                fontSize: 11.5,
-              ),
-            ),
+    final Widget button;
+    if (!_canManage) {
+      button = OutlinedButton.icon(
+        onPressed: null,
+        style: OutlinedButton.styleFrom(
+          side: BorderSide(color: ThemeHelpers.borderColor(context)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
           ),
-        ],
-      ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        ),
+        icon: const Icon(LucideIcons.lock, size: 16),
+        label: const SiteButtonLabel('Verificar DNS'),
+      );
+    } else {
+      // Verificar = conferir (azul de informação), distinto do Salvar verde.
+      final solid = siteSolid(_blue(context));
+      button = FilledButton.icon(
+        onPressed: _dnsVerifying ? null : _verifyDns,
+        style: FilledButton.styleFrom(
+          backgroundColor: solid,
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: solid.withValues(alpha: 0.6),
+          disabledForegroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        ),
+        icon: _dnsVerifying
+            ? const SizedBox(
+                width: 15,
+                height: 15,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : const Icon(LucideIcons.radar, size: 16),
+        label: SiteButtonLabel(
+          _dnsVerifying ? 'Verificando…' : 'Verificar DNS',
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [box, const SizedBox(height: 10), button],
     );
   }
 
-  // ─── Skeleton (fiel ao layout novo: moldura de navegador + abas) ─────────
+  // ─── Auxiliares de desenho ────────────────────────────────────────────────
 
-  Widget _buildPageSkeleton(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+  /// Linha de nota (ícone + frase) em cinza secundário.
+  Widget _noteLine(BuildContext context, IconData icon, String text) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: Icon(icon, size: 14, color: secondary),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: secondary,
+              height: 1.4,
+              fontSize: 11.5,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─── Esqueleto (fiel ao layout: moldura, situação, próximo passo, abas,
+  // cabeçalho do painel, publicação e "o que falta") ────────────────────────
+
+  Widget _buildPageSkeleton(BuildContext context, double sidePad) {
+    final hairline = siteHairline(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        _kPagePadH,
-        _kPagePadTop + 4,
-        _kPagePadH,
+      padding: EdgeInsets.fromLTRB(
+        sidePad,
+        _kPagePadTop,
+        sidePad,
         _kPagePadBottom,
       ),
       child: Column(
@@ -2063,19 +3166,15 @@ class _PublicSitePageState extends State<PublicSitePage> {
             decoration: BoxDecoration(
               color: ThemeHelpers.cardBackgroundColor(context),
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(
-                color: isDark
-                    ? Colors.white.withValues(alpha: 0.08)
-                    : Colors.black.withValues(alpha: 0.06),
-              ),
+              border: Border.all(color: hairline),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(12, 10, 12, 10),
                   child: Row(
-                    children: const [
+                    children: [
                       SkeletonBox(width: 8, height: 8, borderRadius: 999),
                       SizedBox(width: 5),
                       SkeletonBox(width: 8, height: 8, borderRadius: 999),
@@ -2083,23 +3182,24 @@ class _PublicSitePageState extends State<PublicSitePage> {
                       SkeletonBox(width: 8, height: 8, borderRadius: 999),
                       SizedBox(width: 10),
                       Expanded(
-                        child: SkeletonBox(height: 25, borderRadius: 999),
+                        child: SkeletonBox(height: 26, borderRadius: 999),
                       ),
                     ],
                   ),
                 ),
                 Divider(
                   height: 1,
+                  thickness: 1,
                   color: ThemeHelpers.borderLightColor(context),
                 ),
-                Padding(
-                  padding: const EdgeInsets.all(14),
+                const Padding(
+                  padding: EdgeInsets.all(14),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Row(
-                        children: const [
-                          SkeletonBox(width: 38, height: 38, borderRadius: 12),
+                        children: [
+                          SkeletonBox(width: 40, height: 40, borderRadius: 12),
                           SizedBox(width: 10),
                           Expanded(
                             child: Column(
@@ -2113,11 +3213,11 @@ class _PublicSitePageState extends State<PublicSitePage> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
-                      const SkeletonBox(height: 52, borderRadius: 12),
-                      const SizedBox(height: 10),
+                      SizedBox(height: 12),
+                      SkeletonBox(height: 54, borderRadius: 12),
+                      SizedBox(height: 10),
                       Row(
-                        children: const [
+                        children: [
                           Expanded(
                             child: SkeletonBox(height: 30, borderRadius: 9),
                           ),
@@ -2142,41 +3242,71 @@ class _PublicSitePageState extends State<PublicSitePage> {
             ),
           ),
           const SizedBox(height: 12),
-          Row(
-            children: const [
-              SkeletonBox(width: 84, height: 24, borderRadius: 999),
-              SizedBox(width: 7),
-              SkeletonBox(width: 110, height: 24, borderRadius: 999),
-              Spacer(),
-              SkeletonBox(width: 34, height: 34, borderRadius: 11),
+          // Selos + abrir/copiar
+          const Row(
+            children: [
+              SkeletonBox(width: 74, height: 24, borderRadius: 999),
               SizedBox(width: 6),
+              Flexible(
+                child: SkeletonBox(width: 118, height: 24, borderRadius: 999),
+              ),
+              Spacer(),
+              SkeletonBox(width: 36, height: 36, borderRadius: 11),
+              SizedBox(width: 6),
+              SkeletonBox(width: 36, height: 36, borderRadius: 11),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // Próximo passo
+          const SkeletonBox(height: 84, borderRadius: 14),
+          const SizedBox(height: 18),
+          // Abas
+          const Row(
+            children: [
+              Expanded(
+                child: Center(child: SkeletonText(width: 52, height: 12)),
+              ),
+              Expanded(
+                child: Center(child: SkeletonText(width: 52, height: 12)),
+              ),
+              Expanded(
+                child: Center(child: SkeletonText(width: 52, height: 12)),
+              ),
+              Expanded(
+                child: Center(child: SkeletonText(width: 52, height: 12)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 26),
+          // Cabeçalho do painel
+          const Row(
+            children: [
+              SkeletonBox(width: 4, height: 34, borderRadius: 999),
+              SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonText(width: 150, height: 14),
+                    SizedBox(height: 6),
+                    SkeletonText(height: 10),
+                  ],
+                ),
+              ),
+              SizedBox(width: 10),
               SkeletonBox(width: 34, height: 34, borderRadius: 11),
             ],
           ),
+          const SizedBox(height: 16),
+          // Publicação
+          const SkeletonBox(height: 148, borderRadius: 16),
           const SizedBox(height: 22),
-          Row(
-            children: const [
-              Expanded(child: SkeletonText(height: 14)),
-              SizedBox(width: 14),
-              Expanded(child: SkeletonText(height: 14)),
-              SizedBox(width: 14),
-              Expanded(child: SkeletonText(height: 14)),
-              SizedBox(width: 14),
-              Expanded(child: SkeletonText(height: 14)),
-            ],
-          ),
-          const SizedBox(height: 22),
-          const SkeletonBox(height: 44, borderRadius: 12),
-          const SizedBox(height: 14),
-          const SkeletonBox(height: 130, borderRadius: 16),
-          const SizedBox(height: 12),
-          const SkeletonBox(height: 180, borderRadius: 16),
+          // O que falta
+          const SkeletonText(width: 180, height: 11),
+          const SizedBox(height: 10),
+          const SkeletonBox(height: 280, borderRadius: 16),
         ],
       ),
     );
   }
-}
-
-extension<T> on Iterable<T> {
-  T? get firstOrNull => isEmpty ? null : first;
 }

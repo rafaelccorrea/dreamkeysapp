@@ -14,13 +14,17 @@ import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/admin_user_model.dart';
 import '../services/admin_users_service.dart';
+import '../widgets/user_access_widgets.dart';
 import '../widgets/users_filters_sheet.dart';
 import 'edit_user_page.dart';
 
 /// Tela de Colaboradores → Usuários.
 ///
-/// Paridade visual com `imobx-front` `UsersPage.tsx` (cards de usuário,
-/// hero com stats, busca debounced + filtros), adaptado pra mobile.
+/// Superfície do dia a dia: cabeçalho com o tamanho e a composição da equipe
+/// por papel (nomes de [uaRoleLabel]) + "Novo usuário"; busca com
+/// filtros; linhas flush com quem é, papel, estado e último acesso. Tocar na
+/// linha abre a edição; o menu da linha traz editar e desativar/reativar.
+/// Paridade de dados com `imobx-front` `UsersPage.tsx`.
 class UsersPage extends StatefulWidget {
   const UsersPage({super.key});
 
@@ -49,6 +53,9 @@ class _UsersPageState extends State<UsersPage> {
   int _total = 0;
 
   AdminUsersStats? _stats;
+  // A 1ª resposta das estatísticas já chegou (com ou sem sucesso) — separa
+  // "carregando" (skeleton) de "indisponível" (sem a barra de composição).
+  bool _statsSettled = false;
 
   // Filtros
   String _search = '';
@@ -195,7 +202,12 @@ class _UsersPageState extends State<UsersPage> {
     final res = await AdminUsersService.instance.getStats();
     if (!mounted) return;
     if (res.success && res.data != null) {
-      setState(() => _stats = res.data);
+      setState(() {
+        _stats = res.data;
+        _statsSettled = true;
+      });
+    } else if (!_statsSettled) {
+      setState(() => _statsSettled = true);
     }
   }
 
@@ -220,6 +232,16 @@ class _UsersPageState extends State<UsersPage> {
     });
     _persistState();
     _reload();
+  }
+
+  Future<void> _openCreate() async {
+    final created = await Navigator.of(context).pushNamed('/users/create');
+    if (created == true && mounted) {
+      _reload();
+      // O cabeçalho mostra o total e a composição da equipe: sem isso ele
+      // ficaria com o número de antes do cadastro.
+      unawaited(_loadStats());
+    }
   }
 
   Future<void> _openEdit(AdminUser u) async {
@@ -315,9 +337,9 @@ class _UsersPageState extends State<UsersPage> {
 
   @override
   Widget build(BuildContext context) {
-    final canView =
-        ModuleAccessService.instance.hasPermission(AppPermissions.userView) ||
-        ModuleAccessService.instance.hasCompanyModule('user_management');
+    final access = ModuleAccessService.instance;
+    final canView = access.hasPermission(AppPermissions.userView) ||
+        access.hasCompanyModule('user_management');
 
     if (!canView) {
       return const AppScaffold(
@@ -327,26 +349,28 @@ class _UsersPageState extends State<UsersPage> {
       );
     }
 
+    final canCreate = access.hasPermission(AppPermissions.userCreate);
+    final canEdit = access.hasPermission(AppPermissions.userUpdate);
     final filterCount = _filters.activeCount;
     final hasAnyFilter = filterCount > 0 || _search.trim().isNotEmpty;
+    // 1ª carga (ou recarga sem nada na tela) = skeleton; recarga com lista
+    // na tela mantém a lista e mostra só a barrinha de atualização.
+    final firstLoad = _loading && !_refetching;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final brand =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    // Tela larga: coluna central de até 720dp. Calculado aqui — um
+    // LayoutBuilder entre o RefreshIndicator e a lista crasha.
+    final width = MediaQuery.sizeOf(context).width;
+    final side = width > kUaMaxContentWidth + 32
+        ? (width - kUaMaxContentWidth) / 2
+        : 16.0;
 
     return AppScaffold(
       title: 'Usuários',
       showBottomNavigation: false,
-      actions: [
-        if (ModuleAccessService.instance
-            .hasPermission(AppPermissions.userCreate))
-          IconButton(
-            tooltip: 'Novo usuário',
-            icon: const Icon(LucideIcons.userPlus, size: 19),
-            onPressed: () async {
-              final created =
-                  await Navigator.of(context).pushNamed('/users/create');
-              if (created == true && mounted) _reload();
-            },
-          ),
-      ],
       body: RefreshIndicator(
+        color: brand,
         onRefresh: () async {
           await _reload();
           await _loadStats();
@@ -357,55 +381,60 @@ class _UsersPageState extends State<UsersPage> {
           // Arrastar a lista fecha o teclado (problema recorrente de teclado
           // atrapalhando ao rolar os resultados).
           keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          padding: const EdgeInsets.only(bottom: 28),
+          padding: EdgeInsets.fromLTRB(side, 0, side, 28),
           children: [
-            _Hero(stats: _stats, total: _total),
-            const SizedBox(height: 16),
+            _UsersHeader(
+              stats: _stats,
+              statsSettled: _statsSettled,
+              fallbackTotal: _total,
+              canCreate: canCreate,
+              onCreate: _openCreate,
+            ),
+            const SizedBox(height: 18),
             _Toolbar(
               controller: _searchController,
               onFilterTap: _openFilters,
               filterCount: filterCount,
-              onClearAll: hasAnyFilter ? _clearAll : null,
             ),
-            const SizedBox(height: 12),
-            if (_loading)
-              const _UsersShimmer()
+            const SizedBox(height: 8),
+            if (!firstLoad && _error == null)
+              _ListCaption(
+                total: _total,
+                loaded: _users.length,
+                filtered: hasAnyFilter,
+                onClearAll: hasAnyFilter ? _clearAll : null,
+              ),
+            if (_refetching)
+              const _RefetchBar()
+            else
+              const SizedBox(height: 2),
+            if (firstLoad)
+              const _UsersSkeleton()
             else if (_error != null)
-              _ErrorBlock(
-                message: _error!,
-                statusCode: _errorStatus,
-                error: _errorRaw,
-                onRetry: _reload,
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: _ErrorBlock(
+                  message: _error!,
+                  statusCode: _errorStatus,
+                  error: _errorRaw,
+                  onRetry: _reload,
+                ),
               )
             else if (_users.isEmpty)
-              const _EmptyBlock()
+              _EmptyBlock(
+                filtered: hasAnyFilter,
+                canCreate: canCreate,
+                onClear: _clearAll,
+                onCreate: _openCreate,
+              )
             else
               _UsersList(
                 users: _users,
+                canEdit: canEdit,
                 onToggleActive: _toggleActive,
                 onOpenEdit: _openEdit,
               ),
-            if (_loadingMore)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Center(
-                  child: SizedBox(
-                    width: 22,
-                    height: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2.2),
-                  ),
-                ),
-              ),
-            if (_refetching && !_loading)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 6),
-                child: Center(
-                  child: Text(
-                    'Atualizando…',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ),
-              ),
+            if (_loadingMore) const _UsersSkeleton(rows: 2),
           ],
         ),
       ),
@@ -414,857 +443,734 @@ class _UsersPageState extends State<UsersPage> {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Hero (eyebrow + título + subtítulo + stats inline)
+// Cabeçalho — tamanho da equipe, composição por papel e "Novo usuário"
 // ──────────────────────────────────────────────────────────────────────────
 
-class _Hero extends StatelessWidget {
-  const _Hero({required this.stats, required this.total});
+class _UsersHeader extends StatelessWidget {
+  const _UsersHeader({
+    required this.stats,
+    required this.statsSettled,
+    required this.fallbackTotal,
+    required this.canCreate,
+    required this.onCreate,
+  });
 
   final AdminUsersStats? stats;
-  final int total;
+  final bool statsSettled;
+  final int fallbackTotal;
+  final bool canCreate;
+  final VoidCallback onCreate;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final textColor = ThemeHelpers.textColor(context);
-    final secondaryColor = ThemeHelpers.textSecondaryColor(context);
-    final formatter = NumberFormat.decimalPattern('pt_BR');
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final success =
+        isDark ? AppColors.status.successDarkMode : AppColors.status.success;
+    final fmt = NumberFormat.decimalPattern('pt_BR');
+    final s = stats;
+    final waiting = s == null && !statsSettled;
+    final total = s?.total ?? fallbackTotal;
+    final newThisMonth = s?.newThisMonth ?? 0;
 
-    // Paleta editorial — emerald pra "vivos / ativos", violet pra hierarquia,
-    // amber pra fluxo (novos/mês), slate pra texto secundário.
-    final emerald = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
-    final indigo = isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
-    final violet = isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
-    final amber = isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
-
-    final displayTotal = stats?.total ?? total;
-    final regulars = stats?.regulars ?? 0;
-    final admins = stats?.admins ?? 0;
-    final newThisMonth = stats?.newThisMonth ?? 0;
-
-    // Linha de contexto curta sob o título — adapta o tom conforme dados.
-    final subtitle = displayTotal == 0
-        ? 'Convide o primeiro membro pra começar a montar sua equipe.'
-        : (newThisMonth > 0
-              ? '$newThisMonth ${newThisMonth == 1 ? 'novo' : 'novos'} este mês · $regulars regulares · $admins administradores'
-              : '$regulars regulares · $admins administradores');
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Eyebrow editorial: dot esmeralda pulsante + label uppercase.
-          Row(
-            children: [
-              Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: emerald,
-                  boxShadow: [
-                    BoxShadow(
-                      color: emerald.withValues(alpha: 0.55),
-                      blurRadius: 8,
-                      spreadRadius: 1,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 9),
-              Text(
-                'COLABORADORES · USUÁRIOS',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: emerald,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.2,
-                  fontSize: 11,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          // Headline com número grande + rótulo pequeno alinhados na base.
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                formatter.format(displayTotal),
-                style: theme.textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: textColor,
-                  height: 1.0,
-                  letterSpacing: -1.0,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: Text(
-                  displayTotal == 1 ? 'usuário' : 'usuários',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: secondaryColor,
-                    fontWeight: FontWeight.w800,
-                    height: 1.0,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            subtitle,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: secondaryColor,
-              fontWeight: FontWeight.w600,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 18),
-          // Strip editorial — 4 colunas separadas por 1px vertical.
-          // Mesmo padrão usado no hero de Equipes pra consistência.
-          _HeroKpiStrip(
-            blocks: [
-              _HeroKpiBlock(
-                icon: LucideIcons.userCheck,
-                label: 'REGULARES',
-                value: '$regulars',
-                sub: displayTotal > 0
-                    ? '${((regulars / displayTotal) * 100).toStringAsFixed(0)}% do quadro'
-                    : 'operacionais',
-                tone: emerald,
-              ),
-              _HeroKpiBlock(
-                icon: LucideIcons.shieldCheck,
-                label: 'ADMINS',
-                value: '$admins',
-                sub: admins == 1 ? 'operador' : 'operadores',
-                tone: violet,
-              ),
-              _HeroKpiBlock(
-                icon: LucideIcons.briefcase,
-                label: 'GESTORES',
-                value: '${stats?.managers ?? 0}',
-                sub: 'liderança',
-                tone: indigo,
-              ),
-              _HeroKpiBlock(
-                icon: LucideIcons.userPlus,
-                label: 'NOVOS',
-                value: '$newThisMonth',
-                sub: newThisMonth == 1 ? 'este mês' : 'no mês',
-                tone: amber,
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Bloco vertical do strip de KPI do hero — ícone + label uppercase +
-/// valor grande em tom + sub-rótulo contextual + traço fino accent.
-/// Sem bordas / sem fill — pura tipografia editorial. Compartilhado
-/// (espelhado) com `teams_page.dart` para consistência visual entre
-/// as duas telas de Colaboradores.
-class _HeroKpiBlock {
-  const _HeroKpiBlock({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.sub,
-    required this.tone,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final String sub;
-  final Color tone;
-
-  Widget render(BuildContext context) {
-    final theme = Theme.of(context);
-    final secondaryColor = ThemeHelpers.textSecondaryColor(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 11, color: tone),
-              const SizedBox(width: 5),
-              Flexible(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w900,
-                    color: tone,
-                    letterSpacing: 1.4,
-                    height: 1.0,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
+    final headline = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (waiting && total == 0)
+          const SkeletonBox(width: 150, height: 34, borderRadius: 8)
+        else
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
-            child: Text(
-              value,
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: tone,
-                letterSpacing: -0.6,
-                height: 1.0,
-                fontSize: 22,
-                fontFeatures: const [FontFeature.tabularFigures()],
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: fmt.format(total),
+                    style: theme.textTheme.displaySmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: textColor,
+                      height: 1.0,
+                      letterSpacing: -1.2,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  TextSpan(
+                    text: total == 1 ? '  usuário' : '  usuários',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: secondary,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                ],
               ),
+              maxLines: 1,
             ),
           ),
-          const SizedBox(height: 5),
-          Text(
-            sub,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: secondaryColor,
-              letterSpacing: 0.1,
-              height: 1.0,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+        const SizedBox(height: 7),
+        if (waiting)
+          const SkeletonBox(width: 160, height: 12, borderRadius: 4)
+        else if (s != null)
+          Row(
+            children: [
+              Icon(
+                LucideIcons.userPlus,
+                size: 13,
+                color: newThisMonth > 0 ? success : secondary,
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  newThisMonth > 0
+                      ? '$newThisMonth ${newThisMonth == 1 ? 'entrou' : 'entraram'} este mês'
+                      : 'Nenhuma entrada este mês',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: secondary,
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 7),
-          Container(
-            height: 2,
-            width: 18,
-            decoration: BoxDecoration(
-              color: tone,
-              borderRadius: BorderRadius.circular(2),
-            ),
+      ],
+    );
+
+    Widget composition;
+    if (waiting) {
+      composition = const Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SkeletonBox(height: 10, borderRadius: 4),
+          SizedBox(height: 10),
+          Wrap(
+            spacing: 16,
+            runSpacing: 8,
+            children: [
+              SkeletonBox(width: 104, height: 12, borderRadius: 4),
+              SkeletonBox(width: 80, height: 12, borderRadius: 4),
+              SkeletonBox(width: 126, height: 12, borderRadius: 4),
+            ],
           ),
         ],
+      );
+    } else if (s != null) {
+      // Nomes pelo helper único (paridade com o `translateUserRole` do web);
+      // o bloco de admins das estatísticas soma admin + master.
+      composition = _RoleComposition(
+        segments: [
+          _RoleSegment(
+            role: 'user',
+            label: uaRoleLabel('user'),
+            value: s.regulars,
+          ),
+          _RoleSegment(
+            role: 'manager',
+            label: uaRoleLabel('manager'),
+            value: s.managers,
+          ),
+          _RoleSegment(
+            role: 'admin',
+            label: uaRoleLabel('admin'),
+            value: s.admins,
+          ),
+        ],
+      );
+    } else {
+      // Estatísticas indisponíveis: sem barra (não inventa composição).
+      composition = const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 18),
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final wide = c.maxWidth >= 440;
+          final cta = _CreateUserButton(
+            canCreate: canCreate,
+            onCreate: onCreate,
+          );
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: headline),
+                  if (wide) ...[const SizedBox(width: 16), cta],
+                ],
+              ),
+              const SizedBox(height: 16),
+              composition,
+              if (!wide) ...[
+                const SizedBox(height: 16),
+                SizedBox(width: double.infinity, child: cta),
+              ],
+            ],
+          );
+        },
       ),
     );
   }
 }
 
-/// Strip horizontal de KPIs do hero — 4 colunas com peso igual,
-/// separadas por linhas verticais finas. Editorial aberto, sem
-/// encapsulamento por chip.
-class _HeroKpiStrip extends StatelessWidget {
-  const _HeroKpiStrip({required this.blocks});
+/// CTA principal de criação (vermelho da marca). Sem permissão não some:
+/// fica travado com cadeado e explica ao toque.
+class _CreateUserButton extends StatelessWidget {
+  const _CreateUserButton({required this.canCreate, required this.onCreate});
 
-  final List<_HeroKpiBlock> blocks;
+  final bool canCreate;
+  final VoidCallback onCreate;
 
   @override
   Widget build(BuildContext context) {
-    final divider = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (var i = 0; i < blocks.length; i++) ...[
-            if (i > 0)
-              Container(
-                width: 1,
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                color: divider,
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final brand =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(14),
+    );
+    const label = FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Text('Novo usuário', maxLines: 1, softWrap: false),
+    );
+    if (canCreate) {
+      return FilledButton.icon(
+        onPressed: onCreate,
+        style: FilledButton.styleFrom(
+          backgroundColor: brand,
+          foregroundColor: Colors.white,
+          minimumSize: const Size(0, 46),
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          shape: shape,
+          textStyle: const TextStyle(
+            fontWeight: FontWeight.w800,
+            fontSize: 14.5,
+          ),
+        ),
+        icon: const Icon(LucideIcons.userPlus, size: 18),
+        label: label,
+      );
+    }
+    return OutlinedButton.icon(
+      onPressed: () {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              behavior: SnackBarBehavior.floating,
+              content: Text(
+                'Você não tem permissão para cadastrar usuários. Peça ao '
+                'administrador da empresa.',
               ),
-            Expanded(child: blocks[i].render(context)),
+            ),
+          );
+      },
+      style: OutlinedButton.styleFrom(
+        foregroundColor: ThemeHelpers.textSecondaryColor(context),
+        side: BorderSide(color: ThemeHelpers.borderColor(context)),
+        minimumSize: const Size(0, 46),
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        shape: shape,
+        textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+      ),
+      icon: const Icon(LucideIcons.lock, size: 16),
+      label: label,
+    );
+  }
+}
+
+class _RoleSegment {
+  const _RoleSegment({
+    required this.role,
+    required this.label,
+    required this.value,
+  });
+
+  final String role;
+  final String label;
+  final int value;
+}
+
+/// Barra de composição da equipe (parte do todo) + legenda com os números.
+/// Marca fina (10px), 2px de respiro entre as partes, ponta de dados
+/// arredondada; a legenda carrega a identidade (nunca só a cor).
+class _RoleComposition extends StatelessWidget {
+  const _RoleComposition({required this.segments});
+
+  final List<_RoleSegment> segments;
+
+  @override
+  Widget build(BuildContext context) {
+    final sum = segments.fold<int>(0, (a, s) => a + s.value);
+    final visible = segments.where((s) => s.value > 0).toList();
+    const end = BorderRadius.horizontal(right: Radius.circular(4));
+    return Semantics(
+      label: 'Composição da equipe: '
+          '${segments.map((s) => '${s.label} ${s.value}').join(', ')}',
+      child: ExcludeSemantics(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              height: 10,
+              child: sum == 0
+                  ? DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: ThemeHelpers.borderLightColor(context),
+                        borderRadius: end,
+                      ),
+                      child: const SizedBox.expand(),
+                    )
+                  : Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (var i = 0; i < visible.length; i++) ...[
+                          if (i > 0) const SizedBox(width: 2),
+                          Expanded(
+                            flex: visible[i].value,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: uaRoleSwatch(visible[i].role),
+                                borderRadius: i == visible.length - 1
+                                    ? end
+                                    : BorderRadius.zero,
+                              ),
+                              child: const SizedBox.expand(),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 16,
+              runSpacing: 8,
+              children: [
+                for (final s in segments) _LegendItem(segment: s),
+              ],
+            ),
           ],
-        ],
+        ),
       ),
     );
   }
 }
 
+class _LegendItem extends StatelessWidget {
+  const _LegendItem({required this.segment});
+
+  final _RoleSegment segment;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: uaRoleSwatch(segment.role),
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ),
+        const SizedBox(width: 7),
+        // Nome (singular, do helper do web) + número: "Colaborador 38".
+        Flexible(
+          child: Text(
+            segment.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: ThemeHelpers.textSecondaryColor(context),
+            ),
+          ),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          '${segment.value}',
+          style: TextStyle(
+            fontSize: 13.5,
+            fontWeight: FontWeight.w900,
+            color: ThemeHelpers.textColor(context),
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 // ──────────────────────────────────────────────────────────────────────────
-// Toolbar (busca + filtros)
+// Busca + filtros (mesma gramática da tela de Imóveis) e legenda da lista
 // ──────────────────────────────────────────────────────────────────────────
 
-class _Toolbar extends StatefulWidget {
+class _Toolbar extends StatelessWidget {
   const _Toolbar({
     required this.controller,
     required this.onFilterTap,
     required this.filterCount,
-    this.onClearAll,
   });
 
   final TextEditingController controller;
   final VoidCallback onFilterTap;
   final int filterCount;
-  final VoidCallback? onClearAll;
-
-  @override
-  State<_Toolbar> createState() => _ToolbarState();
-}
-
-class _ToolbarState extends State<_Toolbar> {
-  bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final accent = isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final brand =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
     final textColor = ThemeHelpers.textColor(context);
-    final secondaryColor = ThemeHelpers.textSecondaryColor(context);
-    final borderColor = isDark
-        ? Colors.white.withValues(alpha: 0.08)
-        : Colors.black.withValues(alpha: 0.06);
-    final cardColor = ThemeHelpers.cardBackgroundColor(context);
-    final hasText = widget.controller.text.isNotEmpty;
-    final showAccent = _focused || hasText;
-    final filterActive = widget.filterCount > 0;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final fill = isDark
+        ? AppColors.background.backgroundTertiaryDarkMode
+        : AppColors.background.backgroundTertiary;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Controle único: ícone + input + clear + divisor + botão filtros.
-          // Borda animada que tinge em accent quando há foco/texto/filtro.
-          Focus(
-            onFocusChange: (f) => setState(() => _focused = f),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOutCubic,
-              height: 50,
-              decoration: BoxDecoration(
-                color: cardColor,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: (showAccent || filterActive)
-                      ? accent.withValues(alpha: isDark ? 0.5 : 0.42)
-                      : borderColor,
-                  width: (showAccent || filterActive) ? 1.4 : 1,
+    return Row(
+      children: [
+        Expanded(
+          child: ValueListenableBuilder<TextEditingValue>(
+            valueListenable: controller,
+            builder: (context, value, _) {
+              final hasText = value.text.isNotEmpty;
+              return Container(
+                constraints: const BoxConstraints(minHeight: 48),
+                decoration: BoxDecoration(
+                  color: fill,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: ThemeHelpers.borderColor(context)
+                        .withValues(alpha: 0.5),
+                  ),
                 ),
-                boxShadow: showAccent
-                    ? [
-                        BoxShadow(
-                          color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
-                          blurRadius: 14,
-                          offset: const Offset(0, 5),
-                          spreadRadius: -4,
+                child: Row(
+                  children: [
+                    const SizedBox(width: 14),
+                    Icon(LucideIcons.search, size: 18, color: secondary),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: controller,
+                        textInputAction: TextInputAction.search,
+                        cursorColor: brand,
+                        style: TextStyle(
+                          color: textColor,
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w700,
                         ),
-                      ]
-                    : null,
-              ),
-              child: Row(
-                children: [
-                  const SizedBox(width: 14),
-                  Icon(
-                    LucideIcons.search,
-                    size: 17,
-                    color: showAccent ? accent : secondaryColor,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: widget.controller,
-                      textInputAction: TextInputAction.search,
-                      cursorColor: accent,
-                      style: TextStyle(
-                        color: textColor,
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.1,
-                      ),
-                      // IMPORTANTE: o tema global tem `filled: true` +
-                      // borders no `inputDecorationTheme`. Sem desligar
-                      // explicitamente aqui o TextField pinta o próprio
-                      // retângulo dentro do nosso container — virava o
-                      // "card dentro de card".
-                      decoration: InputDecoration(
-                        hintText: 'Buscar por nome ou e-mail',
-                        hintStyle: TextStyle(
-                          color: secondaryColor.withValues(alpha: 0.75),
-                          fontWeight: FontWeight.w500,
-                          fontSize: 13.5,
+                        // IMPORTANTE: o tema global tem `filled: true` +
+                        // bordas; sem desligar aqui o TextField pinta um
+                        // segundo retângulo dentro do nosso.
+                        decoration: InputDecoration(
+                          hintText: 'Buscar por nome ou e-mail',
+                          hintStyle: TextStyle(
+                            color: secondary.withValues(alpha: 0.8),
+                            fontWeight: FontWeight.w500,
+                            fontSize: 13.5,
+                          ),
+                          filled: false,
+                          fillColor: Colors.transparent,
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          disabledBorder: InputBorder.none,
+                          errorBorder: InputBorder.none,
+                          focusedErrorBorder: InputBorder.none,
+                          isDense: true,
+                          contentPadding:
+                              const EdgeInsets.symmetric(vertical: 14),
                         ),
-                        filled: false,
-                        fillColor: Colors.transparent,
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        disabledBorder: InputBorder.none,
-                        errorBorder: InputBorder.none,
-                        focusedErrorBorder: InputBorder.none,
-                        contentPadding: EdgeInsets.zero,
-                        isDense: true,
-                      ),
-                      onChanged: (_) => setState(() {}),
-                      onSubmitted: (_) => FocusScope.of(context).unfocus(),
-                    ),
-                  ),
-                  if (hasText) ...[
-                    InkResponse(
-                      radius: 18,
-                      onTap: () {
-                        widget.controller.clear();
-                        FocusScope.of(context).unfocus();
-                        setState(() {});
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.all(6),
-                        child: Icon(
-                          LucideIcons.x,
-                          size: 14,
-                          color: secondaryColor,
-                        ),
+                        onSubmitted: (_) => FocusScope.of(context).unfocus(),
                       ),
                     ),
-                    const SizedBox(width: 4),
+                    if (hasText)
+                      IconButton(
+                        tooltip: 'Limpar busca',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () {
+                          controller.clear();
+                          FocusScope.of(context).unfocus();
+                        },
+                        icon: Icon(LucideIcons.x, size: 16, color: secondary),
+                      )
+                    else
+                      const SizedBox(width: 12),
                   ],
-                  // Divisor interno entre input e botão de filtros — fundindo
-                  // os dois numa única peça (acaba o "card ao lado de card").
-                  Container(width: 1, height: 24, color: borderColor),
-                  Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      borderRadius: const BorderRadius.only(
-                        topRight: Radius.circular(13),
-                        bottomRight: Radius.circular(13),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(width: 10),
+        _FilterButton(count: filterCount, onTap: onFilterTap),
+      ],
+    );
+  }
+}
+
+/// Botão de filtros colado à busca — quadrado; com filtro ativo ganha o
+/// tom da marca e a contagem.
+class _FilterButton extends StatelessWidget {
+  const _FilterButton({required this.count, required this.onTap});
+
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final brand =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final active = count > 0;
+    final fill = isDark
+        ? AppColors.background.backgroundTertiaryDarkMode
+        : AppColors.background.backgroundTertiary;
+    final radius = BorderRadius.circular(14);
+    return Tooltip(
+      message: active ? 'Filtros ($count ativos)' : 'Filtros',
+      child: Material(
+        color: active ? brand.withValues(alpha: isDark ? 0.16 : 0.09) : fill,
+        borderRadius: radius,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: radius,
+          child: Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              borderRadius: radius,
+              border: Border.all(
+                color: active
+                    ? brand.withValues(alpha: 0.5)
+                    : ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+                width: active ? 1.4 : 1,
+              ),
+            ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Center(
+                  child: Icon(
+                    LucideIcons.slidersHorizontal,
+                    size: 19,
+                    color: active ? brand : ThemeHelpers.textColor(context),
+                  ),
+                ),
+                if (active)
+                  Positioned(
+                    right: 4,
+                    top: 4,
+                    child: Container(
+                      constraints: const BoxConstraints(
+                        minWidth: 16,
+                        minHeight: 16,
                       ),
-                      onTap: widget.onFilterTap,
-                      child: Container(
-                        height: 50,
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        alignment: Alignment.center,
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          alignment: Alignment.center,
-                          children: [
-                            Icon(
-                              LucideIcons.slidersHorizontal,
-                              size: 18,
-                              color: filterActive ? accent : textColor,
-                            ),
-                            if (filterActive)
-                              Positioned(
-                                right: -8,
-                                top: -6,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 5,
-                                    vertical: 1,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: accent,
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(
-                                      color: cardColor,
-                                      width: 1.5,
-                                    ),
-                                  ),
-                                  constraints: const BoxConstraints(
-                                    minWidth: 16,
-                                    minHeight: 16,
-                                  ),
-                                  child: Text(
-                                    '${widget.filterCount}',
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 9.5,
-                                      fontWeight: FontWeight.w800,
-                                      height: 1,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: brand,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '$count',
+                        textScaler: TextScaler.noScaling,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          height: 1.2,
                         ),
                       ),
                     ),
                   ),
-                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Linha fina acima da lista: quantos resultados, quantos já carregados e o
+/// atalho para limpar busca e filtros.
+class _ListCaption extends StatelessWidget {
+  const _ListCaption({
+    required this.total,
+    required this.loaded,
+    required this.filtered,
+    this.onClearAll,
+  });
+
+  final int total;
+  final int loaded;
+  final bool filtered;
+  final VoidCallback? onClearAll;
+
+  @override
+  Widget build(BuildContext context) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final noun = filtered
+        ? (total == 1 ? 'resultado' : 'resultados')
+        : (total == 1 ? 'usuário na lista' : 'usuários na lista');
+    final more = loaded < total ? ' · mostrando $loaded' : '';
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 36),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '$total $noun$more',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                color: secondary,
               ),
             ),
           ),
-          // Link ghost "Limpar busca e filtros" — só aparece quando há
-          // estado ativo. Some sem ocupar espaço quando não usado.
-          if (widget.onClearAll != null) ...[
-            const SizedBox(height: 6),
-            Align(
-              alignment: Alignment.centerRight,
-              child: InkWell(
-                onTap: widget.onClearAll,
-                borderRadius: BorderRadius.circular(6),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 4,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(LucideIcons.x, size: 11, color: secondaryColor),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Limpar busca e filtros',
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w800,
-                          color: secondaryColor,
-                          letterSpacing: 0.2,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+          if (onClearAll != null)
+            TextButton.icon(
+              onPressed: onClearAll,
+              style: TextButton.styleFrom(
+                // Neutro: o tema pinta TextButton com o vermelho da marca.
+                foregroundColor: secondary,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 36),
+                visualDensity: VisualDensity.compact,
+              ),
+              icon: const Icon(LucideIcons.x, size: 14),
+              // Curto de propósito: ao lado da contagem, "Limpar" basta — e
+              // não espreme o número em 320dp com fonte grande.
+              label: const Text(
+                'Limpar',
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
               ),
             ),
-          ],
         ],
       ),
     );
   }
 }
 
+class _RefetchBar extends StatelessWidget {
+  const _RefetchBar();
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final brand =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(2),
+      child: LinearProgressIndicator(
+        minHeight: 2,
+        semanticsLabel: 'Atualizando a lista',
+        backgroundColor: ThemeHelpers.borderLightColor(context),
+        valueColor: AlwaysStoppedAnimation(brand),
+      ),
+    );
+  }
+}
+
 // ──────────────────────────────────────────────────────────────────────────
-// Lista de usuários (cards refinados)
+// Lista — linhas flush com filete: quem, papel/cargo, estado, último acesso
 // ──────────────────────────────────────────────────────────────────────────
+
+/// "hoje às 14:20", "ontem às 09:10", "há 3 dias", "em 12 de mar."…
+String _lastAccessLabel(DateTime at) {
+  final local = at.toLocal();
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final day = DateTime(local.year, local.month, local.day);
+  final days = (today.difference(day).inHours / 24).round();
+  final hm = DateFormat('HH:mm', 'pt_BR').format(local);
+  if (days <= 0) return 'hoje às $hm';
+  if (days == 1) return 'ontem às $hm';
+  if (days < 7) return 'há $days dias';
+  if (local.year == now.year) {
+    return 'em ${DateFormat("d 'de' MMM", 'pt_BR').format(local)}';
+  }
+  return 'em ${DateFormat("d 'de' MMM 'de' yyyy", 'pt_BR').format(local)}';
+}
+
+bool _isDisabled(AdminUser u) => !u.isActiveInCompany || !u.active;
 
 class _UsersList extends StatelessWidget {
   const _UsersList({
     required this.users,
+    required this.canEdit,
     required this.onToggleActive,
     required this.onOpenEdit,
   });
 
   final List<AdminUser> users;
+  final bool canEdit;
   final Future<void> Function(AdminUser) onToggleActive;
   final Future<void> Function(AdminUser) onOpenEdit;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      child: Column(
-        children: [
-          for (final u in users) ...[
-            _UserCard(
-              user: u,
-              onToggleActive: () => onToggleActive(u),
-              onOpenEdit: () => onOpenEdit(u),
+    final hairline = ThemeHelpers.borderLightColor(context);
+    return Column(
+      children: [
+        for (var i = 0; i < users.length; i++) ...[
+          if (i > 0)
+            Container(
+              height: 1,
+              margin: const EdgeInsets.only(left: 56),
+              color: hairline,
             ),
-            const SizedBox(height: 10),
-          ],
+          _UserRow(
+            user: users[i],
+            canEdit: canEdit,
+            onToggleActive: () => onToggleActive(users[i]),
+            onOpenEdit: () => onOpenEdit(users[i]),
+          ),
         ],
-      ),
+      ],
     );
   }
 }
 
-class _UserCard extends StatelessWidget {
-  const _UserCard({
+class _UserRow extends StatelessWidget {
+  const _UserRow({
     required this.user,
+    required this.canEdit,
     required this.onToggleActive,
     required this.onOpenEdit,
   });
 
   final AdminUser user;
+  final bool canEdit;
   final Future<void> Function() onToggleActive;
   final Future<void> Function() onOpenEdit;
 
-  /// Cor do papel — alinhada ao hero (Corretor=verde, Gestor=azul, Admin=roxo)
-  /// para coerência em toda a tela de Usuários e na de Editar.
-  Color _roleColor(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    switch (user.role.toLowerCase()) {
-      case 'master':
-        return isDark ? const Color(0xFFC4B5FD) : const Color(0xFF6D28D9);
-      case 'admin':
-        return isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
-      case 'manager':
-        return isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
-      case 'user':
-      default:
-        return isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
-    }
-  }
-
-  /// Status visual de presença — alinhado com web `UsersPage.tsx`.
-  /// `active` → conta ativa e já acessou. `unknown` → nunca acessou.
-  /// `inactive` → conta desativada na empresa.
-  Color _presenceColor() {
-    if (!user.isActiveInCompany || !user.active) {
-      return const Color(0xFFA1A1AA); // slate — desativado
-    }
-    if (user.neverLoggedIn) return const Color(0xFFF59E0B); // amber — nunca
-    return const Color(0xFF10B981); // emerald — ativo
-  }
-
-  String _statusLabel() {
-    if (!user.isActiveInCompany || !user.active) return 'Desativado';
-    if (user.neverLoggedIn) return 'Nunca acessou';
-    return 'Ativo';
-  }
-
-  IconData _statusIcon() {
-    if (!user.isActiveInCompany || !user.active) return LucideIcons.minus;
-    if (user.neverLoggedIn) return LucideIcons.clock;
-    return LucideIcons.check;
-  }
-
-  /// Mascara CPF como `***.***.***-XX` (apenas últimos 2 dígitos visíveis),
-  /// paridade com `maskCPFOculto` do web.
-  String? _maskedDocument() {
-    final raw = user.document;
-    if (raw == null || raw.trim().isEmpty) return null;
-    final digits = raw.replaceAll(RegExp(r'\D'), '');
-    if (digits.length < 2) return '***.***.***-**';
-    final tail = digits.substring(digits.length - 2);
-    return '***.***.***-$tail';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final accent = theme.colorScheme.primary;
-    final textColor = ThemeHelpers.textColor(context);
-    final secondaryColor = ThemeHelpers.textSecondaryColor(context);
-    final borderColor = ThemeHelpers.borderColor(context);
-    final cardColor = ThemeHelpers.cardBackgroundColor(context);
-    final roleColor = _roleColor(context);
-    final presence = _presenceColor();
-
-    final canEdit = ModuleAccessService.instance.hasPermission(
-      AppPermissions.userUpdate,
-    );
-
-    final phone = user.phone?.trim();
-    final docMasked = _maskedDocument();
-    final lastLoginLabel = user.lastLoginAt != null
-        ? DateFormat(
-            "d 'de' MMM · HH:mm",
-            'pt_BR',
-          ).format(user.lastLoginAt!.toLocal())
-        : 'Nunca';
-    final createdAtLabel = user.createdAt != null
-        ? DateFormat(
-            "d 'de' MMM yyyy",
-            'pt_BR',
-          ).format(user.createdAt!.toLocal())
-        : null;
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: canEdit ? () => onOpenEdit() : null,
-        child: Container(
-          decoration: BoxDecoration(
-            color: cardColor,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: borderColor.withValues(alpha: 0.55)),
-          ),
-          padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ── HEADER: avatar com presence dot + identidade + menu ────
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _UserAvatar(
-                    name: user.name,
-                    avatarUrl: user.avatar,
-                    accent: accent,
-                    presenceColor: presence,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          user.name.isEmpty ? '—' : user.name,
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w900,
-                            color: textColor,
-                            letterSpacing: -0.3,
-                            height: 1.15,
-                            fontSize: 15,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 3),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              LucideIcons.mail,
-                              size: 11,
-                              color: secondaryColor,
-                            ),
-                            const SizedBox(width: 5),
-                            Flexible(
-                              child: Text(
-                                user.email,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: secondaryColor,
-                                  fontWeight: FontWeight.w600,
-                                  height: 1.2,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                        if (phone != null || docMasked != null) ...[
-                          const SizedBox(height: 6),
-                          Wrap(
-                            spacing: 10,
-                            runSpacing: 4,
-                            children: [
-                              if (phone != null)
-                                _InlineDatum(
-                                  icon: LucideIcons.phone,
-                                  text: phone,
-                                  color: secondaryColor,
-                                ),
-                              if (docMasked != null)
-                                _InlineDatum(
-                                  icon: LucideIcons.fingerprint,
-                                  text: docMasked,
-                                  color: secondaryColor,
-                                  monospace: true,
-                                ),
-                            ],
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  if (canEdit)
-                    InkResponse(
-                      radius: 20,
-                      onTap: () => _showUserActions(context),
-                      child: Padding(
-                        padding: const EdgeInsets.all(6),
-                        child: Icon(
-                          LucideIcons.moreVertical,
-                          size: 18,
-                          color: secondaryColor,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              // ── BADGE ROW: role + status (paridade com web) ───────────
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  _Badge(
-                    label: user.roleLabel,
-                    color: roleColor,
-                    isDark: isDark,
-                    icon: LucideIcons.shieldCheck,
-                  ),
-                  _Badge(
-                    label: _statusLabel(),
-                    color: presence,
-                    isDark: isDark,
-                    icon: _statusIcon(),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              // ── META: último acesso ───────────────────────────────────
-              _MetaCell(
-                icon: LucideIcons.clock,
-                label: 'ÚLTIMO ACESSO',
-                child: Text(
-                  lastLoginLabel,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                    color: textColor,
-                    height: 1.2,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Container(height: 1, color: borderColor.withValues(alpha: 0.4)),
-              const SizedBox(height: 10),
-              // ── FOOTER: "Desde {date}" + edit hint ───────────────────
-              Row(
-                children: [
-                  if (createdAtLabel != null) ...[
-                    Icon(
-                      LucideIcons.calendar,
-                      size: 12,
-                      color: secondaryColor.withValues(alpha: 0.75),
-                    ),
-                    const SizedBox(width: 5),
-                    Flexible(
-                      child: RichText(
-                        text: TextSpan(
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: secondaryColor,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.1,
-                          ),
-                          children: [
-                            const TextSpan(text: 'Desde '),
-                            TextSpan(
-                              text: createdAtLabel,
-                              style: TextStyle(
-                                color: textColor,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ] else
-                    const SizedBox.shrink(),
-                  const Spacer(),
-                  if (canEdit) ...[
-                    Text(
-                      'Abrir edição',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w900,
-                        color: accent,
-                        letterSpacing: 0.2,
-                      ),
-                    ),
-                    const SizedBox(width: 3),
-                    Icon(LucideIcons.arrowRight, size: 13, color: accent),
-                  ],
-                ],
-              ),
-            ],
+  void _explainLocked(BuildContext context) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            'Você não tem permissão para editar usuários. Peça ao '
+            'administrador da empresa.',
           ),
         ),
-      ),
-    );
+      );
   }
 
   void _showUserActions(BuildContext context) {
@@ -1277,137 +1183,462 @@ class _UserCard extends StatelessWidget {
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (ctx) {
-        final theme = Theme.of(ctx);
-        final isDark = theme.brightness == Brightness.dark;
-        final textColor = ThemeHelpers.textColor(ctx);
-        final secondaryColor = ThemeHelpers.textSecondaryColor(ctx);
-        final editAccent = isDark
-            ? const Color(0xFF818CF8)
-            : const Color(0xFF6366F1);
-        final danger = isDark
-            ? AppColors.status.errorDarkMode
-            : AppColors.status.error;
-        final emerald = isDark
-            ? const Color(0xFF34D399)
-            : const Color(0xFF059669);
-        final roleColor = _roleColor(ctx);
-        final presence = _presenceColor();
-        final willDeactivate = user.isActiveInCompany;
+      builder: (ctx) => _UserActionsSheet(
+        user: user,
+        onEdit: () async {
+          Navigator.of(ctx).pop();
+          await onOpenEdit();
+        },
+        onToggle: () async {
+          Navigator.of(ctx).pop();
+          await onToggleActive();
+        },
+      ),
+    );
+  }
 
-        return Container(
-          decoration: BoxDecoration(
-            color: ThemeHelpers.cardBackgroundColor(ctx),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            border: Border.all(
-              color: ThemeHelpers.borderColor(ctx).withValues(alpha: 0.5),
-            ),
-          ),
-          padding: const EdgeInsets.fromLTRB(18, 10, 18, 18),
-          child: SafeArea(
-            top: false,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 38,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: ThemeHelpers.borderColor(ctx),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ),
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final disabled = _isDisabled(user);
+
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: canEdit ? () => onOpenEdit() : () => _explainLocked(context),
+        onLongPress: canEdit ? () => _showUserActions(context) : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Opacity(
+                opacity: disabled ? 0.5 : 1,
+                child: UaAvatar(
+                  name: user.name,
+                  url: user.avatar,
+                  tone: uaRoleTone(user.role, isDark: isDark),
+                  size: 44,
+                  radius: 14,
                 ),
-                const SizedBox(height: 16),
-                // Identidade.
-                Row(
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _UserAvatar(
-                      name: user.name,
-                      avatarUrl: user.avatar,
-                      accent: theme.colorScheme.primary,
-                      presenceColor: presence,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            user.name.isEmpty ? '—' : user.name,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w900,
-                              color: textColor,
-                              letterSpacing: -0.2,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            user.email,
-                            style: TextStyle(
-                              color: secondaryColor,
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 7),
-                          _Badge(
-                            label: user.roleLabel,
-                            color: roleColor,
-                            isDark: isDark,
-                            icon: LucideIcons.shieldCheck,
-                          ),
-                        ],
+                    Text(
+                      user.name.isEmpty ? 'Sem nome' : user.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: disabled ? secondary : textColor,
+                        letterSpacing: -0.2,
+                        height: 1.2,
                       ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      user.email,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w500,
+                        color: secondary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        _RoleMark(user: user),
+                        _StatusMark(user: user),
+                      ],
                     ),
                   ],
                 ),
-                const SizedBox(height: 18),
-                _ActionTile(
-                  icon: LucideIcons.userPen,
-                  tone: editAccent,
-                  title: 'Editar usuário',
-                  subtitle: 'Papel, acessos e permissões',
-                  onTap: () async {
-                    Navigator.of(ctx).pop();
-                    await onOpenEdit();
-                  },
+              ),
+              const SizedBox(width: 4),
+              if (canEdit)
+                IconButton(
+                  tooltip: 'Ações do usuário',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => _showUserActions(context),
+                  icon: Icon(
+                    LucideIcons.ellipsisVertical,
+                    size: 18,
+                    color: secondary,
+                  ),
+                )
+              else
+                Tooltip(
+                  message: 'Sem permissão para editar usuários',
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Icon(
+                      LucideIcons.lock,
+                      size: 15,
+                      color: secondary.withValues(alpha: 0.75),
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 10),
-                _ActionTile(
-                  icon: willDeactivate
-                      ? LucideIcons.userMinus
-                      : LucideIcons.userCheck,
-                  tone: willDeactivate ? danger : emerald,
-                  title: willDeactivate
-                      ? 'Desativar usuário'
-                      : 'Ativar usuário',
-                  subtitle: willDeactivate
-                      ? 'Revoga o acesso ao sistema'
-                      : 'Restaura o acesso ao sistema',
-                  onTap: () async {
-                    Navigator.of(ctx).pop();
-                    await onToggleActive();
-                  },
-                ),
-              ],
-            ),
+            ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }
 
-/// Tile de ação do modal — ícone tonal em quadrado + título/subtítulo +
-/// chevron. Refinado, com toque amplo.
+/// Papel (quadradinho na cor do papel + nome) e, quando houver, o cargo.
+class _RoleMark extends StatelessWidget {
+  const _RoleMark({required this.user});
+
+  final AdminUser user;
+
+  @override
+  Widget build(BuildContext context) {
+    final cargo = (user.jobLevelName ?? '').trim();
+    final role = uaRoleLabel(user.role, isOwner: user.owner);
+    final text = cargo.isEmpty ? role : '$role · $cargo';
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: uaRoleSwatch(user.role),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: ThemeHelpers.textColor(context),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Estado + último acesso. Ativo = check discreto com "Acessou há…";
+/// exceções (nunca acessou, desativado) ganham pílula para saltar aos olhos.
+class _StatusMark extends StatelessWidget {
+  const _StatusMark({required this.user});
+
+  final AdminUser user;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final last = user.lastLoginAt;
+    if (_isDisabled(user)) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _Pill(
+            label: 'Desativado',
+            icon: LucideIcons.ban,
+            tone: isDark
+                ? AppColors.text.textLightDarkMode
+                : AppColors.text.textLight,
+          ),
+          if (last != null) ...[
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                'último acesso ${_lastAccessLabel(last)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: secondary,
+                ),
+              ),
+            ),
+          ],
+        ],
+      );
+    }
+    if (last == null) {
+      return _Pill(
+        label: 'Nunca acessou',
+        icon: LucideIcons.clock,
+        tone: isDark
+            ? AppColors.status.warningDarkMode
+            : AppColors.message.warningText,
+      );
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          LucideIcons.circleCheck,
+          size: 13,
+          color: isDark
+              ? AppColors.status.successDarkMode
+              : AppColors.status.success,
+        ),
+        const SizedBox(width: 5),
+        Flexible(
+          child: Text(
+            'Acessou ${_lastAccessLabel(last)}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: secondary,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Pílula de estado: tom no fundo, borda e ícone; texto na tinta de texto.
+class _Pill extends StatelessWidget {
+  const _Pill({required this.label, required this.icon, required this.tone});
+
+  final String label;
+  final IconData icon;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: isDark ? 0.18 : 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: tone.withValues(alpha: isDark ? 0.4 : 0.32)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 11, color: tone),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: ThemeHelpers.textColor(context),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Folha de ações da linha (identidade + editar + desativar/reativar)
+// ──────────────────────────────────────────────────────────────────────────
+
+class _UserActionsSheet extends StatelessWidget {
+  const _UserActionsSheet({
+    required this.user,
+    required this.onEdit,
+    required this.onToggle,
+  });
+
+  final AdminUser user;
+  final VoidCallback onEdit;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final hairline = ThemeHelpers.borderLightColor(context);
+    final willDeactivate = user.isActiveInCompany;
+    final danger =
+        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final success =
+        isDark ? AppColors.status.successDarkMode : AppColors.status.success;
+    final info = isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
+    final phone = user.phone?.trim();
+
+    return Container(
+      // Teto de 88%: em paisagem/tela baixa as ações rolam dentro.
+      constraints: BoxConstraints(maxHeight: mq.size.height * 0.88),
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border(
+          top: BorderSide(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.6),
+          ),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(top: 8, bottom: 10),
+                decoration: BoxDecoration(
+                  color: ThemeHelpers.borderColor(context),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 6, 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  UaAvatar(
+                    name: user.name,
+                    url: user.avatar,
+                    tone: uaRoleTone(user.role, isDark: isDark),
+                    size: 48,
+                    radius: 15,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          user.name.isEmpty ? 'Sem nome' : user.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 16.5,
+                            fontWeight: FontWeight.w900,
+                            color: textColor,
+                            letterSpacing: -0.3,
+                            height: 1.2,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          user.email,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: secondary,
+                          ),
+                        ),
+                        if (phone != null && phone.isNotEmpty)
+                          Text(
+                            phone,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: secondary,
+                            ),
+                          ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 6,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            _RoleMark(user: user),
+                            _StatusMark(user: user),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Fechar',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => Navigator.of(context).maybePop(),
+                    icon: Icon(LucideIcons.x, size: 20, color: secondary),
+                  ),
+                ],
+              ),
+            ),
+            Container(height: 1, color: hairline),
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(4, 6, 4, 10),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _ActionTile(
+                      icon: LucideIcons.userPen,
+                      tone: info,
+                      title: 'Editar usuário',
+                      subtitle: 'Dados, papel, gestores, tags e permissões',
+                      onTap: onEdit,
+                    ),
+                    Container(
+                      height: 1,
+                      margin: const EdgeInsets.only(left: 68, right: 12),
+                      color: hairline,
+                    ),
+                    _ActionTile(
+                      icon: willDeactivate
+                          ? LucideIcons.userX
+                          : LucideIcons.userCheck,
+                      tone: willDeactivate ? danger : success,
+                      title: willDeactivate
+                          ? 'Desativar acesso'
+                          : 'Reativar acesso',
+                      subtitle: willDeactivate
+                          ? 'Bloqueia o login nesta empresa. Antes de '
+                              'confirmar, você vê o que acontece com os '
+                              'cards do funil.'
+                          : 'Libera o login nesta empresa de novo, na hora.',
+                      titleColor: willDeactivate ? danger : null,
+                      onTap: onToggle,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Tile flush da folha de ações — roundel no tom do significado + título +
+/// subtítulo informativo + chevron (sem caixa tingida em volta).
 class _ActionTile extends StatelessWidget {
   const _ActionTile({
     required this.icon,
@@ -1415,6 +1646,7 @@ class _ActionTile extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.titleColor,
   });
 
   final IconData icon;
@@ -1422,31 +1654,27 @@ class _ActionTile extends StatelessWidget {
   final String title;
   final String subtitle;
   final VoidCallback onTap;
+  final Color? titleColor;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
     return Material(
       color: Colors.transparent,
+      borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: tone.withValues(alpha: isDark ? 0.10 : 0.06),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: tone.withValues(alpha: 0.28)),
-          ),
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Row(
             children: [
               Container(
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: tone.withValues(alpha: isDark ? 0.20 : 0.14),
+                  color: tone.withValues(alpha: isDark ? 0.18 : 0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(icon, size: 19, color: tone),
@@ -1458,26 +1686,36 @@ class _ActionTile extends StatelessWidget {
                   children: [
                     Text(
                       title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 14.5,
                         fontWeight: FontWeight.w800,
-                        color: textColor,
+                        color: titleColor ?? ThemeHelpers.textColor(context),
                         letterSpacing: -0.2,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w500,
                         color: secondary,
+                        height: 1.3,
                       ),
                     ),
                   ],
                 ),
               ),
-              Icon(LucideIcons.chevronRight, size: 18, color: secondary),
+              const SizedBox(width: 8),
+              Icon(
+                LucideIcons.chevronRight,
+                size: 18,
+                color: secondary.withValues(alpha: 0.7),
+              ),
             ],
           ),
         ),
@@ -1486,377 +1724,175 @@ class _ActionTile extends StatelessWidget {
   }
 }
 
-/// Avatar do usuário — paridade com `UserCardAvatar` do web. Mostra foto
-/// quando disponível; caso contrário, monograma de 2 letras em gradiente.
-/// Presence dot pequeno sobreposto no canto inferior direito, com cor
-/// herdada do status semântico (ativo · nunca · desativado).
-class _UserAvatar extends StatelessWidget {
-  const _UserAvatar({
-    required this.name,
-    required this.avatarUrl,
-    required this.accent,
-    required this.presenceColor,
-  });
+// ──────────────────────────────────────────────────────────────────────────
+// Skeleton / Vazio / Erro / Sem acesso
+// ──────────────────────────────────────────────────────────────────────────
 
-  final String name;
-  final String? avatarUrl;
-  final Color accent;
-  final Color presenceColor;
+/// Skeleton fiel à linha: avatar, nome, e-mail e a linha de papel/estado.
+class _UsersSkeleton extends StatelessWidget {
+  const _UsersSkeleton({this.rows = 6});
 
-  static const double _size = 52;
-  static const double _dotSize = 13;
-
-  String _initials() {
-    final parts = name.trim().split(RegExp(r'\s+'));
-    if (parts.isEmpty || parts.first.isEmpty) return '?';
-    if (parts.length == 1) {
-      return parts.first.substring(0, 1).toUpperCase();
-    }
-    return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-  }
-
-  Widget _monogram() {
-    final deep = HSLColor.fromColor(accent)
-        .withLightness(
-          (HSLColor.fromColor(accent).lightness * 0.78).clamp(0.0, 1.0),
-        )
-        .toColor();
-    return Container(
-      width: _size,
-      height: _size,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [accent, deep],
-        ),
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        _initials(),
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w900,
-          fontSize: 17,
-          letterSpacing: 0.4,
-        ),
-      ),
-    );
-  }
+  final int rows;
 
   @override
   Widget build(BuildContext context) {
-    final hasPhoto = avatarUrl != null && avatarUrl!.trim().isNotEmpty;
-    final cardColor = ThemeHelpers.cardBackgroundColor(context);
-
-    final avatar = hasPhoto
-        ? Container(
-            width: _size,
-            height: _size,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: accent.withValues(alpha: 0.22),
-                width: 1.2,
-              ),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Image.network(
-              avatarUrl!,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => _monogram(),
-              loadingBuilder: (_, child, progress) {
-                if (progress == null) return child;
-                return _monogram();
-              },
-            ),
-          )
-        : _monogram();
-
-    return SizedBox(
-      width: _size + 2,
-      height: _size + 2,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          avatar,
-          // Presence dot — sobreposto, com ring da cor do card pra recortar
-          // o avatar e dar destaque.
-          Positioned(
-            right: -1,
-            bottom: -1,
-            child: Container(
-              width: _dotSize,
-              height: _dotSize,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: presenceColor,
-                border: Border.all(color: cardColor, width: 2),
-                boxShadow: [
-                  BoxShadow(
-                    color: presenceColor.withValues(alpha: 0.55),
-                    blurRadius: 6,
-                    spreadRadius: 0.3,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Badge extends StatelessWidget {
-  const _Badge({
-    required this.label,
-    required this.color,
-    required this.isDark,
-    required this.icon,
-  });
-
-  final String label;
-  final Color color;
-  final bool isDark;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: isDark ? 0.18 : 0.10),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: color.withValues(alpha: isDark ? 0.35 : 0.22),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 11, color: color),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w800,
-              fontSize: 10.5,
-              letterSpacing: 0.2,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Item inline de dado complementar (telefone, CPF). Ícone pequeno +
-/// texto compacto — usado abaixo do email do usuário no card. Paridade
-/// com `UserCardInlineDataItem` do web.
-class _InlineDatum extends StatelessWidget {
-  const _InlineDatum({
-    required this.icon,
-    required this.text,
-    required this.color,
-    this.monospace = false,
-  });
-
-  final IconData icon;
-  final String text;
-  final Color color;
-  final bool monospace;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 11, color: color),
-        const SizedBox(width: 4),
-        Text(
-          text,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            color: color,
-            letterSpacing: monospace ? 0.4 : 0.1,
-            fontFamily: monospace ? 'monospace' : null,
-            height: 1.2,
-          ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ],
-    );
-  }
-}
-
-/// Célula da meta grid (último acesso · visibilidade). Label uppercase
-/// pequeno em accent secondary + child livre. Paridade com `UserCardMetaItem`.
-class _MetaCell extends StatelessWidget {
-  const _MetaCell({
-    required this.icon,
-    required this.label,
-    required this.child,
-  });
-
-  final IconData icon;
-  final String label;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final secondaryColor = ThemeHelpers.textSecondaryColor(context);
+    final hairline = ThemeHelpers.borderLightColor(context);
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 10, color: secondaryColor),
-            const SizedBox(width: 5),
-            Flexible(
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: 9,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1.2,
-                  color: secondaryColor,
-                  height: 1.0,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+        for (var i = 0; i < rows; i++) ...[
+          if (i > 0)
+            Container(
+              height: 1,
+              margin: const EdgeInsets.only(left: 56),
+              color: hairline,
             ),
-          ],
-        ),
-        const SizedBox(height: 5),
-        child,
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SkeletonBox(width: 44, height: 44, borderRadius: 14),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonBox(
+                        width: 130.0 + (i % 3) * 22,
+                        height: 14,
+                        borderRadius: 4,
+                      ),
+                      const SizedBox(height: 7),
+                      const SkeletonBox(width: 180, height: 11, borderRadius: 4),
+                      const SizedBox(height: 11),
+                      const Wrap(
+                        spacing: 12,
+                        runSpacing: 6,
+                        children: [
+                          SkeletonBox(width: 84, height: 12, borderRadius: 4),
+                          SkeletonBox(width: 118, height: 12, borderRadius: 4),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const SkeletonBox(width: 18, height: 18, borderRadius: 4),
+              ],
+            ),
+          ),
+        ],
       ],
     );
   }
 }
 
-// Acesso ao app móvel é controlado por empresa (mobile_app_access_for_all),
-// sem status/toggle individual por usuário.
-
-// ──────────────────────────────────────────────────────────────────────────
-// Shimmer / Empty / Error / Denied
-// ──────────────────────────────────────────────────────────────────────────
-
-class _UsersShimmer extends StatelessWidget {
-  const _UsersShimmer();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      child: Column(
-        children: List.generate(
-          5,
-          (_) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Container(
-              decoration: BoxDecoration(
-                color: ThemeHelpers.cardBackgroundColor(context),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: ThemeHelpers.borderColor(
-                    context,
-                  ).withValues(alpha: 0.5),
-                ),
-              ),
-              padding: const EdgeInsets.all(14),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SkeletonBox(width: 48, height: 48, borderRadius: 14),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
-                        SkeletonBox(width: 160, height: 14, borderRadius: 4),
-                        SizedBox(height: 8),
-                        SkeletonBox(width: 220, height: 11, borderRadius: 4),
-                        SizedBox(height: 14),
-                        Row(
-                          children: [
-                            SkeletonBox(
-                              width: 60,
-                              height: 18,
-                              borderRadius: 999,
-                            ),
-                            SizedBox(width: 6),
-                            SkeletonBox(
-                              width: 70,
-                              height: 18,
-                              borderRadius: 999,
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
+/// Vazio que ensina: com busca/filtro, diz o que fazer e oferece limpar;
+/// sem nada, explica para que serve a tela e leva ao cadastro.
 class _EmptyBlock extends StatelessWidget {
-  const _EmptyBlock();
+  const _EmptyBlock({
+    required this.filtered,
+    required this.canCreate,
+    required this.onClear,
+    required this.onCreate,
+  });
+
+  final bool filtered;
+  final bool canCreate;
+  final VoidCallback onClear;
+  final VoidCallback onCreate;
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final textColor = ThemeHelpers.textColor(context);
+    final brand =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 30, 20, 30),
-      child: Center(
-        child: Column(
-          children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: ThemeHelpers.borderColor(
-                  context,
-                ).withValues(alpha: 0.35),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(LucideIcons.users, size: 24, color: secondary),
+      padding: const EdgeInsets.fromLTRB(8, 36, 8, 24),
+      child: Column(
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: ThemeHelpers.borderLightColor(context),
+              shape: BoxShape.circle,
             ),
-            const SizedBox(height: 14),
-            Text(
-              'Nenhum usuário encontrado',
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w800,
-                color: textColor,
+            child: Icon(
+              filtered ? LucideIcons.searchX : LucideIcons.users,
+              size: 24,
+              color: secondary,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            filtered
+                ? 'Ninguém com essa busca ou filtros'
+                : 'Nenhum usuário por aqui ainda',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: textColor,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            filtered
+                ? 'Confira a grafia do nome ou do e-mail, ou limpe os filtros '
+                    'para ver a equipe inteira.'
+                : 'Cadastre a equipe da empresa para que cada pessoa entre '
+                    'no sistema com o próprio acesso.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              color: secondary,
+              fontWeight: FontWeight.w500,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (filtered)
+            OutlinedButton.icon(
+              onPressed: onClear,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: textColor,
+                side: BorderSide(color: ThemeHelpers.borderColor(context)),
+                minimumSize: const Size(0, 44),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              icon: const Icon(LucideIcons.x, size: 16),
+              label: const Text(
+                'Limpar busca e filtros',
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+              ),
+            )
+          else if (canCreate)
+            FilledButton.icon(
+              onPressed: onCreate,
+              style: FilledButton.styleFrom(
+                backgroundColor: brand,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(0, 44),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              icon: const Icon(LucideIcons.userPlus, size: 17),
+              label: const Text(
+                'Cadastrar o primeiro usuário',
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
               ),
             ),
-            const SizedBox(height: 6),
-            Text(
-              'Ajuste a busca ou os filtros para tentar novamente.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 12.5,
-                color: secondary,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -1892,35 +1928,38 @@ class _UsersDeniedView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(28),
-      child: Center(
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(28),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              LucideIcons.lock,
-              size: 38,
-              color: ThemeHelpers.textSecondaryColor(context),
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: ThemeHelpers.borderLightColor(context),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(LucideIcons.lock, size: 24, color: secondary),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             Text(
-              'Você não tem permissão para ver usuários.',
+              'Você não tem acesso à lista de usuários',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                fontSize: 15.5,
               ),
             ),
             const SizedBox(height: 6),
             Text(
-              'Solicite ao administrador a permissão "user:view".',
+              'Peça ao administrador da empresa a permissão '
+              '"Visualizar usuários".',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                color: ThemeHelpers.textSecondaryColor(context),
-                fontSize: 12.5,
-              ),
+              style: TextStyle(color: secondary, fontSize: 13, height: 1.4),
             ),
           ],
         ),
@@ -2057,14 +2096,24 @@ class _DeactivateUserSheetState extends State<_DeactivateUserSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
+    final hairline = ThemeHelpers.borderLightColor(context);
     final danger =
         isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-    final warn = isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309);
-    final info = isDark ? const Color(0xFF60A5FA) : const Color(0xFF1D4ED8);
+    final warn = isDark
+        ? AppColors.status.warningDarkMode
+        : AppColors.message.warningText;
+    final info =
+        isDark ? AppColors.status.infoDarkMode : AppColors.message.infoText;
+    final success =
+        isDark ? AppColors.status.successDarkMode : AppColors.status.success;
     final total = _preview.totalOpenTasks;
+    final who = widget.user.name.trim().isEmpty
+        ? 'Esta pessoa'
+        : widget.user.name.trim();
 
     final confirmLabel = _submitting
         ? (_willRedistribute
@@ -2075,39 +2124,35 @@ class _DeactivateUserSheetState extends State<_DeactivateUserSheet> {
             : 'Confirmar desativação');
 
     return Container(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.sizeOf(context).height * 0.88,
-      ),
+      // Teto de 88% + corpo rolável: em paisagem só o miolo rola, título e
+      // botões ficam à vista.
+      constraints: BoxConstraints(maxHeight: mq.size.height * 0.88),
       decoration: BoxDecoration(
         color: ThemeHelpers.cardBackgroundColor(context),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+        border: Border(
+          top: BorderSide(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.6),
+          ),
         ),
       ),
-      padding: EdgeInsets.fromLTRB(
-        18,
-        10,
-        18,
-        14 + MediaQuery.paddingOf(context).bottom,
-      ),
+      padding: EdgeInsets.fromLTRB(16, 8, 16, 12 + mq.padding.bottom),
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Center(
             child: Container(
-              width: 38,
+              width: 40,
               height: 4,
+              margin: const EdgeInsets.only(bottom: 14),
               decoration: BoxDecoration(
                 color: ThemeHelpers.borderColor(context),
-                borderRadius: BorderRadius.circular(4),
+                borderRadius: BorderRadius.circular(999),
               ),
             ),
           ),
-          const SizedBox(height: 16),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
                 width: 40,
@@ -2116,7 +2161,7 @@ class _DeactivateUserSheetState extends State<_DeactivateUserSheet> {
                   color: danger.withValues(alpha: isDark ? 0.20 : 0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(LucideIcons.userMinus, size: 19, color: danger),
+                child: Icon(LucideIcons.userX, size: 19, color: danger),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -2125,22 +2170,24 @@ class _DeactivateUserSheetState extends State<_DeactivateUserSheet> {
                   children: [
                     Text(
                       'Desativar acesso',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 16.5,
+                        fontSize: 17,
                         fontWeight: FontWeight.w900,
                         color: textColor,
                         letterSpacing: -0.3,
                       ),
                     ),
-                    const SizedBox(height: 3),
+                    const SizedBox(height: 1),
                     Text(
-                      'Você está desativando ${widget.user.name} nesta empresa. '
-                      'Ele continua no cadastro, mas não entra mais no sistema.',
+                      who,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
                         color: secondary,
-                        height: 1.3,
                       ),
                     ),
                   ],
@@ -2148,20 +2195,37 @@ class _DeactivateUserSheetState extends State<_DeactivateUserSheet> {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+          Container(height: 1, color: hairline),
           Flexible(
             child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(vertical: 14),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: _loading
-                    ? const [
-                        SkeletonBox(height: 60, borderRadius: 14),
-                        SizedBox(height: 10),
-                        SkeletonBox(height: 60, borderRadius: 14),
-                        SizedBox(height: 10),
-                        SkeletonBox(height: 48, borderRadius: 14),
-                      ]
-                    : [
+                children: [
+                  // Frase do cabeçalho do modal do web (paridade) — já à
+                  // vista enquanto a prévia do funil carrega.
+                  Text(
+                    'Você está desativando ${widget.user.name} nesta empresa. '
+                    'Ele continua no cadastro, mas não entra mais no sistema.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: textColor,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  if (_loading)
+                    ...const [
+                      SizedBox(height: 8),
+                      SkeletonBox(height: 56, borderRadius: 12),
+                      SizedBox(height: 12),
+                      SkeletonBox(height: 56, borderRadius: 12),
+                      SizedBox(height: 12),
+                      SkeletonBox(height: 56, borderRadius: 12),
+                    ]
+                  else ...[
                         _impact(
                           icon: LucideIcons.ban,
                           tone: danger,
@@ -2212,6 +2276,9 @@ class _DeactivateUserSheetState extends State<_DeactivateUserSheet> {
                                                 fontSize: 12.5,
                                                 fontWeight: FontWeight.w900,
                                                 color: textColor,
+                                                fontFeatures: const [
+                                                  FontFeature.tabularFigures(),
+                                                ],
                                               ),
                                             ),
                                           ],
@@ -2232,11 +2299,11 @@ class _DeactivateUserSheetState extends State<_DeactivateUserSheet> {
                               color: secondary,
                             ),
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 10),
                           if (_showRedistribute) ...[
                             _choice(
                               selected: _redistribute,
-                              tone: AppColors.primary.primary,
+                              tone: success,
                               icon: LucideIcons.split,
                               title: 'Redistribuir entre a equipe e desativar',
                               hint:
@@ -2265,54 +2332,107 @@ class _DeactivateUserSheetState extends State<_DeactivateUserSheet> {
                             ),
                         ],
                         if (_error != null) ...[
-                          const SizedBox(height: 12),
-                          Text(
-                            _error!,
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w700,
-                              color: danger,
+                          const SizedBox(height: 14),
+                          Container(
+                            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                            decoration: BoxDecoration(
+                              color: danger.withValues(
+                                alpha: isDark ? 0.14 : 0.08,
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: danger.withValues(alpha: 0.35),
+                              ),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Icon(
+                                  LucideIcons.circleAlert,
+                                  size: 16,
+                                  color: danger,
+                                ),
+                                const SizedBox(width: 9),
+                                Expanded(
+                                  child: Text(
+                                    _error!,
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: textColor,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ],
+                ],
               ),
             ),
           ),
-          const SizedBox(height: 14),
+          Container(height: 1, color: hairline),
+          const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed:
-                      _submitting ? null : () => Navigator.of(context).pop(),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(0, 48),
-                    foregroundColor: textColor,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
+              TextButton(
+                onPressed:
+                    _submitting ? null : () => Navigator.of(context).pop(),
+                style: TextButton.styleFrom(
+                  // Cancelar nunca em vermelho: neutro forçado.
+                  foregroundColor: secondary,
+                  minimumSize: const Size(0, 48),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
                   ),
-                  child: const Text('Cancelar'),
+                ),
+                child: const Text(
+                  'Cancelar',
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
-                flex: 2,
-                child: FilledButton(
+                child: FilledButton.icon(
                   onPressed: _submitting || _loading ? null : _confirm,
                   style: FilledButton.styleFrom(
                     backgroundColor: danger,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: danger.withValues(alpha: 0.4),
+                    disabledForegroundColor:
+                        Colors.white.withValues(alpha: 0.9),
                     minimumSize: const Size(0, 48),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
                     ),
                   ),
-                  child: Text(
-                    confirmLabel,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  icon: _submitting
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(LucideIcons.userX, size: 18),
+                  label: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      confirmLabel,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -2323,9 +2443,10 @@ class _DeactivateUserSheetState extends State<_DeactivateUserSheet> {
     );
   }
 
-  Widget _divider() => Divider(
-        height: 20,
-        color: ThemeHelpers.borderLightColor(context).withValues(alpha: 0.7),
+  Widget _divider() => Container(
+        height: 1,
+        margin: const EdgeInsets.only(left: 46),
+        color: ThemeHelpers.borderLightColor(context),
       );
 
   Widget _impact({
@@ -2336,46 +2457,49 @@ class _DeactivateUserSheetState extends State<_DeactivateUserSheet> {
     Widget? extra,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: tone.withValues(alpha: isDark ? 0.18 : 0.10),
-            borderRadius: BorderRadius.circular(10),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: tone.withValues(alpha: isDark ? 0.18 : 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, size: 17, color: tone),
           ),
-          child: Icon(icon, size: 17, color: tone),
-        ),
-        const SizedBox(width: 11),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w800,
-                  color: ThemeHelpers.textColor(context),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: ThemeHelpers.textColor(context),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                body,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: ThemeHelpers.textSecondaryColor(context),
-                  height: 1.3,
+                const SizedBox(height: 2),
+                Text(
+                  body,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    height: 1.35,
+                  ),
                 ),
-              ),
-              ?extra,
-            ],
+                ?extra,
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -2387,64 +2511,81 @@ class _DeactivateUserSheetState extends State<_DeactivateUserSheet> {
     required String hint,
     required VoidCallback onTap,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    return GestureDetector(
-      onTap: _submitting ? null : onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: selected ? tone.withValues(alpha: 0.07) : Colors.transparent,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected
-                ? tone.withValues(alpha: 0.5)
-                : ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
-            width: selected ? 1.4 : 1,
-          ),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(
-              selected ? LucideIcons.circleDot : LucideIcons.circle,
-              size: 18,
-              color: selected ? tone : secondary,
+    final radius = BorderRadius.circular(14);
+    return Material(
+      color: selected
+          ? tone.withValues(alpha: isDark ? 0.12 : 0.07)
+          : Colors.transparent,
+      borderRadius: radius,
+      child: InkWell(
+        onTap: _submitting ? null : onTap,
+        borderRadius: radius,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            borderRadius: radius,
+            border: Border.all(
+              color: selected
+                  ? tone.withValues(alpha: 0.55)
+                  : ThemeHelpers.borderColor(context),
+              width: selected ? 1.5 : 1,
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(icon, size: 14, color: selected ? tone : secondary),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          title,
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w800,
-                            color: ThemeHelpers.textColor(context),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                selected ? LucideIcons.circleDot : LucideIcons.circle,
+                size: 18,
+                color: selected ? tone : secondary,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(top: 1),
+                          child: Icon(
+                            icon,
+                            size: 14,
+                            color: selected ? tone : secondary,
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    hint,
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      color: secondary,
-                      height: 1.3,
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w800,
+                              color: textColor,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 4),
+                    Text(
+                      hint,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: secondary,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

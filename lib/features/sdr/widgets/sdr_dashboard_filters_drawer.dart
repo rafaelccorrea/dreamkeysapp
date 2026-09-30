@@ -6,6 +6,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../models/sdr_dashboard_filters.dart';
 import '../models/sdr_metrics_model.dart';
+import 'sdr_tinta_legivel.dart';
 
 /// Bottom-sheet de filtros do dashboard SDR — gramática do
 /// `KanbanFiltersDrawer` (referência dos modais de filtro do app), com o
@@ -122,19 +123,31 @@ class _SdrDashboardFiltersDrawerState extends State<SdrDashboardFiltersDrawer> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cHeader =
-        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
-    final cPeriodo =
-        isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
-    final cEquipes =
-        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
+    // Os acentos viram texto (chip escolhido, "N ativos", "2 de 5", dias do
+    // recorte) e ícone pequeno: tinta legível, ≥ 4,5:1 no claro.
+    final cHeader = sdrTintaLegivel(
+      context,
+      isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple,
+    );
+    final cPeriodo = sdrTintaLegivel(
+      context,
+      isDark ? AppColors.status.blueDarkMode : AppColors.status.blue,
+    );
+    final cEquipes = sdrTintaLegivel(
+      context,
+      isDark ? AppColors.status.greenDarkMode : AppColors.status.green,
+    );
     final mq = MediaQuery.of(context);
     final activeCount = _activeCount;
+    // Tela baixa (paisagem, celular pequeno): a folha abre quase inteira e
+    // não desce ao ponto de o cabeçalho + rodapé fixos passarem da altura
+    // (em 0.45 de ~360dp eles não cabiam e a coluna estourava).
+    final compacta = mq.size.height < 560;
 
     return DraggableScrollableSheet(
       expand: false,
-      initialChildSize: 0.72,
-      minChildSize: 0.45,
+      initialChildSize: compacta ? 0.95 : 0.72,
+      minChildSize: compacta ? 0.75 : 0.45,
       maxChildSize: 0.95,
       builder: (context, scrollController) {
         return Container(
@@ -161,7 +174,7 @@ class _SdrDashboardFiltersDrawerState extends State<SdrDashboardFiltersDrawer> {
                   ),
                 ),
               ),
-              _buildHeader(context, cHeader, activeCount),
+              _buildHeader(context, cHeader, activeCount, compacta),
               Expanded(
                 child: ListView(
                   controller: scrollController,
@@ -282,15 +295,17 @@ class _SdrDashboardFiltersDrawerState extends State<SdrDashboardFiltersDrawer> {
                                                   context),
                                         ),
                                         const SizedBox(width: 5),
-                                        Text(
-                                          'Limpar seleção de equipes',
-                                          style: TextStyle(
-                                            fontSize: 11.5,
-                                            fontWeight: FontWeight.w700,
-                                            color:
-                                                ThemeHelpers
-                                                    .textSecondaryColor(
-                                                        context),
+                                        Flexible(
+                                          child: Text(
+                                            'Limpar seleção de equipes',
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 11.5,
+                                              fontWeight: FontWeight.w700,
+                                              color: ThemeHelpers
+                                                  .textSecondaryColor(context),
+                                            ),
                                           ),
                                         ),
                                       ],
@@ -313,7 +328,12 @@ class _SdrDashboardFiltersDrawerState extends State<SdrDashboardFiltersDrawer> {
     );
   }
 
-  Widget _buildHeader(BuildContext context, Color accent, int activeCount) {
+  Widget _buildHeader(
+    BuildContext context,
+    Color accent,
+    int activeCount,
+    bool compacta,
+  ) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     return Container(
@@ -381,14 +401,18 @@ class _SdrDashboardFiltersDrawerState extends State<SdrDashboardFiltersDrawer> {
                     ],
                   ],
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  'Recorte de período e equipes do funil do agente.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    height: 1.3,
+                // Em tela baixa a legenda sai: cada linha do cabeçalho fixo
+                // é uma linha a menos de filtro à vista.
+                if (!compacta) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    'Recorte de período e equipes do funil SDR.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: ThemeHelpers.textSecondaryColor(context),
+                      height: 1.3,
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ),
@@ -524,6 +548,8 @@ class _SdrDashboardFiltersDrawerState extends State<SdrDashboardFiltersDrawer> {
           Expanded(
             child: Text(
               '${fmt.format(r.start)} — ${fmt.format(r.end)}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w800,
@@ -586,16 +612,24 @@ class _SdrDashboardFiltersDrawerState extends State<SdrDashboardFiltersDrawer> {
               child: Icon(LucideIcons.calendar, size: 16, color: accent),
             ),
             const SizedBox(width: 10),
+            // A data encolhe em vez de quebrar: dois campos lado a lado
+            // deixam ~75dp para "01/09/2026" no 320.
             Expanded(
-              child: Text(
-                filled ? _fmt(value) : placeholder,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: filled
-                      ? ThemeHelpers.textColor(context)
-                      : ThemeHelpers.textSecondaryColor(context)
-                          .withValues(alpha: 0.9),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  filled ? _fmt(value) : placeholder,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: filled
+                        ? ThemeHelpers.textColor(context)
+                        : ThemeHelpers.textSecondaryColor(context)
+                            .withValues(alpha: 0.9),
+                  ),
                 ),
               ),
             ),
@@ -612,8 +646,11 @@ class _SdrDashboardFiltersDrawerState extends State<SdrDashboardFiltersDrawer> {
   ) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     // Verde = confirmação (Aplicar). Limpar é sempre neutro — nunca vermelho.
-    final confirm =
-        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
+    // Fundo com texto em cima: tinta legível (branco passa de 4,5:1).
+    final confirm = sdrTintaLegivel(
+      context,
+      isDark ? AppColors.status.greenDarkMode : AppColors.status.green,
+    );
     return Container(
       padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + mq.padding.bottom),
       decoration: BoxDecoration(
@@ -657,11 +694,14 @@ class _SdrDashboardFiltersDrawerState extends State<SdrDashboardFiltersDrawer> {
               icon: const Icon(LucideIcons.check, size: 18),
               label: Text(
                 activeCount == 0 ? 'Aplicar' : 'Aplicar ($activeCount)',
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontWeight: FontWeight.w800),
               ),
               style: FilledButton.styleFrom(
                 backgroundColor: confirm,
-                foregroundColor: Colors.white,
+                foregroundColor: ThemeHelpers.onPrimaryColor(context),
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
@@ -725,6 +765,8 @@ class _ChipChoice extends StatelessWidget {
             Flexible(
               child: Text(
                 label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.labelMedium?.copyWith(
                   fontSize: 12.5,
                   color: fg,

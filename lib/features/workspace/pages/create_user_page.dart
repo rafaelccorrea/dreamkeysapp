@@ -20,11 +20,15 @@ import '../widgets/user_access_widgets.dart';
 
 /// Criar usuário — paridade com o `CreateUserPage` do web num passo só:
 /// dados básicos (email e CPF/CNPJ checados antes do POST), senha inicial
-/// (com gerador), papel, gestores (obrigatório para corretor), cargo e
+/// (com gerador), papel, gestores (obrigatório para Colaborador), cargo e
 /// superior (admin/master), tags e permissões com as regras do web (fixas,
 /// dependências, alçada de quem cria, módulos do plano). Tudo vai no mesmo
-/// `POST /admin/users` — o back recusa corretor sem gestor e usuário sem
+/// `POST /admin/users` — o back recusa Colaborador sem gestor e usuário sem
 /// permissão, então não existe "configurar depois".
+///
+/// Layout: seções com cabeçalho flush; o que é obrigatório aparece como
+/// linha de requisito na própria seção e como pendência tocável na barra
+/// de salvar — a pessoa vê o que falta ANTES de tocar em "Criar usuário".
 class CreateUserPage extends StatefulWidget {
   const CreateUserPage({super.key});
 
@@ -34,12 +38,17 @@ class CreateUserPage extends StatefulWidget {
 
 class _CreateUserPageState extends State<CreateUserPage> {
   static const double _padH = 16;
+  static const double _gap = 28; // respiro entre seções
 
   final _name = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _document = TextEditingController();
   final _phone = TextEditingController();
+
+  // Âncoras para as pendências da barra de salvar levarem até a seção.
+  final _managersKey = GlobalKey();
+  final _permissionsKey = GlobalKey();
 
   String _role = 'user';
   bool _showPassword = false;
@@ -299,97 +308,65 @@ class _CreateUserPageState extends State<CreateUserPage> {
     );
   }
 
-  InputDecoration _dec(
-    String label, {
-    String? hint,
-    String? errorText,
-    Widget? suffixIcon,
-  }) =>
-      InputDecoration(
-        labelText: label,
-        hintText: hint,
-        errorText: errorText,
-        errorMaxLines: 2,
-        suffixIcon: suffixIcon,
-        filled: true,
-        fillColor: ThemeHelpers.cardBackgroundColor(context),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(
-            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
-          ),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(
-            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
-          ),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: _accent, width: 1.6),
-        ),
-      );
+  // ─── Apresentação ────────────────────────────────────────────────────────
 
-  Widget _sectionLabel(IconData icon, String label, {Widget? trailing}) => Row(
-        children: [
-          Icon(icon, size: 14, color: _accent),
-          const SizedBox(width: 7),
-          Expanded(
-            child: Text(
-              label.toUpperCase(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.1,
-                color: ThemeHelpers.textColor(context),
-              ),
-            ),
-          ),
-          ?trailing,
-        ],
-      );
-
-  Widget _hint(String text) => Text(
-        text,
-        style: TextStyle(
-          fontSize: 11.5,
-          fontWeight: FontWeight.w600,
-          color: ThemeHelpers.textSecondaryColor(context),
-        ),
-      );
-
-  /// Duas colunas quando cabe (largura e escala de fonte); senão empilha.
-  Widget _twoCols(Widget a, Widget b) {
-    return LayoutBuilder(
-      builder: (context, c) {
-        final fits = c.maxWidth >= 360 &&
-            MediaQuery.textScalerOf(context).scale(14) <= 16;
-        if (!fits) {
-          return Column(children: [a, const SizedBox(height: 12), b]);
-        }
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(child: a),
-            const SizedBox(width: 10),
-            Expanded(child: b),
-          ],
-        );
-      },
+  /// Leva a rolagem até a seção (usado pelas pendências da barra).
+  void _scrollTo(GlobalKey key) {
+    final ctx = key.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(
+      ctx,
+      duration: const Duration(milliseconds: 380),
+      curve: Curves.easeOutCubic,
+      alignment: 0.06,
     );
+  }
+
+  /// O que ainda impede o POST — mesmas condições do `_validate`, mostradas
+  /// antes do toque em salvar.
+  List<UaPending> _pending() {
+    final sel = _sel;
+    return [
+      if (_managerMissing)
+        UaPending('Gestor responsável', () => _scrollTo(_managersKey)),
+      if (sel != null && sel.selected.isEmpty)
+        UaPending('Pelo menos 1 permissão', () => _scrollTo(_permissionsKey)),
+    ];
+  }
+
+  /// Papéis criáveis: qualquer gestor cria Colaborador; admin/master também
+  /// criam Gestor e Proprietário (paridade com o web). O que a pessoa não
+  /// pode criar aparece travado, com o motivo. Nomes: [uaRoleLabel] — aqui o
+  /// admin é "Proprietário", como o cartão do `CreateUserPage` do web.
+  List<UaRoleChoice> _roleChoices() {
+    final myRole = _myRole();
+    final elevated = _elevated;
+    return [
+      const UaRoleChoice('user'),
+      UaRoleChoice(
+        'manager',
+        lockedReason: elevated || myRole == 'manager'
+            ? null
+            : 'Seu papel não permite cadastrar usuário '
+                '${uaRoleLabel('manager')}.',
+      ),
+      UaRoleChoice(
+        'admin',
+        isOwner: true,
+        lockedReason: elevated
+            ? null
+            : 'Seu papel não permite cadastrar usuário '
+                '${uaRoleLabel('admin', isOwner: true)}.',
+      ),
+    ];
   }
 
   @override
   Widget build(BuildContext context) {
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    // Papéis criáveis: qualquer gestor cria corretor; admin/master também
-    // criam gestores e proprietários (paridade com o web).
-    final myRole = _myRole();
     final elevated = _elevated;
     final sel = _sel;
+    final accent = _accent;
 
     return AppScaffold(
       title: 'Novo usuário',
@@ -397,366 +374,386 @@ class _CreateUserPageState extends State<CreateUserPage> {
       body: Column(
         children: [
           Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(_padH, 16, _padH, 20),
-              keyboardDismissBehavior:
-                  ScrollViewKeyboardDismissBehavior.onDrag,
-              children: [
-                _sectionLabel(LucideIcons.userRound, 'Dados básicos'),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _name,
-                  enabled: !_saving,
-                  textCapitalization: TextCapitalization.words,
-                  onChanged: (_) {
-                    if (_nameError != null) setState(() => _nameError = null);
-                  },
-                  decoration: _dec('Nome completo *', errorText: _nameError),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _email,
-                  enabled: !_saving,
-                  keyboardType: TextInputType.emailAddress,
-                  autocorrect: false,
-                  decoration: _dec('Email *', errorText: _emailError),
-                  onChanged: (_) {
-                    if (_emailError != null) {
-                      setState(() => _emailError = null);
-                    }
-                  },
-                ),
-                const SizedBox(height: 12),
-                _twoCols(
-                  CpfCnpjTextField(
-                    controller: _document,
-                    enabled: !_saving,
-                    label: 'CPF/CNPJ *',
-                    errorText: _documentError,
-                    onChanged: (_) {
-                      if (_documentError != null) {
-                        setState(() => _documentError = null);
-                      }
-                    },
-                  ),
-                  TextField(
-                    controller: _phone,
-                    enabled: !_saving,
-                    keyboardType: TextInputType.phone,
-                    inputFormatters: [PhoneInputFormatter()],
-                    onChanged: (_) {
-                      if (_phoneError != null) {
-                        setState(() => _phoneError = null);
-                      }
-                    },
-                    decoration: _dec('Telefone *', errorText: _phoneError),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                _sectionLabel(LucideIcons.keyRound, 'Senha inicial'),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _password,
-                  enabled: !_saving,
-                  obscureText: !_showPassword,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  onChanged: (_) {
-                    if (_passwordError != null) {
-                      setState(() => _passwordError = null);
-                    }
-                  },
-                  decoration: _dec(
-                    'Senha *',
-                    hint: 'Mínimo 6 caracteres',
-                    errorText: _passwordError,
-                    suffixIcon: Row(
-                      mainAxisSize: MainAxisSize.min,
+            child: Theme(
+              data: uaFormTheme(context, accent),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(_padH, 18, _padH, 28),
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: kUaMaxContentWidth,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        IconButton(
-                          tooltip: 'Gerar senha forte',
-                          onPressed: _saving ? null : _generatePassword,
-                          icon: Icon(
-                            LucideIcons.sparkles,
-                            size: 18,
-                            color: _accent,
+                        // ── Dados básicos ────────────────────────────────
+                        UaSectionHeader(
+                          icon: LucideIcons.userRound,
+                          label: 'Dados básicos',
+                          accent: accent,
+                        ),
+                        const SizedBox(height: 14),
+                        TextField(
+                          controller: _name,
+                          enabled: !_saving,
+                          textCapitalization: TextCapitalization.words,
+                          textInputAction: TextInputAction.next,
+                          onChanged: (_) {
+                            if (_nameError != null) {
+                              setState(() => _nameError = null);
+                            }
+                          },
+                          decoration: InputDecoration(
+                            labelText: 'Nome completo *',
+                            hintText: 'Ex.: Maria Silva',
+                            errorText: _nameError,
                           ),
                         ),
-                        IconButton(
-                          tooltip:
-                              _showPassword ? 'Ocultar senha' : 'Mostrar senha',
-                          onPressed: _saving
+                        const SizedBox(height: 12),
+                        UaTwoCols(
+                          left: TextField(
+                            controller: _email,
+                            enabled: !_saving,
+                            keyboardType: TextInputType.emailAddress,
+                            textInputAction: TextInputAction.next,
+                            autocorrect: false,
+                            decoration: InputDecoration(
+                              labelText: 'Email *',
+                              hintText: 'nome@empresa.com',
+                              errorText: _emailError,
+                            ),
+                            onChanged: (_) {
+                              if (_emailError != null) {
+                                setState(() => _emailError = null);
+                              }
+                            },
+                          ),
+                          right: TextField(
+                            controller: _phone,
+                            enabled: !_saving,
+                            keyboardType: TextInputType.phone,
+                            inputFormatters: [PhoneInputFormatter()],
+                            onChanged: (_) {
+                              if (_phoneError != null) {
+                                setState(() => _phoneError = null);
+                              }
+                            },
+                            decoration: InputDecoration(
+                              labelText: 'Telefone *',
+                              hintText: '(00) 00000-0000',
+                              errorText: _phoneError,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        // CPF/CNPJ em linha própria: o campo traz o rótulo
+                        // em cima e desalinharia a dupla de colunas.
+                        CpfCnpjTextField(
+                          controller: _document,
+                          enabled: !_saving,
+                          label: 'CPF/CNPJ *',
+                          errorText: _documentError,
+                          onChanged: (_) {
+                            if (_documentError != null) {
+                              setState(() => _documentError = null);
+                            }
+                          },
+                        ),
+
+                        // ── Senha inicial ────────────────────────────────
+                        const SizedBox(height: _gap),
+                        UaSectionHeader(
+                          icon: LucideIcons.keyRound,
+                          label: 'Senha inicial',
+                          accent: accent,
+                        ),
+                        const SizedBox(height: 14),
+                        TextField(
+                          controller: _password,
+                          enabled: !_saving,
+                          obscureText: !_showPassword,
+                          autocorrect: false,
+                          enableSuggestions: false,
+                          onChanged: (_) {
+                            if (_passwordError != null) {
+                              setState(() => _passwordError = null);
+                            }
+                          },
+                          decoration: InputDecoration(
+                            labelText: 'Senha *',
+                            hintText: 'Mínimo 6 caracteres',
+                            errorText: _passwordError,
+                            suffixIcon: IconButton(
+                              tooltip: _showPassword
+                                  ? 'Ocultar senha'
+                                  : 'Mostrar senha',
+                              onPressed: _saving
+                                  ? null
+                                  : () => setState(
+                                        () => _showPassword = !_showPassword,
+                                      ),
+                              icon: Icon(
+                                _showPassword
+                                    ? LucideIcons.eyeOff
+                                    : LucideIcons.eye,
+                                size: 18,
+                                color: secondary,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            const Expanded(
+                              child: UaHint(
+                                'Compartilhe a senha com a pessoa; ela pode '
+                                'trocá-la no primeiro acesso.',
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            TextButton.icon(
+                              onPressed: _saving ? null : _generatePassword,
+                              style: TextButton.styleFrom(
+                                foregroundColor: uaInk(context, accent),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
+                                minimumSize: const Size(0, 40),
+                              ),
+                              icon: const Icon(LucideIcons.sparkles, size: 16),
+                              label: const Text(
+                                'Gerar senha',
+                                maxLines: 1,
+                                softWrap: false,
+                                style: TextStyle(fontWeight: FontWeight.w800),
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        // ── Papel ────────────────────────────────────────
+                        const SizedBox(height: _gap),
+                        UaSectionHeader(
+                          icon: LucideIcons.shieldCheck,
+                          label: 'Papel',
+                          accent: accent,
+                        ),
+                        const SizedBox(height: 14),
+                        UaRolePicker(
+                          current: _role,
+                          choices: _roleChoices(),
+                          enabled: !_saving,
+                          onChanged: _onRoleChanged,
+                        ),
+
+                        // ── Gestor responsável (só Colaborador) ─────────
+                        if (_role == 'user') ...[
+                          const SizedBox(height: _gap),
+                          UaSectionHeader(
+                            key: _managersKey,
+                            icon: LucideIcons.users,
+                            label: 'Gestor responsável',
+                            accent: accent,
+                          ),
+                          const SizedBox(height: 10),
+                          UaRequirementLine(
+                            met: !_managerMissing,
+                            text: _managerMissing
+                                ? 'Gestor é obrigatório para usuários com '
+                                    'perfil Colaborador. Selecione ao menos '
+                                    'um gestor.'
+                                : 'Gestor definido. Dá para vincular mais de '
+                                    'um.',
+                          ),
+                          const SizedBox(height: 12),
+                          if (_loadingAccess)
+                            const SkeletonBox(height: 62, borderRadius: 14)
+                          else
+                            UaManagerSelector(
+                              managers: _managers,
+                              selected: _selectedManagers,
+                              missing: _managerMissing,
+                              accent: accent,
+                              enabled: !_saving,
+                              onAdd: () => showUaManagerSheet(
+                                context: context,
+                                managers: _managers,
+                                selected: _selectedManagers,
+                                accent: accent,
+                                onToggle: (id) => setState(() {
+                                  if (!_selectedManagers.remove(id)) {
+                                    _selectedManagers.add(id);
+                                  }
+                                }),
+                              ),
+                              onRemove: (id) =>
+                                  setState(() => _selectedManagers.remove(id)),
+                            ),
+                        ],
+
+                        // ── Hierarquia (admin/master — regra do back) ───
+                        if (elevated) ...[
+                          const SizedBox(height: _gap),
+                          UaSectionHeader(
+                            icon: LucideIcons.network,
+                            label: 'Hierarquia',
+                            accent: accent,
+                          ),
+                          const SizedBox(height: 10),
+                          const UaHint(
+                            'Opcional: o cargo na escada da imobiliária e a '
+                            'quem esta pessoa responde.',
+                          ),
+                          const SizedBox(height: 12),
+                          UaHierarchyFields(
+                            jobLevelId: _jobLevelId,
+                            reportsToUserId: _reportsToUserId,
+                            accent: accent,
+                            enabled: !_saving,
+                            onChanged: (level, superior) => setState(() {
+                              _jobLevelId = level;
+                              _reportsToUserId = superior;
+                            }),
+                          ),
+                        ],
+
+                        // ── Tags ─────────────────────────────────────────
+                        const SizedBox(height: _gap),
+                        UaSectionHeader(
+                          icon: LucideIcons.tag,
+                          label: 'Tags',
+                          accent: accent,
+                        ),
+                        const SizedBox(height: 14),
+                        UaTagSelector(
+                          tags: _tags,
+                          selected: _selectedTags,
+                          maxTags: 5,
+                          accent: accent,
+                          loading: _tagsLoading,
+                          enabled: !_saving,
+                          onToggle: (id) => setState(() {
+                            if (!_selectedTags.remove(id)) _selectedTags.add(id);
+                          }),
+                        ),
+
+                        // ── Permissões ───────────────────────────────────
+                        const SizedBox(height: _gap),
+                        UaSectionHeader(
+                          key: _permissionsKey,
+                          icon: LucideIcons.listChecks,
+                          label: 'Permissões',
+                          accent: accent,
+                          trailing: sel == null
                               ? null
-                              : () => setState(
-                                    () => _showPassword = !_showPassword,
-                                  ),
-                          icon: Icon(
-                            _showPassword
-                                ? LucideIcons.eyeOff
-                                : LucideIcons.eye,
-                            size: 18,
-                            color: secondary,
-                          ),
+                              : UaCountPill(
+                                  text: '${uaVisibleSelectedCount(sel)} de '
+                                      '${sel.visibleTotal}',
+                                  accent: accent,
+                                ),
                         ),
+                        const SizedBox(height: 10),
+                        if (sel != null) ...[
+                          UaRequirementLine(
+                            met: sel.selected.isNotEmpty,
+                            text: sel.selected.isNotEmpty
+                                ? 'As obrigatórias (com cadeado) já vêm '
+                                    'marcadas. Toque numa categoria para ver '
+                                    'e ajustar cada permissão.'
+                                : 'É obrigatório selecionar pelo menos 1 '
+                                    'permissão.',
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                        if (_role == 'admin') ...[
+                          UaNoticeBanner(
+                            notice: PermissionNotice(
+                              'O papel '
+                              '${uaRoleLabel('admin', isOwner: true)} tem acesso '
+                              'total — as permissões abaixo não limitam o '
+                              'que ele pode fazer.',
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                        if (_loadingAccess)
+                          _permissionSkeleton()
+                        else if (sel == null)
+                          AppErrorState.fromApi(
+                            message: _accessError ??
+                                'Não foi possível carregar as permissões.',
+                            statusCode: _accessErrorStatus,
+                            error: _accessErrorRaw,
+                            onRetry: _loadAccess,
+                            dense: true,
+                          )
+                        else
+                          UaPermissionGrid(
+                            selection: sel,
+                            accent: accent,
+                            onOpenCategory: (category, perms) =>
+                                showUaPermissionCategorySheet(
+                              context: context,
+                              selection: sel,
+                              category: category,
+                              perms: perms,
+                              accent: accent,
+                              onChanged: () => setState(() {}),
+                            ),
+                          ),
                       ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 6),
-                _hint(
-                  'Compartilhe a senha com o colaborador; ele pode trocá-la no primeiro acesso.',
-                ),
-                const SizedBox(height: 18),
-                _sectionLabel(LucideIcons.shieldCheck, 'Papel'),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _roleChip('user', 'Corretor', LucideIcons.userRound),
-                    if (elevated || myRole == 'manager')
-                      _roleChip('manager', 'Gestor', LucideIcons.users),
-                    if (elevated)
-                      _roleChip('admin', 'Proprietário', LucideIcons.crown),
-                  ],
-                ),
-                if (_role == 'user') ...[
-                  const SizedBox(height: 18),
-                  _sectionLabel(LucideIcons.users, 'Gestores responsáveis'),
-                  const SizedBox(height: 10),
-                  if (_loadingAccess)
-                    const SkeletonBox(width: 150, height: 36, borderRadius: 999)
-                  else
-                    UaManagerSelector(
-                      managers: _managers,
-                      selected: _selectedManagers,
-                      missing: _managerMissing,
-                      accent: _accent,
-                      onAdd: () => showUaManagerSheet(
-                        context: context,
-                        managers: _managers,
-                        selected: _selectedManagers,
-                        accent: _accent,
-                        onToggle: (id) => setState(() {
-                          if (!_selectedManagers.remove(id)) {
-                            _selectedManagers.add(id);
-                          }
-                        }),
-                      ),
-                      onRemove: (id) =>
-                          setState(() => _selectedManagers.remove(id)),
-                    ),
-                ],
-                // Cargo e superior: só administrador/master (regra do back).
-                if (elevated) ...[
-                  const SizedBox(height: 18),
-                  _sectionLabel(LucideIcons.network, 'Hierarquia'),
-                  const SizedBox(height: 10),
-                  UaHierarchyFields(
-                    jobLevelId: _jobLevelId,
-                    reportsToUserId: _reportsToUserId,
-                    accent: _accent,
-                    enabled: !_saving,
-                    onChanged: (level, superior) => setState(() {
-                      _jobLevelId = level;
-                      _reportsToUserId = superior;
-                    }),
-                  ),
-                ],
-                const SizedBox(height: 18),
-                _sectionLabel(LucideIcons.tag, 'Tags'),
-                const SizedBox(height: 10),
-                UaTagSelector(
-                  tags: _tags,
-                  selected: _selectedTags,
-                  maxTags: 5,
-                  accent: _accent,
-                  loading: _tagsLoading,
-                  enabled: !_saving,
-                  onToggle: (id) => setState(() {
-                    if (!_selectedTags.remove(id)) _selectedTags.add(id);
-                  }),
-                ),
-                const SizedBox(height: 18),
-                _sectionLabel(
-                  LucideIcons.shieldCheck,
-                  'Permissões',
-                  trailing: sel == null
-                      ? null
-                      : Text(
-                          '${sel.selected.length}/${sel.visibleTotal}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w900,
-                            color: _accent,
-                            fontFeatures: const [
-                              FontFeature.tabularFigures(),
-                            ],
-                          ),
-                        ),
-                ),
-                const SizedBox(height: 8),
-                _hint(
-                  'As permissões obrigatórias do sistema e do Funil de Vendas já vêm marcadas. Toque numa categoria para ajustar.',
-                ),
-                const SizedBox(height: 12),
-                if (_loadingAccess)
-                  _permissionSkeleton()
-                else if (sel == null)
-                  AppErrorState.fromApi(
-                    message: _accessError ??
-                        'Não foi possível carregar as permissões.',
-                    statusCode: _accessErrorStatus,
-                    error: _accessErrorRaw,
-                    onRetry: _loadAccess,
-                    dense: true,
-                  )
-                else ...[
-                  if (sel.selected.isEmpty) ...[
-                    const UaNoticeBanner(
-                      notice: PermissionNotice(
-                        'É obrigatório selecionar pelo menos 1 permissão',
-                      ),
-                    ),
-                    const SizedBox(height: 11),
-                  ],
-                  UaPermissionGrid(
-                    selection: sel,
-                    accent: _accent,
-                    horizontalPadding: _padH,
-                    onOpenCategory: (category, perms) =>
-                        showUaPermissionCategorySheet(
-                      context: context,
-                      selection: sel,
-                      category: category,
-                      perms: perms,
-                      accent: _accent,
-                      onChanged: () => setState(() {}),
-                    ),
-                  ),
-                ],
-              ],
+              ),
             ),
           ),
-          _buildSaveBar(),
+          UaSaveBar(
+            saveLabel: _saving ? 'Criando…' : 'Criar usuário',
+            saving: _saving,
+            onSave: _saving || _loadingAccess ? null : _submit,
+            cancelLabel: 'Cancelar',
+            onCancel: () => Navigator.of(context).pop(),
+            pendingTitle: 'Falta para criar:',
+            pending: _pending(),
+          ),
         ],
       ),
     );
   }
 
+  /// Skeleton fiel às linhas de categoria (ícone, nome, barra).
   Widget _permissionSkeleton() {
-    final w = (MediaQuery.sizeOf(context).width - (_padH * 2) - 12) / 2;
-    return Wrap(
-      spacing: 12,
-      runSpacing: 12,
+    return Column(
       children: List.generate(
-        6,
-        (_) => SkeletonBox(width: w, height: 84, borderRadius: 16),
-      ),
-    );
-  }
-
-  Widget _roleChip(String value, String label, IconData icon) {
-    final active = _role == value;
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return GestureDetector(
-      onTap: _saving ? null : () => _onRoleChanged(value),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: active
-              ? _accent.withValues(alpha: 0.10)
-              : ThemeHelpers.cardBackgroundColor(context),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: active
-                ? _accent
-                : ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
-            width: active ? 1.6 : 1,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 15, color: active ? _accent : secondary),
-            const SizedBox(width: 7),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                color: active ? _accent : ThemeHelpers.textColor(context),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSaveBar() {
-    final confirm = AppColors.status.success;
-    return Container(
-      padding: EdgeInsets.fromLTRB(
-        _padH,
-        10,
-        _padH,
-        10 + MediaQuery.paddingOf(context).bottom,
-      ),
-      decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        border: Border(
-          top: BorderSide(
-            color:
-                ThemeHelpers.borderLightColor(context).withValues(alpha: 0.5),
-          ),
-        ),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: OutlinedButton(
-              onPressed: _saving ? null : () => Navigator.of(context).pop(),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(0, 48),
-                foregroundColor: ThemeHelpers.textColor(context),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-              child: const Text('Cancelar'),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            flex: 2,
-            child: FilledButton(
-              onPressed: _saving || _loadingAccess ? null : _submit,
-              style: FilledButton.styleFrom(
-                backgroundColor: confirm,
-                minimumSize: const Size(0, 48),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-              child: _saving
-                  ? const SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Text(
-                      'Criar usuário',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+        5,
+        (i) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Row(
+            children: [
+              const SkeletonBox(width: 36, height: 36, borderRadius: 11),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonBox(
+                      width: 120.0 + (i % 3) * 24,
+                      height: 13,
+                      borderRadius: 4,
                     ),
-            ),
+                    const SizedBox(height: 10),
+                    const SkeletonBox(height: 4, borderRadius: 2),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

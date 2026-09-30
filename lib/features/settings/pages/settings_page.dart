@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../../../core/routes/app_routes.dart';
@@ -24,10 +23,11 @@ import 'notification_preferences_page.dart';
 /// agenda e o tema. Cada interruptor manda só o bloco que mudou (o back funde)
 /// e só conta como salvo quando a API confirma; erro volta o valor anterior.
 ///
-/// Sem cards encapsulando seções: cada bloco respira na página, separado por
-/// hierarquia tipográfica (eyebrow uppercase em accent + headline w900) e
-/// divisores finos. Paleta coerente atribuída por seção: azul para canais,
-/// âmbar para eventos, violeta para aparência, vermelho da marca para conta.
+/// Abre respondendo "o que está ligado para mim": um sumário com a resposta
+/// de cada grupo (3 de 4 canais, 12 de 14 assuntos…) que leva direto à
+/// seção. As seções são linhas flush com filete, interruptores alinhados à
+/// direita e a contagem no cabeçalho. Um tom só (azul de informação, por
+/// token); âmbar só quando algo desligado faz você deixar de receber.
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
@@ -49,14 +49,23 @@ class _SettingsPageState extends State<SettingsPage> {
 
   String _appVersionLabel = '…';
 
-  // ── Paleta editorial por seção ────────────────────────────────────────
-  // Coerente, sem arco-íris. Cada seção tem 1 cor de identidade que tinge
-  // o eyebrow, o ícone do tile e o thumb do Switch.
-  static const Color _toneChannels = Color(0xFF0EA5E9); // azul céu
-  static const Color _toneEvents = Color(0xFFF59E0B); // âmbar
-  static const Color _toneAppearance = Color(0xFF8B5CF6); // violeta
-  static const Color _toneAccount = Color(0xFFDC2626); // vermelho marca
-  static const Color _toneApp = Color(0xFF059669); // verde — atualização
+  // ── Cor da tela ───────────────────────────────────────────────────────
+  // Um tom só, por token: o azul de informação — quase tudo aqui é "por
+  // onde o sistema fala com você". Por cima dele, só significado: âmbar
+  // quando algo está desligado a ponto de você deixar de receber; verde
+  // quando a API confirmou a gravação.
+  bool get _isDark => Theme.of(context).brightness == Brightness.dark;
+
+  Color get _tone =>
+      _isDark ? AppColors.message.infoTextDarkMode : AppColors.message.infoText;
+
+  Color get _attention => _isDark
+      ? AppColors.message.warningTextDarkMode
+      : AppColors.message.warningText;
+
+  Color get _saved => _isDark
+      ? AppColors.message.successTextDarkMode
+      : AppColors.message.successText;
 
   @override
   void initState() {
@@ -286,9 +295,50 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  // ──────────────────────────────────────────────────────────────────────
+  // LAYOUT
+  // ──────────────────────────────────────────────────────────────────────
+
+  // Âncoras das seções: cada linha do resumo leva direto à sua.
+  final GlobalKey _channelsKey = GlobalKey();
+  final GlobalKey _screenKey = GlobalKey();
+  final GlobalKey _leadsKey = GlobalKey();
+  final GlobalKey _subjectsKey = GlobalKey();
+  final GlobalKey _agendaKey = GlobalKey();
+  final GlobalKey _appearanceKey = GlobalKey();
+
+  /// Abre Meu perfil ou a edição e, na volta, relê só o perfil (sem piscar
+  /// o skeleton) para a linha de quem é mostrar nome e foto novos.
+  Future<void> _openProfileRoute(String route) async {
+    await Navigator.pushNamed(context, route);
+    if (!mounted) return;
+    final res = await ProfileService.instance.getProfile();
+    if (mounted && res.success && res.data != null) {
+      setState(() => _profile = res.data);
+    }
+  }
+
+  void _jumpTo(GlobalKey key) {
+    final ctx = key.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(
+      ctx,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+      alignment: 0.04,
+    );
+  }
+
+  /// Em tela larga (tablet, landscape grande) a coluna para em
+  /// [_kMaxContentWidth] e centraliza: interruptor longe do rótulo não lê.
+  EdgeInsets _pagePadding({double top = 0, double bottom = 0}) {
+    final w = MediaQuery.sizeOf(context).width;
+    final side = w > _kMaxContentWidth ? (w - _kMaxContentWidth) / 2 : 0.0;
+    return EdgeInsets.fromLTRB(side, top, side, bottom);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final brand = _brand(context);
 
     return AppScaffold(
@@ -296,58 +346,59 @@ class _SettingsPageState extends State<SettingsPage> {
       currentBottomNavIndex: 4,
       showBottomNavigation: true,
       body: _isLoading
-          ? _buildSkeleton(context, theme, brand)
+          ? _buildSkeleton(context)
           : _errorMessage != null && _prefs == null
-          ? _buildErrorState(context, theme, brand)
+          ? _buildErrorState()
           : RefreshIndicator(
               color: brand,
               onRefresh: _loadData,
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.only(top: 4, bottom: 16),
+                padding: _pagePadding(top: 6, bottom: 24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _buildPageMasthead(context, theme, brand),
-                    const SizedBox(height: 18),
-                    if (_profile != null)
-                      _buildProfileManchete(context, theme, brand, _profile!),
-                    if (_profile != null) const SizedBox(height: 14),
-                    _buildQuickStrip(context, theme, brand),
-                    const SizedBox(height: 14),
-                    _sectionSeparator(context),
-                    const SizedBox(height: 22),
-                    _buildChannelsSection(context, theme),
-                    const SizedBox(height: 28),
-                    _sectionSeparator(context),
-                    const SizedBox(height: 22),
-                    _buildScreenAlertsSection(context, theme),
-                    const SizedBox(height: 28),
-                    _sectionSeparator(context),
-                    const SizedBox(height: 22),
-                    _buildEventsSection(context, theme),
-                    const SizedBox(height: 28),
-                    _sectionSeparator(context),
-                    const SizedBox(height: 22),
-                    _buildSubjectsSection(context, theme),
-                    const SizedBox(height: 28),
-                    _sectionSeparator(context),
-                    const SizedBox(height: 22),
-                    _buildAgendaSection(context, theme),
-                    const SizedBox(height: 28),
-                    _sectionSeparator(context),
-                    const SizedBox(height: 22),
-                    _buildAppearanceSection(context, theme),
-                    const SizedBox(height: 28),
-                    _sectionSeparator(context),
-                    const SizedBox(height: 22),
-                    _buildAccountSection(context, theme, brand),
-                    const SizedBox(height: 28),
-                    _sectionSeparator(context),
-                    const SizedBox(height: 22),
-                    _buildAppUpdateSection(context, theme),
-                    const SizedBox(height: 32),
-                    _buildFooterSignature(context, theme, brand),
+                    if (_profile != null) ...[
+                      _buildWhoRow(context, brand, _profile!),
+                      const SizedBox(height: 6),
+                      _hairline(context),
+                    ],
+                    const SizedBox(height: 20),
+                    _buildSummary(context),
+                    _sectionBreak(context),
+                    KeyedSubtree(
+                      key: _channelsKey,
+                      child: _buildChannelsSection(context),
+                    ),
+                    _sectionBreak(context),
+                    KeyedSubtree(
+                      key: _screenKey,
+                      child: _buildScreenAlertsSection(context),
+                    ),
+                    _sectionBreak(context),
+                    KeyedSubtree(
+                      key: _leadsKey,
+                      child: _buildEventsSection(context),
+                    ),
+                    _sectionBreak(context),
+                    KeyedSubtree(
+                      key: _subjectsKey,
+                      child: _buildSubjectsSection(context),
+                    ),
+                    _sectionBreak(context),
+                    KeyedSubtree(
+                      key: _agendaKey,
+                      child: _buildAgendaSection(context),
+                    ),
+                    _sectionBreak(context),
+                    KeyedSubtree(
+                      key: _appearanceKey,
+                      child: _buildAppearanceSection(context),
+                    ),
+                    _sectionBreak(context),
+                    _buildAboutSection(context),
+                    const SizedBox(height: 30),
+                    _buildFooterSignature(context, brand),
                   ],
                 ),
               ),
@@ -359,124 +410,132 @@ class _SettingsPageState extends State<SettingsPage> {
   // SKELETON & ERROR
   // ──────────────────────────────────────────────────────────────────────
 
-  Widget _buildSkeleton(BuildContext context, ThemeData theme, Color brand) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.only(top: 4, bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+  /// Espelha a tela real: linha de quem é, resumo com respostas e uma seção
+  /// de interruptores.
+  Widget _buildSkeleton(BuildContext context) {
+    final hair = ThemeHelpers.borderColor(context).withValues(alpha: 0.3);
+
+    Widget summaryRow() => const Padding(
+      padding: EdgeInsets.symmetric(horizontal: _kPadH, vertical: 12),
+      child: Row(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+          SkeletonBox(width: 18, height: 18, borderRadius: 5),
+          SizedBox(width: 12),
+          Expanded(child: SkeletonText(width: 110, height: 13)),
+          SizedBox(width: 10),
+          SkeletonText(width: 54, height: 13),
+        ],
+      ),
+    );
+
+    Widget switchRow() => const Padding(
+      padding: EdgeInsets.symmetric(horizontal: _kPadH, vertical: 12),
+      child: Row(
+        children: [
+          SkeletonBox(width: 40, height: 40, borderRadius: 12),
+          SizedBox(width: 14),
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SkeletonText(width: 90, height: 11),
-                const SizedBox(height: 12),
-                SkeletonText(width: 220, height: 28),
-                const SizedBox(height: 10),
-                SkeletonText(width: 280, height: 14),
+                SkeletonText(width: 120, height: 13),
+                SizedBox(height: 6),
+                SkeletonText(width: 190, height: 11),
               ],
             ),
           ),
-          const SizedBox(height: 22),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+          SizedBox(width: 10),
+          SkeletonBox(width: 44, height: 26, borderRadius: 13),
+        ],
+      ),
+    );
+
+    return SingleChildScrollView(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: _pagePadding(top: 6, bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: _kPadH, vertical: 10),
             child: Row(
               children: [
-                SkeletonBox(width: 64, height: 64, borderRadius: 32),
-                const SizedBox(width: 16),
+                SkeletonBox(width: 48, height: 48, borderRadius: 24),
+                SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      SkeletonText(width: 160, height: 17),
-                      const SizedBox(height: 6),
-                      SkeletonText(width: 200, height: 12),
-                      const SizedBox(height: 10),
-                      SkeletonText(width: 100, height: 12),
+                      SkeletonText(width: 150, height: 15),
+                      SizedBox(height: 6),
+                      SkeletonText(width: 190, height: 11),
+                      SizedBox(height: 6),
+                      SkeletonText(width: 120, height: 10),
                     ],
                   ),
                 ),
+                SizedBox(width: 10),
+                SkeletonBox(width: 76, height: 32, borderRadius: 999),
               ],
             ),
           ),
-          const SizedBox(height: 26),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              children: List.generate(
-                4,
-                (i) => Expanded(
-                  child: Column(
-                    children: [
-                      SkeletonText(width: 40, height: 22),
-                      const SizedBox(height: 6),
-                      SkeletonText(width: 50, height: 9),
-                    ],
-                  ),
-                ),
-              ),
+          const SizedBox(height: 6),
+          Container(height: 1, color: hair),
+          const SizedBox(height: 20),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: _kPadH),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SkeletonText(width: 230, height: 20),
+                SizedBox(height: 8),
+                SkeletonText(width: 90, height: 12),
+                SizedBox(height: 8),
+                SkeletonText(width: 270, height: 11),
+              ],
             ),
           ),
-          const SizedBox(height: 30),
-          for (var s = 0; s < 3; s++) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SkeletonText(width: 70, height: 10),
-                  const SizedBox(height: 8),
-                  SkeletonText(width: 180, height: 22),
-                  const SizedBox(height: 6),
-                  SkeletonText(width: 240, height: 12),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            for (var i = 0; i < 3; i++) ...[
+          const SizedBox(height: 8),
+          for (var i = 0; i < 6; i++) ...[
+            if (i > 0)
               Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
-                ),
-                child: Row(
-                  children: [
-                    SkeletonBox(width: 40, height: 40, borderRadius: 12),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SkeletonText(width: 120, height: 13),
-                          const SizedBox(height: 6),
-                          SkeletonText(width: 200, height: 11),
-                        ],
-                      ),
-                    ),
-                    SkeletonBox(width: 44, height: 26, borderRadius: 13),
-                  ],
-                ),
+                padding: const EdgeInsets.only(left: 46, right: _kPadH),
+                child: Container(height: 1, color: hair),
               ),
-              if (i < 2)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Divider(
-                    height: 1,
-                    color: ThemeHelpers.borderColor(
-                      context,
-                    ).withValues(alpha: 0.3),
-                  ),
+            summaryRow(),
+          ],
+          const SizedBox(height: 22),
+          Container(height: 1, color: hair),
+          const SizedBox(height: 22),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: _kPadH),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SkeletonText(width: 110, height: 18),
+                SizedBox(height: 8),
+                SkeletonText(width: 250, height: 11),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          for (var i = 0; i < 4; i++) ...[
+            if (i > 0)
+              Padding(
+                padding: const EdgeInsets.only(
+                  left: _kRowTextInset,
+                  right: _kPadH,
                 ),
-            ],
-            const SizedBox(height: 22),
+                child: Container(height: 1, color: hair),
+              ),
+            switchRow(),
           ],
         ],
       ),
     );
   }
 
-  Widget _buildErrorState(BuildContext context, ThemeData theme, Color brand) {
+  Widget _buildErrorState() {
     // Exceção solta traz seu próprio diagnóstico; falha de API vem da resposta.
     final cause = _errorCause;
     if (cause != null) {
@@ -490,189 +549,115 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // MASTHEAD — eyebrow + headline + subtítulo (sem hero card)
+  // DE QUEM SÃO ESTAS PREFERÊNCIAS — uma linha; o perfil mora em Meu perfil
   // ──────────────────────────────────────────────────────────────────────
 
-  Widget _buildPageMasthead(
-    BuildContext context,
-    ThemeData theme,
-    Color brand,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+  Widget _buildWhoRow(BuildContext context, Color brand, Profile p) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final company = (p.companyName ?? '').trim();
+    final role = _formatRole(p.role);
+    final name = p.name.trim();
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _openProfileRoute(AppRoutes.profile),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: _kPadH, vertical: 10),
+          child: Row(
             children: [
-              Text(
-                'PREFERÊNCIAS',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: brand,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.2,
-                  fontSize: 10,
+              _AvatarRing(profile: p, accent: brand, size: 48),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      name.isEmpty ? 'Seu perfil' : name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.3,
+                        height: 1.15,
+                        color: ThemeHelpers.textColor(context),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      p.email,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: secondary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      company.isEmpty ? role : '$role · $company',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: secondary,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Container(
-                width: 4,
-                height: 4,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: brand.withValues(alpha: 0.6),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                _savingCount > 0 ? 'SALVANDO' : 'SALVO NO SERVIDOR',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(
-                    context,
-                  ).withValues(alpha: 0.85),
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1.8,
-                  fontSize: 9.5,
-                ),
+              const SizedBox(width: 10),
+              _SmallActionPill(
+                icon: Icons.edit_rounded,
+                label: 'Editar',
+                tone: brand,
+                onTap: () => _openProfileRoute(AppRoutes.profileEdit),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Configurações',
-            style: theme.textTheme.headlineMedium?.copyWith(
-              fontWeight: FontWeight.w900,
-              letterSpacing: -0.8,
-              color: ThemeHelpers.textColor(context),
-              height: 1.0,
-              fontSize: 30,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Canais, avisos, assuntos, agenda e aparência. Cada interruptor grava no servidor na hora e volta atrás se a gravação falhar.',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-              height: 1.4,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // MANCHETE DE PERFIL — sem card, layout horizontal explorando a margem
+  // RESUMO — sumário com resposta: cada linha diz o estado e leva à seção
   // ──────────────────────────────────────────────────────────────────────
 
-  Widget _buildProfileManchete(
-    BuildContext context,
-    ThemeData theme,
-    Color brand,
-    Profile p,
-  ) {
-    final since = _formatJoinedSince(p.createdAt);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          _AvatarRing(profile: p, accent: brand, size: 64),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  p.name.isEmpty ? 'Usuário' : p.name,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    color: ThemeHelpers.textColor(context),
-                    height: 1.1,
-                    letterSpacing: -0.3,
-                    fontSize: 17,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  p.email,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    fontWeight: FontWeight.w600,
-                    height: 1.2,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    _MetaPill(
-                      label: _formatRole(p.role),
-                      tone: brand,
-                      filled: true,
-                    ),
-                    if (p.companyName != null &&
-                        p.companyName!.trim().isNotEmpty) ...[
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: _MetaPill(
-                          label: p.companyName!.trim(),
-                          tone: AppColors.secondary.secondary,
-                          filled: false,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                if (since != null) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    'NA PLATAFORMA DESDE · ${since.toUpperCase()}',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(
-                        context,
-                      ).withValues(alpha: 0.7),
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.2,
-                      fontSize: 9,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          _GhostIconButton(
-            icon: Icons.edit_rounded,
-            tone: brand,
-            onTap: () => Navigator.pushNamed(context, AppRoutes.profileEdit),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ──────────────────────────────────────────────────────────────────────
-  // QUICK KPI STRIP — 4 colunas separadas por linhas verticais finas
-  // ──────────────────────────────────────────────────────────────────────
-
-  Widget _buildQuickStrip(BuildContext context, ThemeData theme, Color brand) {
+  Widget _buildSummary(BuildContext context) {
+    final theme = Theme.of(context);
     final p = _prefs;
-    final channelsActive = p == null
+    final text = ThemeHelpers.textColor(context);
+
+    int countOn(List<bool> v) => v.where((e) => e).length;
+
+    // A cor da resposta é significado: tudo ligado no tom da tela, parte
+    // ligada em texto comum, nada ligado em âmbar (você deixa de receber).
+    Color answerColor(int on, int of) {
+      if (of > 0 && on == 0) return _attention;
+      return on == of ? _tone : text;
+    }
+
+    final channels = p == null
         ? 0
-        : [
+        : countOn([
             p.inAppChannel,
             p.emailChannel,
             p.pushChannel,
             p.whatsappChannel,
-          ].where((e) => e).length;
-
+          ]);
+    final screen = p == null
+        ? 0
+        : countOn([p.sound, p.leadEventToasts, p.celebrations]);
+    final leads = p == null
+        ? 0
+        : countOn([
+            p.leadEvent(SettingsService.leadTransferEvent).enabled,
+            p.leadEvent(SettingsService.leadWhatsappEvent).enabled,
+          ]);
     final catalog = _catalog;
     final silenceable =
         catalog?.where((c) => c.silenciavel).toList() ??
@@ -680,63 +665,113 @@ class _SettingsPageState extends State<SettingsPage> {
     final subjectsOn = p == null
         ? 0
         : silenceable.where((c) => p.category(c.key).enabled).length;
-
+    final allowOverlap = p?.calendarAllowOverlappingSlots ?? false;
     final themeService = ThemeService.instance;
-    final themeShort = switch (themeService.themeMode) {
-      ThemeMode.light => 'Claro',
-      ThemeMode.dark => 'Escuro',
-      ThemeMode.system => 'Auto',
-    };
-    final langShort = _shortLanguage(p?.language ?? 'pt-BR');
 
-    final items = <_QuickKpi>[
-      _QuickKpi(
-        accent: _toneChannels,
-        label: 'CANAIS',
-        value: '$channelsActive/4',
-        sub: 'ligados',
+    final items = <_SummaryItem>[
+      _SummaryItem(
+        icon: Icons.forum_outlined,
+        label: 'Canais',
+        answer: '$channels de 4',
+        color: answerColor(channels, 4),
+        anchor: _channelsKey,
       ),
-      _QuickKpi(
-        accent: _toneEvents,
-        label: 'ASSUNTOS',
-        value: catalog == null ? '—' : '$subjectsOn/${silenceable.length}',
-        sub: 'ligados',
+      _SummaryItem(
+        icon: Icons.notifications_active_outlined,
+        label: 'Avisos na tela',
+        answer: '$screen de 3',
+        color: answerColor(screen, 3),
+        anchor: _screenKey,
       ),
-      _QuickKpi(
-        accent: _toneAppearance,
-        label: 'TEMA',
-        value: themeShort,
-        sub: themeService.themeMode == ThemeMode.system ? 'sistema' : 'manual',
+      _SummaryItem(
+        icon: Icons.contact_phone_outlined,
+        label: 'Avisos de lead',
+        answer: '$leads de 2',
+        color: answerColor(leads, 2),
+        anchor: _leadsKey,
       ),
-      _QuickKpi(
-        accent: brand,
-        label: 'IDIOMA',
-        value: langShort,
-        sub: 'região',
+      _SummaryItem(
+        icon: Icons.tune_rounded,
+        label: 'Assuntos',
+        answer: catalog == null
+            ? 'Não carregou'
+            : '$subjectsOn de ${silenceable.length}',
+        color: catalog == null
+            ? _attention
+            : answerColor(subjectsOn, silenceable.length),
+        anchor: _subjectsKey,
+      ),
+      _SummaryItem(
+        icon: Icons.event_outlined,
+        label: 'Horário repetido',
+        answer: allowOverlap ? 'Permite' : 'Bloqueia',
+        color: text,
+        anchor: _agendaKey,
+      ),
+      _SummaryItem(
+        icon: themeService.getThemeIcon(),
+        label: 'Tema do app',
+        answer: themeService.getThemeName(),
+        color: text,
+        anchor: _appearanceKey,
       ),
     ];
 
-    final divColor = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          for (var i = 0; i < items.length; i++) ...[
-            if (i > 0) Container(width: 1, height: 44, color: divColor),
-            Expanded(child: items[i].render(context)),
-          ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: _kPadH),
+          child: Text(
+            'O que está ligado para você',
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.5,
+              height: 1.15,
+              color: text,
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        // Estado da gravação logo abaixo do título (ao lado dele, em 320dp
+        // com fonte grande, o título quebrava em três linhas).
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: _kPadH),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: _SaveState(saving: _savingCount > 0, savedColor: _saved),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: _kPadH),
+          child: Text(
+            'Toque numa linha para ir ao ajuste. Cada interruptor grava na hora e volta sozinho se a gravação falhar.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+              height: 1.35,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        for (var i = 0; i < items.length; i++) ...[
+          if (i > 0) _rowDivider(context, indent: 46),
+          _SummaryRow(
+            item: items[i],
+            tone: _tone,
+            onTap: () => _jumpTo(items[i].anchor),
+          ),
         ],
-      ),
+      ],
     );
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // SEÇÃO: CANAIS DE NOTIFICAÇÃO (azul) — os quatro canais do web
+  // SEÇÃO: CANAIS
   // ──────────────────────────────────────────────────────────────────────
 
-  Widget _buildChannelsSection(BuildContext context, ThemeData theme) {
+  Widget _buildChannelsSection(BuildContext context) {
     final p = _prefs;
     final activeCount = p == null
         ? 0
@@ -751,46 +786,46 @@ class _SettingsPageState extends State<SettingsPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _SectionHeader(
-          eyebrow: 'COMO RECEBER',
-          title: 'Canais de notificação',
+          title: 'Canais',
           subtitle:
-              'Por onde o sistema fala com você; o que chega por cada um se ajusta por assunto.',
-          rightHint: '$activeCount de 4 ligados',
-          tone: _toneChannels,
+              'Por onde o sistema fala com você. O que chega por cada um se ajusta em Assuntos.',
+          trailing: '$activeCount de 4 ligados',
+          trailingColor: activeCount == 0 ? _attention : _tone,
+          tone: _tone,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 8),
         _SwitchRow(
-          tone: _toneChannels,
+          tone: _tone,
           icon: Icons.notifications_none_rounded,
           title: 'Sino do sistema',
-          subtitle: 'O painel de avisos aqui dentro.',
+          subtitle: 'O painel de avisos dentro do app.',
           value: p?.inAppChannel ?? true,
           onChanged: (_) => _toggleChannel('inApp'),
         ),
         _rowDivider(context),
         _SwitchRow(
-          tone: _toneChannels,
+          tone: _tone,
           icon: Icons.email_outlined,
           title: 'E-mail',
-          subtitle: 'No seu endereço cadastrado.',
+          subtitle: 'No e-mail da sua conta.',
           value: p?.emailChannel ?? true,
           onChanged: (_) => _toggleChannel('email'),
         ),
         _rowDivider(context),
         _SwitchRow(
-          tone: _toneChannels,
+          tone: _tone,
           icon: Icons.phone_android_rounded,
           title: 'Push no celular',
-          subtitle: 'Pelo app, mesmo com ele fechado.',
+          subtitle: 'Chega mesmo com o app fechado.',
           value: p?.pushChannel ?? true,
           onChanged: (_) => _toggleChannel('push'),
         ),
         _rowDivider(context),
         _SwitchRow(
-          tone: _toneChannels,
+          tone: _tone,
           icon: Icons.chat_outlined,
           title: 'WhatsApp',
-          subtitle: 'No seu número.',
+          subtitle: 'No seu número de WhatsApp.',
           value: p?.whatsappChannel ?? true,
           onChanged: (_) => _toggleChannel('whatsapp'),
         ),
@@ -799,23 +834,28 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // SEÇÃO: AVISOS NA TELA (azul)
+  // SEÇÃO: AVISOS NA TELA
   // ──────────────────────────────────────────────────────────────────────
 
-  Widget _buildScreenAlertsSection(BuildContext context, ThemeData theme) {
+  Widget _buildScreenAlertsSection(BuildContext context) {
     final p = _prefs;
+    final on = p == null
+        ? 0
+        : [p.sound, p.leadEventToasts, p.celebrations].where((e) => e).length;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _SectionHeader(
-          eyebrow: 'NA TELA',
           title: 'Avisos na tela',
           subtitle: 'O que aparece por cima do que você está fazendo.',
-          tone: _toneChannels,
+          trailing: '$on de 3 ligados',
+          trailingColor: on == 0 ? _attention : _tone,
+          tone: _tone,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 8),
         _SwitchRow(
-          tone: _toneChannels,
+          tone: _tone,
           icon: Icons.volume_up_outlined,
           title: 'Som ao receber',
           subtitle: 'Um toque curto quando chega mensagem ou aviso.',
@@ -826,11 +866,11 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         _rowDivider(context),
         _SwitchRow(
-          tone: _toneChannels,
+          tone: _tone,
           icon: Icons.campaign_outlined,
           title: 'Popups de lead',
           subtitle:
-              'Novo lead, lead atribuído e lead perdido aparecem num popup; o sino não muda.',
+              'Lead novo, atribuído ou perdido aparece num popup. O sino não muda.',
           value: p?.leadEventToasts ?? false,
           onChanged: (v) => _savePatch({
             'notificationSettings': {'leadEventToasts': v},
@@ -838,11 +878,11 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         _rowDivider(context),
         _SwitchRow(
-          tone: _toneChannels,
+          tone: _tone,
           icon: Icons.celebration_outlined,
           title: 'Comemorações',
           subtitle:
-              'Confete e o card quando alguém da empresa fecha venda ou locação.',
+              'Confete quando alguém da empresa fecha venda ou locação.',
           value: p?.celebrations ?? true,
           onChanged: (v) => _savePatch({
             'notificationSettings': {'celebrations': v},
@@ -853,10 +893,10 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // SEÇÃO: DOIS AVISOS DE LEAD (âmbar)
+  // SEÇÃO: AVISOS DE LEAD
   // ──────────────────────────────────────────────────────────────────────
 
-  Widget _buildEventsSection(BuildContext context, ThemeData theme) {
+  Widget _buildEventsSection(BuildContext context) {
     final p = _prefs;
     if (p == null) return const SizedBox.shrink();
     final transfer = p.leadEvent(SettingsService.leadTransferEvent);
@@ -870,14 +910,13 @@ class _SettingsPageState extends State<SettingsPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _SectionHeader(
-          eyebrow: 'O QUE NOTIFICAR',
-          title: 'Dois avisos de lead',
-          subtitle:
-              'Transferência recebida e lead do WhatsApp: ligue o aviso e escolha os canais.',
-          rightHint: '$activeCount de 2 ligados',
-          tone: _toneEvents,
+          title: 'Avisos de lead',
+          subtitle: 'Ligue o aviso e marque por onde ele chega.',
+          trailing: '$activeCount de 2 ligados',
+          trailingColor: activeCount == 0 ? _attention : _tone,
+          tone: _tone,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 8),
         _leadEventBlock(
           context,
           SettingsService.leadTransferEvent,
@@ -920,21 +959,33 @@ class _SettingsPageState extends State<SettingsPage> {
       _ => ev.copyWith(whatsapp: !ev.whatsapp),
     };
 
+    // A linha diz por onde o aviso chega hoje, sem precisar ler os chips.
+    final marked = [
+      for (final (c, label) in channels)
+        if (valueOf(c)) label,
+    ];
+    final String subtitle;
+    if (!ev.enabled) {
+      subtitle = 'Desligado: não avisa.';
+    } else if (marked.isEmpty) {
+      subtitle = 'Ligado, mas sem canal marcado.';
+    } else {
+      subtitle = 'Chega por ${marked.join(', ')}.';
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _SwitchRow(
-          tone: _toneEvents,
+          tone: _tone,
           icon: icon,
           title: title,
-          subtitle: ev.enabled
-              ? 'Avisa pelos canais marcados abaixo.'
-              : 'Não avisa.',
+          subtitle: subtitle,
           value: ev.enabled,
           onChanged: (v) => _setLeadEvent(key, ev.copyWith(enabled: v)),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(76, 0, 20, 14),
+          padding: const EdgeInsets.fromLTRB(_kRowTextInset, 0, _kPadH, 12),
           child: Wrap(
             spacing: 6,
             runSpacing: 6,
@@ -943,7 +994,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 _ChannelToggleChip(
                   label: label,
                   on: ev.enabled && valueOf(c),
-                  tone: _toneEvents,
+                  tone: _tone,
                   onTap: ev.enabled
                       ? () => _setLeadEvent(key, toggled(c))
                       : null,
@@ -956,43 +1007,52 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // SEÇÃO: POR ASSUNTO (âmbar) — resumo + página dedicada
+  // SEÇÃO: ASSUNTOS — resumo + página dedicada
   // ──────────────────────────────────────────────────────────────────────
 
-  Widget _buildSubjectsSection(BuildContext context, ThemeData theme) {
+  Widget _buildSubjectsSection(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
     final p = _prefs;
     final catalog = _catalog;
-    final off = (catalog == null || p == null)
+    final silenceable =
+        catalog?.where((c) => c.silenciavel).toList() ??
+        const <NotificationCategoryMeta>[];
+    final on = p == null
         ? 0
-        : catalog
-              .where((c) => c.silenciavel && !p.category(c.key).enabled)
-              .length;
+        : silenceable.where((c) => p.category(c.key).enabled).length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _SectionHeader(
-          eyebrow: 'POR ASSUNTO',
-          title: 'Assuntos das notificações',
+          title: 'Assuntos',
           subtitle:
               'Financeiro, imóveis, leads… o que chega e por onde, assunto a assunto.',
-          rightHint: off > 0 ? '$off silenciado${off == 1 ? '' : 's'}' : null,
-          tone: _toneEvents,
+          trailing: catalog == null
+              ? null
+              : '$on de ${silenceable.length} ligados',
+          trailingColor: silenceable.isNotEmpty && on == 0
+              ? _attention
+              : _tone,
+          tone: _tone,
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 12),
         if (catalog == null)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.symmetric(horizontal: _kPadH),
             child: Text(
-              'Não foi possível ler a lista de assuntos. Puxe para recarregar.',
+              'Não deu para ler a lista de assuntos. Puxe a tela para baixo para tentar de novo.',
               style: theme.textTheme.bodySmall?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context),
+                color: _attention,
+                fontWeight: FontWeight.w700,
+                height: 1.35,
               ),
             ),
           )
-        else
+        else ...[
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.symmetric(horizontal: _kPadH),
             child: Wrap(
               spacing: 6,
               runSpacing: 6,
@@ -1002,23 +1062,32 @@ class _SettingsPageState extends State<SettingsPage> {
                     label: c.label,
                     on: !c.silenciavel || (p?.category(c.key).enabled ?? true),
                     locked: !c.silenciavel,
-                    tone: _toneEvents,
+                    tone: _tone,
                   ),
               ],
             ),
           ),
-        const SizedBox(height: 8),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: _kPadH),
+            child: Text(
+              'Riscado = silenciado. Cadeado = aviso do sistema, sempre ligado.',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: secondary,
+                fontWeight: FontWeight.w600,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 6),
         _NavigationRow(
-          tone: _toneEvents,
+          tone: _tone,
           icon: Icons.tune_rounded,
           title: 'Ajustar por assunto',
           subtitle:
               'Liga, silencia e escolhe os canais de cada assunto, inclusive os avisos do Financeiro.',
-          trailing: Icon(
-            Icons.arrow_forward_rounded,
-            size: 18,
-            color: ThemeHelpers.textSecondaryColor(context),
-          ),
+          trailing: Icon(Icons.chevron_right_rounded, size: 22, color: secondary),
           onTap: _openNotificationPreferences,
         ),
       ],
@@ -1026,10 +1095,11 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // SEÇÃO: AGENDA (violeta) — regra de sobreposição
+  // SEÇÃO: AGENDA — regra de sobreposição (escolha única)
   // ──────────────────────────────────────────────────────────────────────
 
-  Widget _buildAgendaSection(BuildContext context, ThemeData theme) {
+  Widget _buildAgendaSection(BuildContext context) {
+    final theme = Theme.of(context);
     final allow = _prefs?.calendarAllowOverlappingSlots ?? false;
 
     Widget option(bool value, String title, String subtitle, IconData icon) {
@@ -1041,10 +1111,10 @@ class _SettingsPageState extends State<SettingsPage> {
                 'generalSettings': {'calendarAllowOverlappingSlots': value},
               }),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: _kPadH, vertical: 12),
           child: Row(
             children: [
-              _ToneIconPlate(tone: _toneAppearance, icon: icon, active: selected),
+              _ToneIconPlate(tone: _tone, icon: icon, active: selected),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
@@ -1054,13 +1124,13 @@ class _SettingsPageState extends State<SettingsPage> {
                     Text(
                       title,
                       style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w800,
                         color: ThemeHelpers.textColor(context),
                         letterSpacing: -0.2,
                         height: 1.2,
                       ),
                     ),
-                    const SizedBox(height: 3),
+                    const SizedBox(height: 2),
                     Text(
                       subtitle,
                       style: theme.textTheme.bodySmall?.copyWith(
@@ -1074,11 +1144,13 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(width: 10),
               Icon(
-                selected ? Icons.check_circle_rounded : Icons.circle_outlined,
+                selected
+                    ? Icons.radio_button_checked_rounded
+                    : Icons.radio_button_unchecked_rounded,
                 color: selected
-                    ? _toneAppearance
+                    ? _tone
                     : ThemeHelpers.textSecondaryColor(context),
-                size: 24,
+                size: 22,
               ),
             ],
           ),
@@ -1090,14 +1162,13 @@ class _SettingsPageState extends State<SettingsPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _SectionHeader(
-          eyebrow: 'AGENDA',
-          title: 'Dois compromissos no mesmo horário',
+          title: 'Agenda',
           subtitle:
-              'A regra vale só para a SUA agenda — a dos outros não muda.',
-          rightHint: allow ? 'Permite' : 'Bloqueia',
-          tone: _toneAppearance,
+              'Dois compromissos seus no mesmo horário. Vale só para a sua agenda.',
+          trailing: allow ? 'Permite' : 'Bloqueia',
+          tone: _tone,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 8),
         Material(
           color: Colors.transparent,
           child: Column(
@@ -1106,23 +1177,23 @@ class _SettingsPageState extends State<SettingsPage> {
               option(
                 false,
                 'Bloqueia',
-                'O sistema avisa e não deixa marcar por cima de outro compromisso seu.',
+                'Avisa e não deixa marcar por cima de outro compromisso seu.',
                 Icons.event_busy_outlined,
               ),
               _rowDivider(context),
               option(
                 true,
                 'Permite',
-                'Você pode ter dois compromissos no mesmo horário, lado a lado.',
+                'Deixa marcar dois compromissos no mesmo horário, lado a lado.',
                 Icons.event_available_outlined,
               ),
             ],
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+          padding: const EdgeInsets.fromLTRB(_kPadH, 6, _kPadH, 0),
           child: Text(
-            'Vale em: criar agendamento, editar horário e adiar.',
+            'Vale ao criar agendamento, editar horário e adiar.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: ThemeHelpers.textSecondaryColor(context),
               fontWeight: FontWeight.w600,
@@ -1135,10 +1206,10 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // SEÇÃO: APARÊNCIA (violeta)
+  // SEÇÃO: APARÊNCIA
   // ──────────────────────────────────────────────────────────────────────
 
-  Widget _buildAppearanceSection(BuildContext context, ThemeData theme) {
+  Widget _buildAppearanceSection(BuildContext context) {
     final themeService = ThemeService.instance;
     final lang = _prefs?.language ?? 'pt-BR';
 
@@ -1146,104 +1217,53 @@ class _SettingsPageState extends State<SettingsPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _SectionHeader(
-          eyebrow: 'COMO VOCÊ VÊ',
-          title: 'Aparência & região',
-          subtitle:
-              'Tema visual e idioma da interface. Claro ou escuro também vale no sistema web.',
-          tone: _toneAppearance,
+          title: 'Aparência',
+          subtitle: 'Claro ou escuro também vale no sistema web.',
+          trailing: themeService.getThemeName(),
+          tone: _tone,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 8),
         _NavigationRow(
-          tone: _toneAppearance,
+          tone: _tone,
           icon: themeService.getThemeIcon(),
           title: 'Tema do app',
-          subtitle: 'Atualmente: ${themeService.getThemeName().toLowerCase()}',
+          subtitle: 'Claro, escuro ou igual ao do celular.',
           trailing: _ValueChip(
             label: themeService.getThemeName(),
-            tone: _toneAppearance,
+            tone: _tone,
           ),
-          onTap: () => _showThemeSheet(context, _toneAppearance),
+          onTap: () => _showThemeSheet(context),
         ),
         _rowDivider(context),
-        _NavigationRow(
-          tone: _toneAppearance,
+        // O web também só lê o idioma (themeSettings.language): informação,
+        // não ajuste — por isso não tem seta nem toque.
+        _InfoRow(
+          tone: _tone,
           icon: Icons.translate_rounded,
           title: 'Idioma',
-          subtitle: 'Textos, datas e formatos numéricos da interface.',
-          trailing: _ValueChip(
-            label: _languageLabel(lang),
-            tone: _toneAppearance,
-          ),
-          onTap: null, // o web também só lê (themeSettings.language)
+          subtitle: 'Textos, datas e números. Não muda pelo app.',
+          value: _languageLabel(lang),
         ),
       ],
     );
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // SEÇÃO: CONTA (vermelho marca)
+  // SEÇÃO: SOBRE O APP
   // ──────────────────────────────────────────────────────────────────────
 
-  Widget _buildAccountSection(
-    BuildContext context,
-    ThemeData theme,
-    Color brand,
-  ) {
+  Widget _buildAboutSection(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _SectionHeader(
-          eyebrow: 'IDENTIDADE',
-          title: 'Conta & perfil',
-          subtitle:
-              'Seus dados pessoais e como apareces para clientes e equipa.',
-          tone: _toneAccount,
+          title: 'Sobre o app',
+          subtitle: 'Políticas do app. A versão instalada fica no rodapé.',
+          tone: _tone,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 8),
         _NavigationRow(
-          tone: _toneAccount,
-          icon: Icons.person_rounded,
-          title: 'Perfil',
-          subtitle: 'Nome, telefone, foto e dados de contacto.',
-          trailing: Icon(
-            Icons.arrow_forward_rounded,
-            size: 18,
-            color: ThemeHelpers.textSecondaryColor(context),
-          ),
-          onTap: () => Navigator.pushNamed(context, AppRoutes.profile),
-        ),
-        _rowDivider(context),
-        _NavigationRow(
-          tone: _toneAccount,
-          icon: Icons.edit_note_rounded,
-          title: 'Editar perfil',
-          subtitle:
-              'Altera nome, telefone e foto. Salva ao confirmar no formulário.',
-          trailing: Icon(
-            Icons.arrow_forward_rounded,
-            size: 18,
-            color: ThemeHelpers.textSecondaryColor(context),
-          ),
-          onTap: () => Navigator.pushNamed(context, AppRoutes.profileEdit),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildAppUpdateSection(BuildContext context, ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _SectionHeader(
-          eyebrow: 'APLICATIVO',
-          title: 'Sobre o aplicativo',
-          subtitle:
-              'Políticas e informações do app. A versão instalada aparece no rodapé.',
-          tone: _toneApp,
-        ),
-        const SizedBox(height: 16),
-        _NavigationRow(
-          tone: _toneApp,
+          tone: _tone,
           icon: Icons.policy_rounded,
           title: 'Política de privacidade',
           subtitle: 'Como coletamos, usamos e compartilhamos seus dados.',
@@ -1259,27 +1279,20 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // FOOTER — assinatura editorial
+  // RODAPÉ — assinatura da marca + versão instalada
   // ──────────────────────────────────────────────────────────────────────
 
-  Widget _buildFooterSignature(
-    BuildContext context,
-    ThemeData theme,
-    Color brand,
-  ) {
-    final lang = _shortLanguage(_prefs?.language ?? 'pt-BR');
-    final themeShort = ThemeService.instance.getThemeName();
+  Widget _buildFooterSignature(BuildContext context, Color brand) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
     final year = DateTime.now().year;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+      padding: const EdgeInsets.fromLTRB(_kPadH, 0, _kPadH, 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            height: 1,
-            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
-          ),
+          _hairline(context),
           const SizedBox(height: 16),
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -1296,8 +1309,10 @@ class _SettingsPageState extends State<SettingsPage> {
                     const SizedBox(height: 4),
                     Text(
                       'Plataforma · CRM Imobiliário',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.labelSmall?.copyWith(
-                        color: ThemeHelpers.textSecondaryColor(context),
+                        color: secondary,
                         fontWeight: FontWeight.w700,
                         letterSpacing: 0.4,
                         fontSize: 10,
@@ -1319,22 +1334,11 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 14,
-            runSpacing: 6,
-            children: [
-              _FooterMeta(label: 'IDIOMA', value: lang),
-              _FooterMeta(label: 'TEMA', value: themeShort),
-            ],
-          ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           Text(
             '© $year Intellisys. Todos os direitos reservados.',
             style: theme.textTheme.labelSmall?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(
-                context,
-              ).withValues(alpha: 0.7),
+              color: secondary.withValues(alpha: 0.8),
               fontWeight: FontWeight.w600,
               letterSpacing: 0.3,
               fontSize: 10,
@@ -1349,157 +1353,159 @@ class _SettingsPageState extends State<SettingsPage> {
   // HELPERS de layout
   // ──────────────────────────────────────────────────────────────────────
 
-  /// Divisor entre rows da mesma seção — fininho, indentado para alinhar
-  /// com o conteúdo (margem H 20).
-  Widget _rowDivider(BuildContext context) {
+  /// Filete entre linhas da mesma seção — começa onde começa o texto, como
+  /// numa lista de ajustes; a placa de ícone fica sem corte.
+  Widget _rowDivider(BuildContext context, {double indent = _kRowTextInset}) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: EdgeInsets.only(left: indent, right: _kPadH),
       child: Divider(
         height: 1,
         thickness: 0.5,
-        color: ThemeHelpers.borderColor(context).withValues(alpha: 0.4),
+        color: ThemeHelpers.borderColor(context).withValues(alpha: 0.7),
       ),
     );
   }
 
-  /// Separador entre seções — linha que sangra de borda a borda para
-  /// criar uma "quebra editorial" forte.
-  Widget _sectionSeparator(BuildContext context) {
+  Widget _hairline(BuildContext context) {
     return Container(
       height: 1,
-      color: ThemeHelpers.borderColor(context).withValues(alpha: 0.3),
+      color: ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
+    );
+  }
+
+  /// Quebra entre seções — filete de ponta a ponta com respiro igual dos
+  /// dois lados.
+  Widget _sectionBreak(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 22),
+      child: _hairline(context),
     );
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // THEME SHEET — substitui o `vivid_chrome`. Sheet limpa, sem moldura
-  // exagerada, alinhada ao tom violeta da seção Aparência.
+  // FOLHA DO TEMA — escolha única; em tela baixa o conteúdo rola por dentro
   // ──────────────────────────────────────────────────────────────────────
 
-  Future<void> _showThemeSheet(BuildContext context, Color tone) async {
+  Future<void> _showThemeSheet(BuildContext context) async {
     final themeService = ThemeService.instance;
+    final tone = _tone;
 
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
+        final mq = MediaQuery.of(sheetContext);
+        final theme = Theme.of(sheetContext);
+        final secondary = ThemeHelpers.textSecondaryColor(sheetContext);
         return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.paddingOf(sheetContext).bottom,
-          ),
-          child: Container(
-            decoration: BoxDecoration(
-              color: ThemeHelpers.cardBackgroundColor(sheetContext),
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(22),
-              ),
-              border: Border(
-                top: BorderSide(
-                  color: tone.withValues(alpha: 0.35),
-                  width: 1.2,
+          padding: EdgeInsets.only(bottom: mq.padding.bottom),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: mq.size.height * 0.88),
+            child: Container(
+              decoration: BoxDecoration(
+                color: ThemeHelpers.cardBackgroundColor(sheetContext),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(22),
+                ),
+                border: Border(
+                  top: BorderSide(color: ThemeHelpers.borderColor(sheetContext)),
                 ),
               ),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 10),
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: ThemeHelpers.textSecondaryColor(
-                        sheetContext,
-                      ).withValues(alpha: 0.35),
-                      borderRadius: BorderRadius.circular(99),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: 10),
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: secondary.withValues(alpha: 0.35),
+                        borderRadius: BorderRadius.circular(99),
+                      ),
                     ),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 12, 0),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'APARÊNCIA',
-                              style: Theme.of(sheetContext).textTheme.labelSmall
-                                  ?.copyWith(
-                                    color: tone,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: 2.0,
-                                    fontSize: 10,
-                                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(_kPadH, 10, 6, 0),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Tema do app',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.5,
+                              color: ThemeHelpers.textColor(sheetContext),
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Tema do app',
-                              style: Theme.of(sheetContext)
-                                  .textTheme
-                                  .headlineSmall
-                                  ?.copyWith(
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: -0.6,
-                                    color: ThemeHelpers.textColor(sheetContext),
-                                    height: 1.05,
-                                  ),
-                            ),
-                          ],
+                          ),
                         ),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.pop(sheetContext),
-                        icon: const Icon(Icons.close_rounded),
-                      ),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 6),
-                  child: Text(
-                    'Escolhe como queres ver o app. Pode mudar a qualquer momento.',
-                    style: Theme.of(sheetContext).textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(sheetContext),
-                      height: 1.35,
+                        IconButton(
+                          tooltip: 'Fechar',
+                          onPressed: () => Navigator.pop(sheetContext),
+                          icon: Icon(Icons.close_rounded, color: secondary),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                const SizedBox(height: 6),
-                _themeOptionTile(
-                  sheetContext,
-                  tone,
-                  ThemeMode.light,
-                  'Claro',
-                  'Melhor em ambientes luminosos e durante o dia.',
-                  Icons.light_mode_rounded,
-                  themeService,
-                ),
-                _themeOptionTile(
-                  sheetContext,
-                  tone,
-                  ThemeMode.dark,
-                  'Escuro',
-                  'Menos cansaço visual à noite, contraste reduzido.',
-                  Icons.dark_mode_rounded,
-                  themeService,
-                ),
-                _themeOptionTile(
-                  sheetContext,
-                  tone,
-                  ThemeMode.system,
-                  'Sistema',
-                  'Segue automaticamente o tema do telemóvel.',
-                  Icons.brightness_auto_rounded,
-                  themeService,
-                ),
-                const SizedBox(height: 14),
-              ],
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(
+                              _kPadH,
+                              0,
+                              _kPadH,
+                              6,
+                            ),
+                            child: Text(
+                              'Escolha como quer ver o app. Dá para mudar quando quiser.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: secondary,
+                                height: 1.35,
+                              ),
+                            ),
+                          ),
+                          _themeOptionTile(
+                            sheetContext,
+                            tone,
+                            ThemeMode.light,
+                            'Claro',
+                            'Fundo branco. Melhor de dia e em lugar claro.',
+                            Icons.light_mode_rounded,
+                            themeService,
+                          ),
+                          _themeOptionTile(
+                            sheetContext,
+                            tone,
+                            ThemeMode.dark,
+                            'Escuro',
+                            'Fundo grafite. Cansa menos a vista à noite.',
+                            Icons.dark_mode_rounded,
+                            themeService,
+                          ),
+                          _themeOptionTile(
+                            sheetContext,
+                            tone,
+                            ThemeMode.system,
+                            'Sistema',
+                            'Acompanha o tema do celular.',
+                            Icons.brightness_auto_rounded,
+                            themeService,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -1518,6 +1524,7 @@ class _SettingsPageState extends State<SettingsPage> {
   ) {
     final selected = themeService.themeMode == mode;
     final theme = Theme.of(sheetContext);
+    final secondary = ThemeHelpers.textSecondaryColor(sheetContext);
 
     return InkWell(
       onTap: () {
@@ -1525,22 +1532,10 @@ class _SettingsPageState extends State<SettingsPage> {
         _applyTheme(mode);
       },
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: _kPadH, vertical: 12),
         child: Row(
           children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: tone.withValues(alpha: selected ? 0.18 : 0.1),
-                border: Border.all(
-                  color: tone.withValues(alpha: selected ? 0.5 : 0.25),
-                ),
-              ),
-              alignment: Alignment.center,
-              child: Icon(icon, color: tone, size: 20),
-            ),
+            _ToneIconPlate(tone: tone, icon: icon, active: selected),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
@@ -1549,7 +1544,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   Text(
                     title,
                     style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w900,
+                      fontWeight: FontWeight.w800,
                       color: ThemeHelpers.textColor(sheetContext),
                       letterSpacing: -0.2,
                     ),
@@ -1558,7 +1553,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   Text(
                     subtitle,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(sheetContext),
+                      color: secondary,
                       height: 1.3,
                     ),
                   ),
@@ -1567,11 +1562,11 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const SizedBox(width: 8),
             Icon(
-              selected ? Icons.check_circle_rounded : Icons.circle_outlined,
-              color: selected
-                  ? tone
-                  : ThemeHelpers.textSecondaryColor(sheetContext),
-              size: 24,
+              selected
+                  ? Icons.radio_button_checked_rounded
+                  : Icons.radio_button_unchecked_rounded,
+              color: selected ? tone : secondary,
+              size: 22,
             ),
           ],
         ),
@@ -1583,21 +1578,11 @@ class _SettingsPageState extends State<SettingsPage> {
   // FORMATTERS
   // ──────────────────────────────────────────────────────────────────────
 
-  String? _formatJoinedSince(String iso) {
-    if (iso.isEmpty) return null;
-    try {
-      final d = DateTime.parse(iso);
-      return DateFormat('MMM yyyy', 'pt_BR').format(d);
-    } catch (_) {
-      return null;
-    }
-  }
-
   String _formatRole(String role) {
     final r = role.trim().toLowerCase();
     return switch (r) {
       'master' => 'Master',
-      'admin' => 'Admin',
+      'admin' => 'Administrador',
       'broker' => 'Corretor',
       'agent' => 'Corretor',
       'manager' => 'Gestor',
@@ -1607,14 +1592,6 @@ class _SettingsPageState extends State<SettingsPage> {
             ? 'Usuário'
             : '${role[0].toUpperCase()}${role.substring(1).toLowerCase()}',
     };
-  }
-
-  String _shortLanguage(String code) {
-    final c = code.trim().toLowerCase().replaceAll('_', '-');
-    if (c.startsWith('pt')) return 'PT-BR';
-    if (c.startsWith('en')) return 'EN';
-    if (c.startsWith('es')) return 'ES';
-    return c.toUpperCase();
   }
 
   String _languageLabel(String code) {
@@ -1628,102 +1605,219 @@ class _SettingsPageState extends State<SettingsPage> {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// COMPONENTES INTERNOS — sem cards encapsulando seções
+// COMPONENTES INTERNOS — linhas flush, sem cards encapsulando seções
 // ════════════════════════════════════════════════════════════════════════
 
-/// Cabeçalho editorial de seção. Eyebrow uppercase coloridA + título
-/// w900 grande + subtítulo opcional + hint à direita (ex. "2 de 3 ativos").
+/// Margem lateral da tela (gramática flush do app).
+const double _kPadH = 16;
+
+/// Onde começa o texto das linhas com placa (16 + placa 40 + 14): alinha
+/// filetes e os chips de canal dos avisos de lead.
+const double _kRowTextInset = 70;
+
+/// Largura máxima da coluna em tela larga.
+const double _kMaxContentWidth = 720;
+
+/// Uma linha do resumo: rótulo, resposta e para onde leva.
+class _SummaryItem {
+  const _SummaryItem({
+    required this.icon,
+    required this.label,
+    required this.answer,
+    required this.color,
+    required this.anchor,
+  });
+
+  final IconData icon;
+  final String label;
+  final String answer;
+  final Color color;
+  final GlobalKey anchor;
+}
+
+/// Linha do sumário com resposta — rótulo à esquerda, estado à direita na
+/// cor do significado, seta para baixo (leva à seção nesta mesma tela).
+class _SummaryRow extends StatelessWidget {
+  const _SummaryRow({
+    required this.item,
+    required this.tone,
+    required this.onTap,
+  });
+
+  final _SummaryItem item;
+  final Color tone;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(_kPadH, 11, 10, 11),
+          child: Row(
+            children: [
+              Icon(item.icon, size: 18, color: tone),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  item.label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: ThemeHelpers.textColor(context),
+                    fontWeight: FontWeight.w700,
+                    height: 1.2,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 124),
+                child: Text(
+                  item.answer,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: item.color,
+                    fontWeight: FontWeight.w900,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 2),
+              Icon(
+                Icons.keyboard_arrow_down_rounded,
+                size: 20,
+                color: ThemeHelpers.textSecondaryColor(context),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Estado da gravação — "Tudo salvo" (verde, confirmado pela API) ou
+/// "Salvando…" enquanto algum interruptor espera resposta. Estático.
+class _SaveState extends StatelessWidget {
+  const _SaveState({required this.saving, required this.savedColor});
+
+  final bool saving;
+  final Color savedColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = saving
+        ? ThemeHelpers.textSecondaryColor(context)
+        : savedColor;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          saving ? Icons.sync_rounded : Icons.check_circle_rounded,
+          size: 15,
+          color: color,
+        ),
+        const SizedBox(width: 5),
+        Text(
+          saving ? 'Salvando…' : 'Tudo salvo',
+          maxLines: 1,
+          softWrap: false,
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+            color: color,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Cabeçalho de seção — barra tonal, título, explicação curta e a contagem
+/// do que está ligado à direita (quebra em duas linhas se faltar espaço).
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({
-    required this.eyebrow,
     required this.title,
     required this.tone,
     this.subtitle,
-    this.rightHint,
+    this.trailing,
+    this.trailingColor,
   });
 
-  final String eyebrow;
   final String title;
   final String? subtitle;
-  final String? rightHint;
+  final String? trailing;
+  final Color? trailingColor;
   final Color tone;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.symmetric(horizontal: _kPadH),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Container(
+            width: 3,
+            height: 18,
+            margin: const EdgeInsets.only(top: 2),
+            decoration: BoxDecoration(
+              color: tone,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 18,
-                      height: 2,
-                      decoration: BoxDecoration(
-                        color: tone,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        eyebrow,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: tone,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.8,
-                          fontSize: 10,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
                 Text(
                   title,
-                  style: theme.textTheme.headlineSmall?.copyWith(
+                  style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w900,
-                    letterSpacing: -0.6,
+                    letterSpacing: -0.4,
+                    height: 1.2,
+                    fontSize: 18,
                     color: ThemeHelpers.textColor(context),
-                    height: 1.05,
-                    fontSize: 22,
                   ),
                 ),
                 if (subtitle != null) ...[
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 3),
                   Text(
                     subtitle!,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: ThemeHelpers.textSecondaryColor(context),
                       fontWeight: FontWeight.w500,
-                      height: 1.3,
+                      height: 1.35,
                     ),
                   ),
                 ],
               ],
             ),
           ),
-          if (rightHint != null) ...[
+          if (trailing != null) ...[
             const SizedBox(width: 10),
-            Padding(
-              padding: const EdgeInsets.only(top: 14),
-              child: Text(
-                rightHint!,
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: tone,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.2,
-                  fontSize: 11.5,
-                  fontFeatures: const [FontFeature.tabularFigures()],
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 124),
+              child: Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  trailing!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: trailingColor ?? tone,
+                    fontWeight: FontWeight.w900,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
                 ),
               ),
             ),
@@ -1734,7 +1828,8 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
-/// Row de switch — full-bleed (sem moldura), padding H 20.
+/// Linha de interruptor — flush, placa à esquerda, interruptor alinhado à
+/// direita em todas as seções.
 class _SwitchRow extends StatelessWidget {
   const _SwitchRow({
     required this.tone,
@@ -1760,7 +1855,7 @@ class _SwitchRow extends StatelessWidget {
       child: InkWell(
         onTap: () => onChanged(!value),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: _kPadH, vertical: 12),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -1774,13 +1869,13 @@ class _SwitchRow extends StatelessWidget {
                     Text(
                       title,
                       style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w800,
                         color: ThemeHelpers.textColor(context),
                         letterSpacing: -0.2,
                         height: 1.2,
                       ),
                     ),
-                    const SizedBox(height: 3),
+                    const SizedBox(height: 2),
                     Text(
                       subtitle,
                       style: theme.textTheme.bodySmall?.copyWith(
@@ -1811,7 +1906,7 @@ class _SwitchRow extends StatelessWidget {
   }
 }
 
-/// Row de navegação — tap leva para outra tela / abre sheet. Sem moldura.
+/// Linha de navegação — leva para outra tela ou abre a folha. Sem moldura.
 class _NavigationRow extends StatelessWidget {
   const _NavigationRow({
     required this.tone,
@@ -1832,13 +1927,12 @@ class _NavigationRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final disabled = onTap == null;
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: _kPadH, vertical: 12),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -1852,15 +1946,13 @@ class _NavigationRow extends StatelessWidget {
                     Text(
                       title,
                       style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: ThemeHelpers.textColor(
-                          context,
-                        ).withValues(alpha: disabled ? 0.85 : 1.0),
+                        fontWeight: FontWeight.w800,
+                        color: ThemeHelpers.textColor(context),
                         letterSpacing: -0.2,
                         height: 1.2,
                       ),
                     ),
-                    const SizedBox(height: 3),
+                    const SizedBox(height: 2),
                     Text(
                       subtitle,
                       style: theme.textTheme.bodySmall?.copyWith(
@@ -1882,8 +1974,81 @@ class _NavigationRow extends StatelessWidget {
   }
 }
 
-/// Placa de ícone tom-on-tom — usada nos rows de cada seção. Mantém
-/// identidade visual da seção (azul/âmbar/violeta/vermelho).
+/// Linha só de leitura — mesmo desenho das outras, com o valor à direita e
+/// sem seta (não há o que ajustar por aqui).
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({
+    required this.tone,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+  });
+
+  final Color tone;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: _kPadH, vertical: 12),
+      child: Row(
+        children: [
+          _ToneIconPlate(tone: tone, icon: icon, active: false),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: ThemeHelpers.textColor(context),
+                    letterSpacing: -0.2,
+                    height: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: secondary,
+                    height: 1.35,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 124),
+            child: Text(
+              value,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: ThemeHelpers.textColor(context),
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Placa de ícone tom-sobre-tom, chapada (sem degradê): acesa quando o
+/// ajuste está ligado, apagada quando desligado.
 class _ToneIconPlate extends StatelessWidget {
   const _ToneIconPlate({
     required this.tone,
@@ -1898,31 +2063,24 @@ class _ToneIconPlate extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 42,
-      height: 42,
+      width: 40,
+      height: 40,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
-        gradient: LinearGradient(
-          colors: [
-            tone.withValues(alpha: active ? 0.22 : 0.12),
-            tone.withValues(alpha: active ? 0.08 : 0.04),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        border: Border.all(color: tone.withValues(alpha: active ? 0.42 : 0.22)),
+        color: tone.withValues(alpha: active ? 0.13 : 0.05),
+        border: Border.all(color: tone.withValues(alpha: active ? 0.32 : 0.14)),
       ),
       alignment: Alignment.center,
       child: Icon(
         icon,
-        color: tone.withValues(alpha: active ? 1.0 : 0.6),
+        color: tone.withValues(alpha: active ? 1.0 : 0.5),
         size: 20,
       ),
     );
   }
 }
 
-/// Chip de valor à direita de uma navigation row (ex. "Escuro", "PT-BR").
+/// Valor à direita de uma linha de navegação (ex.: "Escuro").
 class _ValueChip extends StatelessWidget {
   const _ValueChip({required this.label, required this.tone});
 
@@ -1931,68 +2089,82 @@ class _ValueChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        color: tone.withValues(alpha: 0.14),
-        border: Border.all(color: tone.withValues(alpha: 0.35)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w900,
-          color: tone,
-          letterSpacing: 0.2,
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 120),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(999),
+          color: tone.withValues(alpha: 0.1),
+          border: Border.all(color: tone.withValues(alpha: 0.32)),
+        ),
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w900,
+            color: tone,
+            letterSpacing: 0.2,
+          ),
         ),
       ),
     );
   }
 }
 
-/// Pill de meta — usada no perfil (role + empresa). Pode ser filled
-/// (com fundo tingido) ou outlined (apenas contorno).
-class _MetaPill extends StatelessWidget {
-  const _MetaPill({
+/// Botão pequeno em pílula — ícone no tom, texto neutro. Usado no "Editar"
+/// da linha de quem é.
+class _SmallActionPill extends StatelessWidget {
+  const _SmallActionPill({
+    required this.icon,
     required this.label,
     required this.tone,
-    required this.filled,
+    required this.onTap,
   });
 
+  final IconData icon;
   final String label;
   final Color tone;
-  final bool filled;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(6),
-        color: filled ? tone.withValues(alpha: 0.18) : Colors.transparent,
-        border: Border.all(
-          color: tone.withValues(alpha: filled ? 0.35 : 0.5),
-          width: 1,
-        ),
+    return Material(
+      color: Colors.transparent,
+      shape: StadiumBorder(
+        side: BorderSide(color: ThemeHelpers.borderColor(context)),
       ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 10.5,
-          fontWeight: FontWeight.w900,
-          color: filled ? ThemeHelpers.textColor(context) : tone,
-          letterSpacing: 0.3,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 15, color: tone),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  color: ThemeHelpers.textColor(context),
+                ),
+              ),
+            ],
+          ),
         ),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
       ),
     );
   }
 }
 
-/// Avatar circular com aro accent fino — sem moldura sombreada
-/// pesada. Tem fallback de monograma quando não há foto.
+/// Avatar circular com aro fino na cor da marca e monograma de reserva.
 class _AvatarRing extends StatelessWidget {
   const _AvatarRing({
     required this.profile,
@@ -2030,7 +2202,8 @@ class _AvatarRing extends StatelessWidget {
   }
 }
 
-/// Fallback do avatar — círculo com gradient accent + primeira letra.
+/// Reserva do avatar — primeira letra na cor da marca sobre o mesmo tom
+/// bem claro (chapado, sem degradê inventado).
 class _Monogram extends StatelessWidget {
   const _Monogram({required this.name, required this.accent});
 
@@ -2041,178 +2214,17 @@ class _Monogram extends StatelessWidget {
   Widget build(BuildContext context) {
     final letter = name.trim().isEmpty ? '?' : name.trim()[0].toUpperCase();
     return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: LinearGradient(
-          colors: [
-            accent.withValues(alpha: 0.85),
-            AppColors.secondary.secondary.withValues(alpha: 0.85),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-      ),
+      color: accent.withValues(alpha: 0.14),
       alignment: Alignment.center,
       child: Text(
         letter,
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: accent,
           fontWeight: FontWeight.w900,
-          fontSize: 22,
+          fontSize: 18,
           letterSpacing: -0.5,
         ),
       ),
-    );
-  }
-}
-
-/// Botão fantasma redondo — sem fundo. Usado no canto direito da
-/// manchete de perfil (atalho para editar).
-class _GhostIconButton extends StatelessWidget {
-  const _GhostIconButton({
-    required this.icon,
-    required this.tone,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final Color tone;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkResponse(
-      onTap: onTap,
-      radius: 24,
-      child: Container(
-        width: 38,
-        height: 38,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: tone.withValues(alpha: 0.32)),
-        ),
-        alignment: Alignment.center,
-        child: Icon(icon, color: tone, size: 17),
-      ),
-    );
-  }
-}
-
-/// Coluna de KPI rápida — valor grande em accent + label uppercase +
-/// sub-rótulo sutil + traço accent fino. Igual ao estilo do dashboard.
-class _QuickKpi {
-  const _QuickKpi({
-    required this.accent,
-    required this.label,
-    required this.value,
-    required this.sub,
-  });
-
-  final Color accent;
-  final String label;
-  final String value;
-  final String sub;
-
-  Widget render(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              value,
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: accent,
-                letterSpacing: -0.6,
-                height: 1,
-                fontSize: 22,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            label,
-            style: theme.textTheme.labelSmall?.copyWith(
-              fontWeight: FontWeight.w900,
-              color: ThemeHelpers.textSecondaryColor(context),
-              letterSpacing: 1.4,
-              fontSize: 9.5,
-              height: 1,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 3),
-          Text(
-            sub,
-            style: theme.textTheme.labelSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-              color: ThemeHelpers.textSecondaryColor(
-                context,
-              ).withValues(alpha: 0.65),
-              letterSpacing: 0.3,
-              fontSize: 9,
-              height: 1,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 6),
-          Container(
-            height: 2,
-            width: 16,
-            decoration: BoxDecoration(
-              color: accent,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Bloco de meta no rodapé — label uppercase fino + valor compacto.
-class _FooterMeta extends StatelessWidget {
-  const _FooterMeta({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          label,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(
-              context,
-            ).withValues(alpha: 0.65),
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1.2,
-            fontSize: 9,
-          ),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          value,
-          style: theme.textTheme.labelMedium?.copyWith(
-            color: ThemeHelpers.textColor(context).withValues(alpha: 0.85),
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.2,
-            fontSize: 11,
-          ),
-        ),
-      ],
     );
   }
 }
@@ -2261,12 +2273,16 @@ class _ChannelToggleChip extends StatelessWidget {
                 color: fg,
               ),
               const SizedBox(width: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: fg,
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: fg,
+                  ),
                 ),
               ),
             ],
@@ -2277,8 +2293,8 @@ class _ChannelToggleChip extends StatelessWidget {
   }
 }
 
-/// Assunto no resumo "Por assunto" — marcado quando ligado, cadeado quando
-/// é do sistema (não pode ser desligado).
+/// Assunto no resumo "Assuntos" — marcado quando ligado, riscado quando
+/// silenciado, cadeado quando é do sistema (não pode ser desligado).
 class _SubjectPill extends StatelessWidget {
   const _SubjectPill({
     required this.label,

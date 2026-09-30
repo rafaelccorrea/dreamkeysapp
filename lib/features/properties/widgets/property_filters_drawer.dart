@@ -190,6 +190,11 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
     final accent = AppColors.primary.primary;
     final textColor = ThemeHelpers.textColor(context);
     final secondaryColor = ThemeHelpers.textSecondaryColor(context);
+    // Tons das seções Tipo e Status por token (mesmos valores de antes).
+    final typeTone =
+        isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
+    final statusTone =
+        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
 
     return Padding(
       padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
@@ -252,13 +257,20 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
                                 Icon(LucideIcons.slidersHorizontal,
                                     size: 13, color: accent),
                                 const SizedBox(width: 6),
-                                Text(
-                                  'FILTROS AVANÇADOS',
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: accent,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: 1.65,
-                                    fontSize: 10.5,
+                                // Flexible: em 320dp com texto a 130% o
+                                // eyebrow + "12 ativos" passava do fechar.
+                                Flexible(
+                                  child: Text(
+                                    'FILTROS AVANÇADOS',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style:
+                                        theme.textTheme.labelSmall?.copyWith(
+                                      color: accent,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 1.65,
+                                      fontSize: 10.5,
+                                    ),
                                   ),
                                 ),
                                 if (_activeCount > 0) ...[
@@ -280,6 +292,8 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
                                     ),
                                     child: Text(
                                       '$_activeCount ativo${_activeCount > 1 ? "s" : ""}',
+                                      maxLines: 1,
+                                      softWrap: false,
                                       style: TextStyle(
                                         color: accent,
                                         fontWeight: FontWeight.w800,
@@ -340,68 +354,82 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         // ── Tipo ───────────────────────────────────────
-                        const _SectionLabel(
+                        // 16 tipos em 3 grupos (Residencial / Comercial /
+                        // Terreno e rural): acha-se o tipo pelo grupo, não
+                        // varrendo uma parede de pastilhas. Tipo não tem cor
+                        // própria — o ícone diferencia; o tom é o da seção.
+                        _SectionLabel(
                           label: 'TIPO DE IMÓVEL',
-                          tone: Color(0xFF4A90E2),
+                          tone: typeTone,
                         ),
                         const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: [
-                            _FilterChip(
-                              label: 'Todos',
-                              icon: LucideIcons.layoutGrid,
-                              active: _selectedType == null,
-                              tone: accent,
-                              onTap: () =>
-                                  setState(() => _selectedType = null),
-                            ),
-                            for (final t in PropertyType.values)
-                              _FilterChip(
-                                label: t.label,
-                                icon: _propertyTypeIcon(t),
-                                tone: _propertyTypeTone(t),
-                                active: _selectedType == t,
-                                onTap: () => setState(() {
-                                  _selectedType =
-                                      _selectedType == t ? null : t;
-                                }),
-                              ),
-                          ],
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: _FilterChip(
+                            label: 'Todos os tipos',
+                            icon: LucideIcons.layoutGrid,
+                            active: _selectedType == null,
+                            tone: accent,
+                            onTap: () => setState(() => _selectedType = null),
+                          ),
                         ),
+                        for (final g in PropertyTypeVisual.grouped())
+                          _ChipGroup(
+                            caption: g.$1.label,
+                            children: [
+                              for (final t in g.$2)
+                                _FilterChip(
+                                  label: t.label,
+                                  icon: PropertyTypeVisual.lucide(t),
+                                  tone: typeTone,
+                                  active: _selectedType == t,
+                                  onTap: () => setState(() {
+                                    _selectedType =
+                                        _selectedType == t ? null : t;
+                                  }),
+                                ),
+                            ],
+                          ),
                         const SizedBox(height: 22),
                         // ── Status ─────────────────────────────────────
-                        const _SectionLabel(
+                        // 17 status em fases (cadastro, carteira, funil de
+                        // locação, fechados), com a MESMA cor e ícone da pill
+                        // do card (PropertyStatusVisual é a fonte única).
+                        _SectionLabel(
                           label: 'STATUS DO IMÓVEL',
-                          tone: Color(0xFF8B5CF6),
+                          tone: statusTone,
                         ),
                         const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: [
-                            _FilterChip(
-                              label: 'Todos',
-                              icon: LucideIcons.layoutGrid,
-                              active: _selectedStatus == null,
-                              tone: accent,
-                              onTap: () =>
-                                  setState(() => _selectedStatus = null),
-                            ),
-                            for (final s in PropertyStatus.values)
-                              _FilterChip(
-                                label: s.label,
-                                icon: _propertyStatusIcon(s),
-                                tone: _propertyStatusTone(s),
-                                active: _selectedStatus == s,
-                                onTap: () => setState(() {
-                                  _selectedStatus =
-                                      _selectedStatus == s ? null : s;
-                                }),
-                              ),
-                          ],
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: _FilterChip(
+                            label: 'Todos os status',
+                            icon: LucideIcons.layoutGrid,
+                            active: _selectedStatus == null,
+                            tone: accent,
+                            onTap: () => setState(() => _selectedStatus = null),
+                          ),
                         ),
+                        for (final g in PropertyStatusVisual.grouped())
+                          _ChipGroup(
+                            caption: g.$1.label,
+                            children: [
+                              for (final s in g.$2)
+                                _FilterChip(
+                                  label: s.label,
+                                  icon: PropertyStatusVisual.of(s).icon,
+                                  tone: PropertyStatusVisual.of(
+                                    s,
+                                    dark: isDark,
+                                  ).color,
+                                  active: _selectedStatus == s,
+                                  onTap: () => setState(() {
+                                    _selectedStatus =
+                                        _selectedStatus == s ? null : s;
+                                  }),
+                                ),
+                            ],
+                          ),
                         const SizedBox(height: 22),
                         // ── Preço ──────────────────────────────────────
                         const _SectionLabel(
@@ -662,54 +690,6 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
       ),
     );
   }
-
-  // Os 16 tipos do back (paridade `PropertyTypeOptions` do web).
-  IconData _propertyTypeIcon(PropertyType type) =>
-      PropertyTypeVisual.lucide(type);
-
-  Color _propertyTypeTone(PropertyType type) => PropertyTypeVisual.tone(type);
-
-  IconData _propertyStatusIcon(PropertyStatus status) {
-    switch (status) {
-      case PropertyStatus.draft:
-        return LucideIcons.fileEdit;
-      case PropertyStatus.pendingApproval:
-        return LucideIcons.clock;
-      case PropertyStatus.pendingOwnerAuthorization:
-        return LucideIcons.userCheck;
-      case PropertyStatus.available:
-        return LucideIcons.checkCircle2;
-      case PropertyStatus.rented:
-        return LucideIcons.key;
-      case PropertyStatus.sold:
-        return LucideIcons.tag;
-      case PropertyStatus.maintenance:
-        return LucideIcons.wrench;
-      default:
-        // Aguardando publicação e etapas do funil de locação.
-        return PropertyStatusVisual.of(status).icon;
-    }
-  }
-
-  Color _propertyStatusTone(PropertyStatus status) {
-    switch (status) {
-      case PropertyStatus.draft:
-        return const Color(0xFF6366F1);
-      case PropertyStatus.pendingApproval:
-      case PropertyStatus.pendingOwnerAuthorization:
-        return const Color(0xFFF59E0B);
-      case PropertyStatus.available:
-        return const Color(0xFF10B981);
-      case PropertyStatus.rented:
-        return const Color(0xFF06B6D4);
-      case PropertyStatus.sold:
-        return const Color(0xFF8B5CF6);
-      case PropertyStatus.maintenance:
-        return const Color(0xFFEF4444);
-      default:
-        return PropertyStatusVisual.of(status).color;
-    }
-  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -782,6 +762,43 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
+/// Grupo de chips com legenda curta ("Residencial", "Funil de locação"):
+/// quebra as listas longas de tipo (16) e status (17) em blocos que a pessoa
+/// reconhece, em vez de uma parede de pastilhas.
+class _ChipGroup extends StatelessWidget {
+  final String caption;
+  final List<Widget> children;
+
+  const _ChipGroup({required this.caption, required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            caption,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+              fontWeight: FontWeight.w800,
+              fontSize: 11.5,
+              letterSpacing: 0.1,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Wrap(spacing: 6, runSpacing: 6, children: children),
+        ],
+      ),
+    );
+  }
+}
+
 /// Chip de filtro — pill arredondada com ícone + label. Inativo: card
 /// surface com borda fina. Ativo: fill tintado + borda da cor + texto
 /// na cor. Mesmo padrão dos chips de portfólio do hero.
@@ -832,13 +849,21 @@ class _FilterChip extends StatelessWidget {
             children: [
               Icon(icon, size: 14, color: fg),
               const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: fg,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 12.5,
-                  letterSpacing: -0.1,
+              // "Aguardando autorização do proprietário" não cabe numa linha
+              // em 320dp com texto a 130%: quebra em 2 dentro da pill em vez
+              // de estourar a Wrap.
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: fg,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12.5,
+                    letterSpacing: -0.1,
+                    height: 1.2,
+                  ),
                 ),
               ),
             ],
@@ -877,14 +902,22 @@ class _CountSelector extends StatelessWidget {
       children: [
         Icon(icon, size: 16, color: ThemeHelpers.textSecondaryColor(context)),
         const SizedBox(width: 8),
+        // 5 pílulas fixas (~176dp) deixam ~80dp ao rótulo em 320dp: reduz em
+        // vez de partir "Dormitórios" no meio da palavra com texto a 130%.
         Expanded(
-          child: Text(
-            label,
-            style: theme.textTheme.labelLarge?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: textColor,
-              fontSize: 13,
-              letterSpacing: -0.1,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              label,
+              maxLines: 1,
+              softWrap: false,
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: textColor,
+                fontSize: 13,
+                letterSpacing: -0.1,
+              ),
             ),
           ),
         ),

@@ -2227,6 +2227,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final canUndoSold =
         (role == 'master' || role == 'admin') &&
         property.status == PropertyStatus.sold;
+    final disponivelTone =
+        PropertyStatusVisual.of(PropertyStatus.available, dark: isDark).color;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2267,12 +2269,12 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                       vertical: 5,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF10B981).withValues(
+                      color: disponivelTone.withValues(
                         alpha: isDark ? 0.14 : 0.1,
                       ),
                       borderRadius: BorderRadius.circular(999),
                       border: Border.all(
-                        color: const Color(0xFF10B981).withValues(
+                        color: disponivelTone.withValues(
                           alpha: isDark ? 0.45 : 0.35,
                         ),
                       ),
@@ -2285,19 +2287,23 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                               ? Icons.hourglass_top_rounded
                               : Icons.check_circle_outline_rounded,
                           size: 14,
-                          color: const Color(0xFF10B981),
+                          color: disponivelTone,
                         ),
                         const SizedBox(width: 5),
-                        Text(
-                          _undoSoldLoading
-                              ? 'Tornando disponível...'
-                              : 'Tornar disponível',
-                          style: const TextStyle(
-                            color: Color(0xFF10B981),
-                            fontWeight: FontWeight.w800,
-                            fontSize: 11,
-                            letterSpacing: 0.15,
-                            height: 1,
+                        Flexible(
+                          child: Text(
+                            _undoSoldLoading
+                                ? 'Tornando disponível...'
+                                : 'Tornar disponível',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: disponivelTone,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 11,
+                              letterSpacing: 0.15,
+                              height: 1,
+                            ),
                           ),
                         ),
                       ],
@@ -2311,6 +2317,15 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             ),
           ],
         ),
+        // Nas 9 etapas do funil de locação, a trilha responde "em que ponto
+        // está" sem a pessoa decorar a ordem das etapas.
+        if (property.statusIsKnown && property.status.isRentalFunnel) ...[
+          const SizedBox(height: 10),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: PropertyRentalFunnelTrail(status: property.status),
+          ),
+        ],
         const SizedBox(height: 14),
         // 2) Linha CRM: código (à esquerda) + matches badge (canto direito).
         Row(
@@ -2656,9 +2671,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return 'há ${(delta.inDays / 365).floor()} a';
   }
 
-  IconData _typeIcon(PropertyType type) => type == PropertyType.house
-      ? Icons.cottage_outlined
-      : PropertyTypeVisual.outlined(type);
+  IconData _typeIcon(PropertyType type) =>
+      type == PropertyType.house || type == PropertyType.townhouse
+          ? Icons.cottage_outlined
+          : PropertyTypeVisual.outlined(type);
 
   /// Pills discretas do hero — paridade `PropertyHeroMetaChip` (web).
   Widget _buildHeroMetaPillsRow(
@@ -2851,13 +2867,19 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         children: [
           Icon(icon, size: 14, color: muted.withValues(alpha: 0.85)),
           const SizedBox(width: 5),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: muted,
-              height: 1.2,
+          // Flexible + ellipsis: bairro longo ou tipo cru desconhecido não
+          // estouram a Wrap em 320dp com texto a 130%.
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: muted,
+                height: 1.2,
+              ),
             ),
           ),
         ],

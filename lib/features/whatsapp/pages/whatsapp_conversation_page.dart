@@ -17,6 +17,7 @@ import '../../../shared/widgets/skeleton_box.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../notifications/services/notification_websocket_service.dart';
 import '../models/whatsapp_anexos.dart';
+import '../models/whatsapp_message_content.dart' show acharCitada;
 import '../models/whatsapp_midia.dart';
 import '../models/whatsapp_models.dart';
 import '../services/whatsapp_service.dart';
@@ -628,7 +629,11 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     } on PlatformException catch (e) {
       _avisarFalhaDoSeletor(e, camera: true);
     } catch (e) {
-      _showSnack('Não foi possível abrir a câmera: $e', isError: true);
+      debugPrint('❌ [WHATSAPP] câmera: $e');
+      _showSnack(
+        'Não foi possível abrir a câmera. Feche e abra o app e tente de novo.',
+        isError: true,
+      );
     }
   }
 
@@ -659,7 +664,12 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     } on PlatformException catch (e) {
       _avisarFalhaDoSeletor(e);
     } catch (e) {
-      _showSnack('Não foi possível abrir a galeria: $e', isError: true);
+      debugPrint('❌ [WHATSAPP] galeria: $e');
+      _showSnack(
+        'Não foi possível abrir a galeria. Feche e abra o app e tente de '
+        'novo.',
+        isError: true,
+      );
     }
   }
 
@@ -684,7 +694,12 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     } on PlatformException catch (e) {
       _avisarFalhaDoSeletor(e);
     } catch (e) {
-      _showSnack('Não foi possível abrir os arquivos: $e', isError: true);
+      debugPrint('❌ [WHATSAPP] arquivos: $e');
+      _showSnack(
+        'Não foi possível abrir os arquivos. Feche e abra o app e tente de '
+        'novo.',
+        isError: true,
+      );
     }
   }
 
@@ -699,9 +714,20 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
       );
       return;
     }
-    final detalhe = (e.message ?? '').trim().isNotEmpty ? e.message! : e.code;
+    // Detalhe técnico só no log; na tela, a causa em português.
+    debugPrint('❌ [WHATSAPP] seletor: ${e.code} ${e.message ?? ''}');
+    final String causa;
+    if (codigo.contains('already_active') || codigo.contains('multiple')) {
+      causa = 'outro seletor ainda está aberto. Aguarde e tente de novo.';
+    } else if (codigo.contains('camera') || codigo.contains('no_available')) {
+      causa = 'o aparelho não liberou a câmera agora. Tente de novo.';
+    } else {
+      causa = 'o aparelho recusou o pedido. Tente de novo.';
+    }
     _showSnack(
-      '${camera ? 'Não foi possível abrir a câmera' : 'Não foi possível abrir o seletor'}: $detalhe',
+      camera
+          ? 'Não foi possível abrir a câmera: $causa'
+          : 'Não foi possível abrir o seletor: $causa',
       isError: true,
     );
   }
@@ -802,18 +828,23 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
           ),
         ),
         actions: [
+          // Cancelar NEUTRO (o tema pinta TextButton de vermelho).
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
+            style: TextButton.styleFrom(
+              foregroundColor: ThemeHelpers.textSecondaryColor(ctx),
+            ),
             child: const Text('Cancelar'),
           ),
+          // Concluir o atendimento não é destrutivo (reabre sozinha): verde
+          // de confirmação, não o vermelho da marca.
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             style: FilledButton.styleFrom(
-              backgroundColor:
-                  Theme.of(ctx).brightness == Brightness.dark
-                      ? AppColors.primary.primaryDarkMode
-                      : AppColors.primary.primary,
-              foregroundColor: Colors.white,
+              backgroundColor: Theme.of(ctx).brightness == Brightness.dark
+                  ? AppColors.status.greenDarkMode
+                  : AppColors.status.green,
+              foregroundColor: ThemeHelpers.onPrimaryColor(ctx),
             ),
             child: const Text('Finalizar'),
           ),
@@ -838,7 +869,12 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
+        // Tinta pelo tema: no escuro o verde/vermelho são claros e o branco
+        // não lia.
+        content: Text(
+          message,
+          style: TextStyle(color: ThemeHelpers.onPrimaryColor(context)),
+        ),
         backgroundColor: isError
             ? (isDark ? AppColors.status.errorDarkMode : AppColors.status.error)
             : (isDark
@@ -863,14 +899,26 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Altura livre medida AQUI, acima do Scaffold (no corpo o Scaffold tira
+    // o teclado do MediaQuery). Em paisagem ou com teclado aberto o
+    // cabeçalho encolhe — ou some e o nome do contato sobe para o título —
+    // e a caixa cresce menos: a conversa continua aparecendo.
+    final mq = MediaQuery.of(context);
+    final livre = mq.size.height - mq.viewInsets.bottom - mq.viewPadding.top;
+    final baixa = livre < 420;
+    final minima = livre < 300;
     return AppScaffold(
-      title: 'WhatsApp',
+      title: minima ? _displayName : 'WhatsApp',
       showBottomNavigation: false,
       body: Column(
         children: [
-          _buildContactHeader(context),
+          // Mesmo lugar na árvore nos dois casos: a caixa de texto não perde
+          // o foco quando o cabeçalho some.
+          minima
+              ? const SizedBox.shrink()
+              : _buildContactHeader(context, compacto: baixa),
           Expanded(child: _buildThread(context)),
-          _buildComposerArea(context),
+          _buildComposerArea(context, baixa: baixa, minima: minima),
         ],
       ),
     );
@@ -878,8 +926,13 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
 
   // ─── Cabeçalho do contato (compacto, estilo iOS) ─────────────────────────
 
-  Widget _buildContactHeader(BuildContext context) {
+  /// Quem é, por onde fala e com quem está: nome, telefone · canal e o
+  /// responsável ("Com você", "Com Ana Souza", "Sem responsável"), com
+  /// "Assumir" à vista quando a conversa não é sua. [compacto] (paisagem ou
+  /// teclado em tela baixa): avatar menor e sem a linha do responsável.
+  Widget _buildContactHeader(BuildContext context, {bool compacto = false}) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
 
     final last = _messages.isNotEmpty ? _messages.last : null;
@@ -894,20 +947,78 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
       source = _integrationStatus!.chatSource;
     }
 
-    final assigned = (last?.assignedToName ??
-            widget.conversation?.lastMessage?.assignedToName ??
-            '')
-        .trim();
+    // Responsável: o mesmo que decide "Assumir conversa" (a mensagem mais
+    // recente com responsável); o nome vem dessa mesma mensagem.
+    final responsavelId = _responsavelAtualId;
+    var responsavelNome = '';
+    if (responsavelId.isNotEmpty) {
+      for (var i = _messages.length - 1; i >= 0; i--) {
+        final m = _messages[i];
+        if ((m.assignedToId ?? '').trim() != responsavelId) continue;
+        final nome = (m.assignedToName ?? '').trim();
+        if (nome.isNotEmpty) {
+          responsavelNome = nome;
+          break;
+        }
+      }
+    }
+    if (responsavelNome.isEmpty) {
+      responsavelNome = (last?.assignedToName ??
+              widget.conversation?.lastMessage?.assignedToName ??
+              '')
+          .trim();
+    }
+    final comVoce = responsavelId.isNotEmpty &&
+        _currentUserId != null &&
+        responsavelId == _currentUserId;
+    final semResponsavel = responsavelId.isEmpty && responsavelNome.isEmpty;
+    final green =
+        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
+    // Tinta de texto legível no claro: o token puro (verde 3,0:1, âmbar
+    // 3,2:1 no branco) puxado para a cor do texto, sem hex novo.
+    final greenInk = isDark
+        ? green
+        : Color.lerp(
+            AppColors.message.successText,
+            AppColors.text.text,
+            0.35,
+          )!;
+    final amberInk = isDark
+        ? AppColors.message.warningTextDarkMode
+        : Color.lerp(
+            AppColors.message.warningText,
+            AppColors.text.text,
+            0.35,
+          )!;
+    final String responsavelTexto;
+    final IconData responsavelIcone;
+    final Color responsavelCor;
+    if (comVoce) {
+      responsavelTexto = 'Com você';
+      responsavelIcone = LucideIcons.userCheck;
+      responsavelCor = greenInk;
+    } else if (semResponsavel) {
+      responsavelTexto = 'Sem responsável';
+      responsavelIcone = LucideIcons.inbox;
+      responsavelCor = amberInk;
+    } else {
+      responsavelTexto = responsavelNome.isNotEmpty
+          ? 'Com $responsavelNome'
+          : 'Com outro atendente';
+      responsavelIcone = LucideIcons.userRound;
+      responsavelCor = secondary;
+    }
+    // Sem mensagens ainda não há de quem seja a conversa.
+    final mostrarResponsavel = !compacto && _messages.isNotEmpty;
 
-    // Linha de status compacta: telefone · canal · atendente.
+    // Linha de status: telefone · canal.
     final statusParts = <String>[formatWhatsAppPhone(widget.phoneNumber)];
     if (source != WhatsAppIntegrationSource.unknown) {
       statusParts.add(source.label);
     }
-    if (assigned.isNotEmpty) statusParts.add(assigned.split(' ').first);
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 9, 8, 9),
+      padding: EdgeInsets.fromLTRB(16, compacto ? 5 : 9, 8, compacto ? 5 : 9),
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
@@ -915,11 +1026,16 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
       ),
       child: Row(
         children: [
-          WhatsAppAvatar(name: _displayName, imageUrl: avatarUrl, size: 40),
+          WhatsAppAvatar(
+            name: _displayName,
+            imageUrl: avatarUrl,
+            size: compacto ? 32 : 42,
+          ),
           const SizedBox(width: 11),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   _displayName,
@@ -959,6 +1075,34 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                     ),
                   ],
                 ),
+                if (mostrarResponsavel) ...[
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      Icon(responsavelIcone, size: 12, color: responsavelCor),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          responsavelTexto,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: comVoce || semResponsavel
+                                ? responsavelCor
+                                : secondary,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 11.5,
+                            height: 1.2,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (_podeAssumir) ...[
+                        const SizedBox(width: 8),
+                        _buildBotaoAssumir(context, green, greenInk),
+                      ],
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
@@ -1016,17 +1160,48 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     );
   }
 
+  /// "Assumir" à vista no cabeçalho (mesma ação do menu ⋮): pílula verde
+  /// tonal, rótulo que encolhe em vez de estourar.
+  Widget _buildBotaoAssumir(BuildContext context, Color green, Color ink) {
+    return TextButton(
+      onPressed: _assumindo ? null : _assumirConversa,
+      style: TextButton.styleFrom(
+        foregroundColor: ink,
+        backgroundColor: green.withValues(alpha: 0.14),
+        disabledForegroundColor: ink.withValues(alpha: 0.5),
+        minimumSize: const Size(0, 28),
+        padding: const EdgeInsets.symmetric(horizontal: 11),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
+        shape: const StadiumBorder(),
+      ),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          _assumindo ? 'Assumindo…' : 'Assumir',
+          maxLines: 1,
+          softWrap: false,
+          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800),
+        ),
+      ),
+    );
+  }
+
   Widget _menuRow(BuildContext context, IconData icon, String label) {
     return Row(
       children: [
         Icon(icon, size: 16, color: ThemeHelpers.textSecondaryColor(context)),
         const SizedBox(width: 10),
-        Text(
-          label,
-          style: TextStyle(
-            color: ThemeHelpers.textColor(context),
-            fontWeight: FontWeight.w700,
-            fontSize: 13.5,
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: ThemeHelpers.textColor(context),
+              fontWeight: FontWeight.w700,
+              fontSize: 13.5,
+            ),
           ),
         ),
       ],
@@ -1096,6 +1271,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
         isLastInGroup: isLast,
         onRenovarMidia: _renovarMidia,
         contactLabel: nomeDoContato,
+        citada: acharCitada(_messages, m.replyToMessageId),
       ));
     }
 
@@ -1142,6 +1318,8 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     return ListView(
       controller: _scrollController,
       reverse: true,
+      // Como no iPhone: arrastar a conversa recolhe o teclado.
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
       children: children.reversed.toList(),
     );
@@ -1168,10 +1346,17 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
       physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
       children: [
+        // Cápsula do dia, como na thread.
+        const Padding(
+          padding: EdgeInsets.only(bottom: 12),
+          child: Center(
+            child: SkeletonBox(width: 64, height: 20, borderRadius: 999),
+          ),
+        ),
         bubble(own: false, width: 210, height: 56),
         bubble(own: true, width: 180, grouped: true),
         bubble(own: true, width: 140),
-        bubble(own: false, width: 240, grouped: true, height: 64),
+        bubble(own: false, width: 228, grouped: true, height: 64),
         bubble(own: false, width: 150),
         bubble(own: true, width: 220, height: 56),
         bubble(own: false, width: 190),
@@ -1184,46 +1369,69 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     final isDark = theme.brightness == Brightness.dark;
     final green =
         isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(colors: [
-                  green.withValues(alpha: 0.18),
-                  green.withValues(alpha: 0.06),
-                ]),
-                border: Border.all(color: green.withValues(alpha: 0.32)),
+    final String dica;
+    if (!_canSend) {
+      dica = 'As mensagens com este contato aparecem aqui. Enviar mensagens '
+          'depende da permissão de envio do WhatsApp.';
+    } else if (_canSendFreeText) {
+      dica = 'Escreva no campo abaixo para começar. As respostas do contato '
+          'aparecem aqui.';
+    } else {
+      dica = 'Pelo número oficial, a conversa começa com um template '
+          'aprovado. Depois que o contato responder, o campo de mensagem '
+          'libera.';
+    }
+    // Rola em tela baixa (paisagem com teclado) em vez de estourar.
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(28, 20, 28, 20),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 60,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: green.withValues(alpha: isDark ? 0.16 : 0.12),
+                      ),
+                      child: Icon(
+                        LucideIcons.messagesSquare,
+                        color: green,
+                        size: 26,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'Nenhuma mensagem ainda',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: ThemeHelpers.textColor(context),
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      dica,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: ThemeHelpers.textSecondaryColor(context),
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              child: Icon(LucideIcons.messagesSquare, color: green, size: 28),
             ),
-            const SizedBox(height: 14),
-            Text(
-              'Nenhuma mensagem ainda',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: ThemeHelpers.textColor(context),
-                letterSpacing: -0.2,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              _canSendFreeText
-                  ? 'Envie a primeira mensagem pelo campo abaixo.'
-                  : 'Envie um template para iniciar a conversa pela API oficial.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context),
-                height: 1.4,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -1240,23 +1448,108 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
 
   // ─── Composer ────────────────────────────────────────────────────────────
 
-  Widget _buildComposerArea(BuildContext context) {
-    if (!_canSend) return const SizedBox.shrink();
+  Widget _buildComposerArea(
+    BuildContext context, {
+    bool baixa = false,
+    bool minima = false,
+  }) {
+    // Sem permissão: a caixa não some calada — diz por que não dá.
+    if (!_canSend) return _buildSemPermissaoDeEnvio(context);
     // Aguardando primeiro load para decidir a UI do composer.
     if (_loading && _messages.isEmpty && _integrationStatus == null) {
       return const SizedBox.shrink();
     }
-    if (!_canSendFreeText) return _buildWindowClosedBanner(context);
-    return _buildComposer(context);
+    if (!_canSendFreeText) {
+      return _buildWindowClosedBanner(context, compacto: baixa);
+    }
+    // Teto de linhas pela altura livre: 6 em pé, menos com teclado em tela
+    // baixa (o texto rola por dentro do campo).
+    return _buildComposer(context, maxLinhas: minima ? 2 : (baixa ? 4 : 6));
   }
 
-  /// Banner âmbar quando a janela de 24h da API oficial está fechada —
-  /// convite direto para reabrir com template (paridade com o painel).
-  Widget _buildWindowClosedBanner(BuildContext context) {
+  /// Faixa no lugar da caixa para quem não tem whatsapp:send.
+  Widget _buildSemPermissaoDeEnvio(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: ThemeHelpers.backgroundColor(context),
+        border: Border(
+          top: BorderSide(color: ThemeHelpers.borderLightColor(context)),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 11, 16, 11),
+          child: Row(
+            children: [
+              Icon(LucideIcons.lock, size: 15, color: secondary),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  'Você pode ler esta conversa, mas não tem permissão para '
+                  'enviar mensagens. Quem libera é o administrador.',
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: secondary,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Faixa âmbar quando a janela de 24h da API oficial está fechada, com a
+  /// causa certa (contato ainda não escreveu / janela venceu / o número que
+  /// envia está fora da janela) e "Enviar template" verde à vista.
+  /// [compacto]: em paisagem some a explicação longa.
+  Widget _buildWindowClosedBanner(
+    BuildContext context, {
+    bool compacto = false,
+  }) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final amber =
         isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+    // Âmbar como TEXTO: no claro o token some no branco — puxado para a
+    // tinta do texto (sem hex novo).
+    final amberInk = isDark
+        ? AppColors.message.warningTextDarkMode
+        : Color.lerp(
+            AppColors.message.warningText,
+            AppColors.text.text,
+            0.35,
+          )!;
+    final green =
+        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
+
+    final ultima = _lastInbound?.createdAt?.toLocal();
+    final String titulo;
+    final String explicacao;
+    if (_lastInbound == null) {
+      titulo = 'O contato ainda não escreveu';
+      explicacao = 'Pelo número oficial, a conversa só começa com um '
+          'template aprovado. Quando o contato responder, o campo de '
+          'mensagem volta.';
+    } else if (_janelaFechadaNoEnvio) {
+      titulo = 'Janela de 24 horas fechada no número que envia';
+      explicacao = 'O contato escreveu para outro número da empresa. Para '
+          'falar por este, envie um template aprovado.';
+    } else {
+      titulo = 'Janela de 24 horas encerrada';
+      explicacao = ultima == null
+          ? 'Pelo número oficial, depois de 24 horas sem resposta do '
+              'contato só dá para retomar com um template aprovado.'
+          : 'A última mensagem do contato foi em ${_dataCurta(ultima)}. '
+              'Pelo número oficial, depois de 24 horas só dá para retomar '
+              'com um template aprovado.';
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -1265,11 +1558,14 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
           top: BorderSide(color: ThemeHelpers.borderLightColor(context)),
         ),
       ),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      padding: EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: compacto ? 8 : 12,
+      ),
       child: SafeArea(
         top: false,
         child: Container(
-          padding: const EdgeInsets.all(13),
+          padding: EdgeInsets.all(compacto ? 10 : 13),
           decoration: BoxDecoration(
             color: amber.withValues(alpha: isDark ? 0.13 : 0.09),
             borderRadius: BorderRadius.circular(14),
@@ -1277,18 +1573,23 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(LucideIcons.clock3, size: 15, color: amber),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 1),
+                    child: Icon(LucideIcons.clock3, size: 15, color: amberInk),
+                  ),
                   const SizedBox(width: 7),
                   Expanded(
                     child: Text(
-                      _lastInbound == null
-                          ? 'Conversa ainda não iniciada pelo contato'
-                          : 'Janela de 24h expirada',
+                      titulo,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.labelMedium?.copyWith(
-                        color: amber,
+                        color: ThemeHelpers.textColor(context),
                         fontWeight: FontWeight.w900,
                         letterSpacing: 0.1,
                       ),
@@ -1296,30 +1597,35 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                   ),
                 ],
               ),
-              const SizedBox(height: 4),
-              Text(
-                'A API oficial só permite texto livre até 24h após a última '
-                'mensagem do contato. Envie um template aprovado para reabrir.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                  height: 1.35,
+              if (!compacto) ...[
+                const SizedBox(height: 4),
+                Text(
+                  explicacao,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    height: 1.35,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 10),
+              ],
+              SizedBox(height: compacto ? 8 : 10),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
                   onPressed: _openTemplateSheet,
                   icon: const Icon(LucideIcons.badgeCheck, size: 16),
-                  label: const Text(
-                    'Enviar template',
-                    style: TextStyle(fontWeight: FontWeight.w800),
+                  label: const FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      'Enviar template',
+                      maxLines: 1,
+                      softWrap: false,
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
                   ),
                   style: FilledButton.styleFrom(
-                    backgroundColor: amber,
-                    foregroundColor:
-                        isDark ? Colors.black : Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    backgroundColor: green,
+                    foregroundColor: ThemeHelpers.onPrimaryColor(context),
+                    padding: EdgeInsets.symmetric(vertical: compacto ? 9 : 12),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -1334,12 +1640,20 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     );
   }
 
+  /// "28/09 às 14:32" (com o ano quando não é o corrente).
+  static String _dataCurta(DateTime d) {
+    String dois(int n) => n.toString().padLeft(2, '0');
+    final ano = d.year == DateTime.now().year ? '' : '/${d.year}';
+    return '${dois(d.day)}/${dois(d.month)}$ano às '
+        '${dois(d.hour)}:${dois(d.minute)}';
+  }
+
   /// Composer estilo iOS: campo arredondado em superfície clara + botão de
   /// enviar circular VERDE (identidade WhatsApp), seta pra cima. Acima dele,
   /// a bandeja de anexos e, durante o lote, "Enviando 2 de 5" (29/09/2026).
   /// O clipe fica dentro do campo, como no WhatsApp, para não estreitar a
   /// caixa em telas pequenas.
-  Widget _buildComposer(BuildContext context) {
+  Widget _buildComposer(BuildContext context, {int maxLinhas = 6}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final green =
         isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
@@ -1382,6 +1696,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                 fieldFill: fieldFill,
                 hairline: hairline,
                 temConteudo: temConteudo,
+                maxLinhas: maxLinhas,
               ),
             ),
           ],
@@ -1435,11 +1750,15 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     required Color fieldFill,
     required Color hairline,
     required bool temConteudo,
+    int maxLinhas = 6,
   }) {
     // Enquanto o seletor ainda lê os arquivos, `_enviar` ignora o toque: o
     // botão fica apagado para não parecer que enviou.
     final podeEnviar = temConteudo && !_sending && !_preparandoAnexos;
     final quantosAnexos = _anexos.length;
+    // Tinta sobre o verde: branca no claro, escura no escuro (o verde do
+    // modo escuro é claro demais para branco).
+    final sobreVerde = ThemeHelpers.onPrimaryColor(context);
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -1448,19 +1767,29 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
         if (!_usesUnofficial)
           Padding(
             padding: const EdgeInsets.only(right: 7, bottom: 3),
-            child: InkResponse(
-              radius: 21,
-              onTap: _openTemplateSheet,
-              child: Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: fieldFill,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: hairline),
+            child: Tooltip(
+              message: 'Enviar template',
+              child: Semantics(
+                button: true,
+                label: 'Enviar template',
+                child: InkResponse(
+                  radius: 21,
+                  onTap: _openTemplateSheet,
+                  child: Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: fieldFill,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: hairline),
+                    ),
+                    child: Icon(
+                      LucideIcons.badgeCheck,
+                      size: 18,
+                      color: secondary,
+                    ),
+                  ),
                 ),
-                child:
-                    Icon(LucideIcons.badgeCheck, size: 18, color: secondary),
               ),
             ),
           ),
@@ -1487,7 +1816,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                     controller: _composerController,
                     focusNode: _composerFocus,
                     minLines: 1,
-                    maxLines: 5,
+                    maxLines: maxLinhas,
                     textCapitalization: TextCapitalization.sentences,
                     cursorColor: green,
                     style: TextStyle(
@@ -1539,21 +1868,13 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
               curve: Curves.easeOut,
               width: 42,
               height: 42,
+              // Chapado, sem brilho verde difuso (sombra colorida vira mancha
+              // no claro).
               decoration: BoxDecoration(
                 color: podeEnviar
                     ? green
                     : green.withValues(alpha: isDark ? 0.35 : 0.4),
                 shape: BoxShape.circle,
-                boxShadow: podeEnviar
-                    ? [
-                        BoxShadow(
-                          color: green.withValues(alpha: 0.35),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                          spreadRadius: -2,
-                        ),
-                      ]
-                    : null,
               ),
               child: Material(
                 color: Colors.transparent,
@@ -1563,18 +1884,18 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
                   onTap: podeEnviar ? _enviar : null,
                   child: Center(
                     child: _sending
-                        ? const SizedBox(
+                        ? SizedBox(
                             width: 17,
                             height: 17,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              color: Colors.white,
+                              color: sobreVerde,
                             ),
                           )
-                        : const Icon(
+                        : Icon(
                             LucideIcons.arrowUp,
                             size: 21,
-                            color: Colors.white,
+                            color: sobreVerde,
                           ),
                   ),
                 ),

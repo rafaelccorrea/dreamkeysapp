@@ -44,7 +44,10 @@ const List<_Channel> _kChannels = [
 
 class _NotificationPreferencesPageState
     extends State<NotificationPreferencesPage> {
-  static const double _padH = 20;
+  static const double _padH = 16;
+
+  /// Em tela larga a coluna para aqui e centraliza.
+  static const double _maxContentWidth = 720;
 
   bool _loading = true;
   String? _error;
@@ -64,11 +67,15 @@ class _NotificationPreferencesPageState
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
 
+  // Tom da tela por token: o mesmo azul de informação das Configurações —
+  // esta página é o detalhe da seção de canais e assuntos de lá. Âmbar só
+  // para o que ficou silenciado.
   Color get _blue =>
-      _isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7);
+      _isDark ? AppColors.message.infoTextDarkMode : AppColors.message.infoText;
 
-  Color get _amber =>
-      _isDark ? AppColors.status.warningDarkMode : const Color(0xFFB7791F);
+  Color get _amber => _isDark
+      ? AppColors.message.warningTextDarkMode
+      : AppColors.message.warningText;
 
   Color get _brand => _isDark
       ? AppColors.primary.primaryDarkMode
@@ -389,16 +396,22 @@ class _NotificationPreferencesPageState
           style: TextStyle(fontSize: 13.5, height: 1.4, color: secondary),
         ),
         actions: [
+          // Seguir editando é neutro (o tema pinta TextButton de vermelho);
+          // descartar desfaz trabalho: chapa vermelha com texto branco.
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
+            style: TextButton.styleFrom(foregroundColor: secondary),
             child: const Text(
               'Continuar editando',
               style: TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
-          TextButton(
+          FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: TextButton.styleFrom(foregroundColor: danger),
+            style: FilledButton.styleFrom(
+              backgroundColor: danger,
+              foregroundColor: Colors.white,
+            ),
             child: const Text(
               'Descartar',
               style: TextStyle(fontWeight: FontWeight.w800),
@@ -442,10 +455,10 @@ class _NotificationPreferencesPageState
                       },
                       child: ListView(
                         physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.only(top: 14, bottom: 24),
+                        padding: _pagePadding(top: 14, bottom: 24),
                         children: [
                           _buildMasthead(),
-                          const SizedBox(height: 18),
+                          const SizedBox(height: 20),
                           _buildMasterSwitch(),
                           const SizedBox(height: 22),
                           _separator(),
@@ -468,9 +481,17 @@ class _NotificationPreferencesPageState
     );
   }
 
+  /// Tablet/landscape largo: a coluna para em [_maxContentWidth] e
+  /// centraliza (o ListView segue filho direto do RefreshIndicator).
+  EdgeInsets _pagePadding({double top = 0, double bottom = 0}) {
+    final w = MediaQuery.sizeOf(context).width;
+    final side = w > _maxContentWidth ? (w - _maxContentWidth) / 2 : 0.0;
+    return EdgeInsets.fromLTRB(side, top, side, bottom);
+  }
+
   Widget _separator() => Container(
     height: 1,
-    color: ThemeHelpers.borderColor(context).withValues(alpha: 0.3),
+    color: ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
   );
 
   Widget _rowDivider() => Padding(
@@ -483,25 +504,55 @@ class _NotificationPreferencesPageState
   );
 
   Widget _buildSkeleton() {
+    // Mesmo desenho do topo real: título, frase de estado e um medidor por
+    // canal (rótulo + contagem + barra), depois a chave mestra e as linhas.
+    Widget meter() => const Padding(
+      padding: EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          SkeletonBox(width: 16, height: 16, borderRadius: 4),
+          SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    SkeletonText(width: 90, height: 11),
+                    Spacer(),
+                    SkeletonText(width: 50, height: 11),
+                  ],
+                ),
+                SizedBox(height: 6),
+                SkeletonBox(height: 5, borderRadius: 99),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
     return ListView(
       physics: const NeverScrollableScrollPhysics(),
-      padding: const EdgeInsets.only(top: 18, bottom: 16),
+      padding: _pagePadding(top: 18, bottom: 16),
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: _padH),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: const [
-              SkeletonText(width: 150, height: 10),
-              SizedBox(height: 12),
-              SkeletonText(width: 240, height: 26),
-              SizedBox(height: 12),
-              SkeletonText(width: 260, height: 12),
-              SizedBox(height: 22),
-              SkeletonBox(height: 44, borderRadius: 12),
-              SizedBox(height: 28),
-              SkeletonText(width: 110, height: 20),
-              SizedBox(height: 14),
+            children: [
+              const SkeletonText(width: 220, height: 24),
+              const SizedBox(height: 10),
+              const SkeletonText(width: 240, height: 12),
+              const SizedBox(height: 18),
+              meter(),
+              meter(),
+              meter(),
+              const SizedBox(height: 14),
+              const SkeletonBox(height: 44, borderRadius: 12),
+              const SizedBox(height: 28),
+              const SkeletonText(width: 110, height: 20),
+              const SizedBox(height: 14),
             ],
           ),
         ),
@@ -531,79 +582,45 @@ class _NotificationPreferencesPageState
     );
   }
 
-  // ── masthead ────────────────────────────────────────────────────────────
+  // ── topo: medidor por canal ─────────────────────────────────────────────
+  // Quem abre quer saber "o que chega e por onde". Em vez de manchete com
+  // números soltos, um medidor: quantos assuntos chegam por cada canal, com
+  // a barra enchendo — e uma frase de estado logo abaixo do título.
 
   Widget _buildMasthead() {
     final theme = Theme.of(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final active = _activeChannels;
-    final crmOff = _silenceable.length - _crmOn;
+    final total = _silenceable.length;
+    final crmOff = total - _crmOn;
 
-    Widget reading(String value, String? of, String label, {Color? tone}) {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.baseline,
-        textBaseline: TextBaseline.alphabetic,
-        children: [
-          Text(
-            value,
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w900,
-              color: tone ?? ThemeHelpers.textColor(context),
-              letterSpacing: -0.5,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          ),
-          if (of != null)
-            Text(
-              '/$of',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: secondary,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              label,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: secondary,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      );
+    int litBy(String channel) => _silenceable.where((c) {
+      final e = _choiceOf(c.key);
+      return e.enabled && e.valueOf(channel);
+    }).length;
+
+    final String status;
+    if (total == 0) {
+      status = 'Nenhum assunto pode ser silenciado.';
+    } else if (crmOff == 0) {
+      status = 'Todos os $total assuntos estão ligados.';
+    } else if (_crmOn == 0) {
+      status = 'Todos os $total assuntos estão silenciados.';
+    } else {
+      status =
+          '$_crmOn de $total assuntos ligados · $crmOff silenciado${crmOff == 1 ? '' : 's'}.';
     }
-
-    final channelLabel = active.isEmpty
-        ? 'canais em uso'
-        : _kChannels
-              .where((c) => active.contains(c.key))
-              .map((c) => c.label.toLowerCase())
-              .join(' · ');
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: _padH),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'SUA CONTA · PREFERÊNCIAS',
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: _brand,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 2.0,
-              fontSize: 10,
-            ),
-          ),
-          const SizedBox(height: 8),
           Text.rich(
             TextSpan(
               children: [
-                const TextSpan(text: 'Notificações que '),
+                const TextSpan(text: 'O que chega '),
                 TextSpan(
-                  text: 'quero receber',
+                  text: 'e por onde',
                   style: TextStyle(color: _blue),
                 ),
               ],
@@ -615,29 +632,42 @@ class _NotificationPreferencesPageState
               height: 1.1,
             ),
           ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 16,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              reading(
-                '$_crmOn',
-                '${_silenceable.length}',
-                'assuntos ligados',
-                tone: crmOff > 0 ? _amber : null,
-              ),
-              reading('${active.length}', null, channelLabel),
-              if (_financeAvailable && _finCatalog != null)
-                reading(
-                  '$_finOn',
-                  '$_finTotal',
-                  'avisos do Financeiro',
-                  tone: _finAllOff ? _amber : null,
-                ),
-            ],
+          const SizedBox(height: 6),
+          Text(
+            status,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              // Tudo ligado no tom da tela; algo silenciado em âmbar.
+              color: total == 0
+                  ? secondary
+                  : crmOff > 0
+                  ? _amber
+                  : _blue,
+              fontWeight: FontWeight.w800,
+              height: 1.3,
+            ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
+          for (final ch in _kChannels) ...[
+            _ChannelMeter(
+              icon: ch.icon,
+              label: ch.label,
+              count: litBy(ch.key),
+              total: total,
+              tone: _blue,
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (_financeAvailable && _finCatalog != null) ...[
+            _ChannelMeter(
+              icon: LucideIcons.wallet,
+              label: 'Financeiro (no sino)',
+              count: _finOn,
+              total: _finTotal,
+              tone: _blue,
+            ),
+            const SizedBox(height: 12),
+          ],
+          const SizedBox(height: 2),
           Text.rich(
             TextSpan(
               children: [
@@ -773,7 +803,12 @@ class _NotificationPreferencesPageState
 
   // ── cabeçalho de seção ──────────────────────────────────────────────────
 
-  Widget _sectionHeader(String title, String subtitle, {String? hint}) {
+  Widget _sectionHeader(
+    String title,
+    String subtitle, {
+    String? hint,
+    Color? hintColor,
+  }) {
     final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: _padH),
@@ -807,14 +842,22 @@ class _NotificationPreferencesPageState
           ),
           if (hint != null) ...[
             const SizedBox(width: 10),
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                hint,
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: _blue,
-                  fontWeight: FontWeight.w900,
-                  fontFeatures: const [FontFeature.tabularFigures()],
+            // Contagem com teto de largura: em 320dp/fonte grande ela quebra
+            // em duas linhas em vez de espremer o título.
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 120),
+              child: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  hint,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: hintColor ?? _blue,
+                    fontWeight: FontWeight.w900,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
                 ),
               ),
             ),
@@ -884,7 +927,8 @@ class _NotificationPreferencesPageState
         _sectionHeader(
           'Por assunto',
           'Toque no assunto para ligar ou silenciar; nos canais, por onde ele chega.',
-          hint: '$_crmOn de ${silenceable.length}',
+          hint: '$_crmOn de ${silenceable.length} ligados',
+          hintColor: _crmAllOff ? _amber : null,
         ),
         const SizedBox(height: 12),
         Padding(
@@ -893,19 +937,6 @@ class _NotificationPreferencesPageState
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final c in _kChannels)
-                _actionChip(
-                  label: active.contains(c.key)
-                      ? 'Sem ${c.label.toLowerCase()}'
-                      : 'Com ${c.label.toLowerCase()}',
-                  icon: c.icon,
-                  onTap: _crmAllOff
-                      ? null
-                      : () => _setChannelEverywhere(
-                          c.key,
-                          !active.contains(c.key),
-                        ),
-                ),
               _actionChip(
                 label: 'Ligar todos',
                 icon: LucideIcons.checkCheck,
@@ -918,6 +949,43 @@ class _NotificationPreferencesPageState
                 icon: LucideIcons.bellOff,
                 onTap: _crmAllOff ? null : () => _setAll(false),
               ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        // Canal em todos os assuntos de uma vez: aceso = em uso em algum
+        // assunto (toque tira de todos); apagado = em nenhum (toque põe em
+        // todos). Mesmo desenho dos canais de cada assunto, logo abaixo.
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: _padH),
+          child: Text(
+            'Canal em todos os assuntos',
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: _padH),
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final c in _kChannels)
+                _ChannelChip(
+                  label: c.label,
+                  icon: c.icon,
+                  lit: active.contains(c.key),
+                  tone: _blue,
+                  onTap: _crmAllOff
+                      ? null
+                      : () => _setChannelEverywhere(
+                          c.key,
+                          !active.contains(c.key),
+                        ),
+                ),
             ],
           ),
         ),
@@ -1093,7 +1161,8 @@ class _NotificationPreferencesPageState
         _sectionHeader(
           'Avisos do Financeiro',
           'Por evento; desligar aqui só afeta o seu sino — quem mais recebe continua recebendo.',
-          hint: cat != null ? '$_finOn de $_finTotal' : null,
+          hint: cat != null ? '$_finOn de $_finTotal ligados' : null,
+          hintColor: _finAllOff ? _amber : null,
         ),
         const SizedBox(height: 12),
         if (cat != null && cat.isNotEmpty) ...[
@@ -1199,7 +1268,9 @@ class _NotificationPreferencesPageState
   // ── barra de salvar ─────────────────────────────────────────────────────
 
   Widget _buildSaveBar() {
-    final onConfirm = _isDark ? const Color(0xFF0B2314) : Colors.white;
+    // Texto sobre o verde de confirmação: branco no claro, grafite no escuro
+    // (o verde do tema escuro é claro demais para letra branca).
+    final onConfirm = ThemeHelpers.onPrimaryColor(context);
     final dirty = _dirty;
     final n = _changes;
     final label = _saving
@@ -1218,72 +1289,80 @@ class _NotificationPreferencesPageState
       decoration: BoxDecoration(
         color: ThemeHelpers.cardBackgroundColor(context),
         border: Border(
-          top: BorderSide(
-            color: ThemeHelpers.borderLightColor(context).withValues(alpha: 0.5),
-          ),
+          top: BorderSide(color: ThemeHelpers.borderColor(context)),
         ),
       ),
-      child: Row(
-        children: [
-          OutlinedButton(
-            onPressed: _saving
-                ? null
-                : dirty
-                ? _discard
-                : () => Navigator.of(context).maybePop(),
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size(0, 52),
-              padding: const EdgeInsets.symmetric(horizontal: 18),
-              foregroundColor: ThemeHelpers.textSecondaryColor(context),
-              side: BorderSide(
-                color: ThemeHelpers.borderColor(context).withValues(alpha: 0.75),
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
-            child: Text(
-              dirty ? 'Descartar' : 'Voltar',
-              maxLines: 1,
-              softWrap: false,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: FilledButton(
-              onPressed: dirty && !_saving ? _save : null,
-              style: FilledButton.styleFrom(
-                backgroundColor: _confirm,
-                foregroundColor: onConfirm,
-                minimumSize: const Size(0, 52),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: _maxContentWidth),
+          child: Row(
+            children: [
+              OutlinedButton(
+                onPressed: _saving
+                    ? null
+                    : dirty
+                    ? _discard
+                    : () => Navigator.of(context).maybePop(),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 52),
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  foregroundColor: ThemeHelpers.textSecondaryColor(context),
+                  side: BorderSide(
+                    color: ThemeHelpers.borderColor(
+                      context,
+                    ).withValues(alpha: 0.9),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: Text(
+                  dirty ? 'Descartar' : 'Voltar',
+                  maxLines: 1,
+                  softWrap: false,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(LucideIcons.check, size: 17),
-                    const SizedBox(width: 8),
-                    Text(
-                      label,
-                      maxLines: 1,
-                      softWrap: false,
-                      style: const TextStyle(
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w900,
-                      ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton(
+                  onPressed: dirty && !_saving ? _save : null,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _confirm,
+                    foregroundColor: onConfirm,
+                    minimumSize: const Size(0, 52),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                  ],
+                  ),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(LucideIcons.check, size: 17),
+                        const SizedBox(width: 8),
+                        Text(
+                          label,
+                          maxLines: 1,
+                          softWrap: false,
+                          style: const TextStyle(
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -1375,18 +1454,114 @@ class _ChannelChip extends StatelessWidget {
             children: [
               Icon(icon, size: 13, color: fg),
               const SizedBox(width: 5),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: fg,
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: fg,
+                  ),
                 ),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Medidor de um canal no topo: rótulo, "N de M" e a barra enchendo na
+/// proporção dos assuntos que chegam por ele. Só leitura — o ajuste fica
+/// nas linhas de cada assunto.
+class _ChannelMeter extends StatelessWidget {
+  const _ChannelMeter({
+    required this.icon,
+    required this.label,
+    required this.count,
+    required this.total,
+    required this.tone,
+  });
+
+  final IconData icon;
+  final String label;
+  final int count;
+  final int total;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final frac = total <= 0 ? 0.0 : (count / total).clamp(0.0, 1.0);
+    final lit = count > 0;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Icon(icon, size: 16, color: lit ? tone : secondary),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: ThemeHelpers.textColor(context),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$count de $total',
+                    maxLines: 1,
+                    softWrap: false,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: lit ? tone : secondary,
+                      fontWeight: FontWeight.w900,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 5),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(99),
+                child: SizedBox(
+                  height: 5,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: ColoredBox(
+                          color: ThemeHelpers.borderColor(
+                            context,
+                          ).withValues(alpha: 0.6),
+                        ),
+                      ),
+                      FractionallySizedBox(
+                        widthFactor: frac,
+                        heightFactor: 1,
+                        child: ColoredBox(color: tone),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

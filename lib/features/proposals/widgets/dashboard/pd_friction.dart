@@ -1,16 +1,20 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../services/proposals_dashboard_service.dart';
 import 'pd_common.dart';
 
 /// Assinaturas paradas: quem está segurando a proposta e há quantos dias.
-/// ≥ 7 dias = vermelho, ≥ 3 = âmbar (mesma régua do web).
+/// ≥ 7 dias = vermelho, ≥ 3 = âmbar (mesma régua do web). Com [onOpen], a
+/// linha abre as assinaturas da proposta — reenviar ou copiar o link sem
+/// sair do painel.
 class PdBottleneckList extends StatefulWidget {
-  const PdBottleneckList({super.key, required this.items});
+  const PdBottleneckList({super.key, required this.items, this.onOpen});
 
   final List<ProposalsSignatureBottleneck> items;
+  final ValueChanged<ProposalsSignatureBottleneck>? onOpen;
 
   @override
   State<PdBottleneckList> createState() => _PdBottleneckListState();
@@ -25,7 +29,12 @@ class _PdBottleneckListState extends State<PdBottleneckList> {
     final t = PdTones.of(context);
     final items = widget.items;
     if (items.isEmpty) {
-      return const PdEmptyLine('Nenhuma assinatura parada. Fila limpa.');
+      return const PdEmptyLine(
+        'Nenhuma assinatura esperando. Fila limpa.',
+        hint: 'Quando um signatário demora para assinar, ele aparece aqui '
+            'com os dias de espera — do mais antigo para o mais novo.',
+        icon: LucideIcons.circleCheck,
+      );
     }
     final shown = _expanded ? items : items.take(_collapsed).toList();
     return Column(
@@ -39,13 +48,13 @@ class _PdBottleneckListState extends State<PdBottleneckList> {
           TextButton(
             style: TextButton.styleFrom(
               foregroundColor: t.text,
-              padding: EdgeInsets.zero,
+              padding: const EdgeInsets.symmetric(horizontal: 0),
             ),
             onPressed: () => setState(() => _expanded = !_expanded),
             child: Text(
               _expanded
                   ? 'Mostrar menos'
-                  : 'Ver as ${items.length} assinaturas paradas',
+                  : 'Ver as ${items.length} assinaturas esperando',
               style: const TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w800,
@@ -60,28 +69,48 @@ class _PdBottleneckListState extends State<PdBottleneckList> {
     final tone = g.pendingDays >= 7
         ? t.red
         : g.pendingDays >= 3
-            ? t.amber
+            ? t.amberText
             : t.muted;
-    final number = g.proposalNumber.isEmpty ? '' : '#${g.proposalNumber} · ';
-    return Padding(
+    final number =
+        g.proposalNumber.isEmpty ? '' : 'Nº ${g.proposalNumber} · ';
+    final open = widget.onOpen;
+    final content = Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
         children: [
           SizedBox(
             width: 46,
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Text(
-                pdDays(g.pendingDays),
-                maxLines: 1,
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.4,
-                  color: tone,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    pdDays(g.pendingDays),
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.4,
+                      color: tone,
+                    ),
+                  ),
                 ),
-              ),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'de espera',
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w700,
+                      color: t.muted,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(width: 10),
@@ -101,21 +130,32 @@ class _PdBottleneckListState extends State<PdBottleneckList> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '${number}Etapa ${g.etapa}/3'
+                  '${number}Etapa ${g.etapa} · ${pdEtapaNome(g.etapa)}'
                   '${g.signerEmail != null ? ' · ${g.signerEmail}' : ''}',
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w500,
+                    height: 1.3,
                     color: t.muted,
                   ),
                 ),
               ],
             ),
           ),
+          if (open != null) ...[
+            const SizedBox(width: 8),
+            Icon(LucideIcons.chevronRight, size: 16, color: t.muted),
+          ],
         ],
       ),
+    );
+    if (open == null) return content;
+    return Semantics(
+      button: true,
+      label: 'Abrir assinaturas da proposta ${g.proposalNumber}',
+      child: InkWell(onTap: () => open(g), child: content),
     );
   }
 }
@@ -131,10 +171,15 @@ class PdCounterProposals extends StatelessWidget {
     final t = PdTones.of(context);
     final s = stats;
     if (s.total == 0 && s.pendente == 0 && s.aprovada == 0 && s.recusada == 0) {
-      return const PdEmptyLine('Nenhuma contraproposta no período.');
+      return const PdEmptyLine(
+        'Nenhuma contraproposta no período.',
+        hint: 'Quando o proprietário responder uma proposta com outro valor '
+            'ou condição, a contraproposta entra nesta conta.',
+        icon: LucideIcons.handshake,
+      );
     }
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         PdStackedBar(
           height: 10,
@@ -144,68 +189,42 @@ class PdCounterProposals extends StatelessWidget {
             PdSegment(s.recusada, t.red),
           ],
         ),
-        const SizedBox(height: 12),
-        IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(child: _cell(t, 'Aprovadas', s.aprovada, t.green)),
-              _divider(t),
-              Expanded(child: _cell(t, 'Pendentes', s.pendente, t.amber)),
-              _divider(t),
-              Expanded(child: _cell(t, 'Recusadas', s.recusada, t.red)),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _divider(PdTones t) => Container(
-        width: 1,
-        margin: const EdgeInsets.symmetric(horizontal: 10),
-        color: t.hairline,
-      );
-
-  Widget _cell(PdTones t, String label, int value, Color tone) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text(
-            pdInt.format(value),
-            maxLines: 1,
-            style: TextStyle(
-              fontSize: 19,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.4,
-              color: value > 0 ? tone : t.muted,
+        const SizedBox(height: 14),
+        PdLedger(
+          gap: 10,
+          children: [
+            PdFigure(
+              value: pdInt.format(s.aprovada),
+              label: 'Aprovadas',
+              tone: t.green,
+              size: 19,
             ),
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 11.5,
-            fontWeight: FontWeight.w600,
-            color: t.muted,
-          ),
+            PdFigure(
+              value: pdInt.format(s.pendente),
+              label: 'Esperando resposta',
+              tone: t.amber,
+              size: 19,
+            ),
+            PdFigure(
+              value: pdInt.format(s.recusada),
+              label: 'Recusadas',
+              tone: t.red,
+              size: 19,
+            ),
+          ],
         ),
       ],
     );
   }
 }
 
-/// Score de chance de fechamento (0–100) das propostas em aberto.
+/// Score de chance de fechamento (0–100) das propostas em aberto. Com
+/// [onOpen], a linha abre as assinaturas da proposta para empurrá-la.
 class PdScoreList extends StatefulWidget {
-  const PdScoreList({super.key, required this.items});
+  const PdScoreList({super.key, required this.items, this.onOpen});
 
   final List<ProposalsScoreItem> items;
+  final ValueChanged<ProposalsScoreItem>? onOpen;
 
   @override
   State<PdScoreList> createState() => _PdScoreListState();
@@ -215,17 +234,39 @@ class _PdScoreListState extends State<PdScoreList> {
   static const int _collapsed = 6;
   bool _expanded = false;
 
+  Color _tone(PdTones t, int score) => score >= 70
+      ? t.green
+      : score >= 40
+          ? t.amber
+          : t.red;
+
   @override
   Widget build(BuildContext context) {
     final t = PdTones.of(context);
     final items = widget.items;
     if (items.isEmpty) {
-      return const PdEmptyLine('Nenhuma proposta em aberto para pontuar.');
+      return const PdEmptyLine(
+        'Nenhuma proposta em aberto para pontuar.',
+        hint: 'As propostas em andamento do recorte aparecem aqui com a '
+            'chance de virar venda, da maior para a menor.',
+        icon: LucideIcons.gauge,
+      );
     }
     final shown = _expanded ? items : items.take(_collapsed).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Régua da nota, antes das linhas: a cor do mostrador tem nome.
+        Wrap(
+          spacing: 14,
+          runSpacing: 4,
+          children: [
+            PdLegendItem(color: t.green, label: 'Alta (70 ou mais)'),
+            PdLegendItem(color: t.amber, label: 'Média (40 a 69)'),
+            PdLegendItem(color: t.red, label: 'Baixa (menos de 40)'),
+          ],
+        ),
+        const SizedBox(height: 6),
         for (var i = 0; i < shown.length; i++) ...[
           if (i > 0) const PdHairline(indent: 56),
           _row(t, shown[i]),
@@ -234,7 +275,7 @@ class _PdScoreListState extends State<PdScoreList> {
           TextButton(
             style: TextButton.styleFrom(
               foregroundColor: t.text,
-              padding: EdgeInsets.zero,
+              padding: const EdgeInsets.symmetric(horizontal: 0),
             ),
             onPressed: () => setState(() => _expanded = !_expanded),
             child: Text(
@@ -250,13 +291,11 @@ class _PdScoreListState extends State<PdScoreList> {
   }
 
   Widget _row(PdTones t, ProposalsScoreItem item) {
-    final tone = item.score >= 70
-        ? t.green
-        : item.score >= 40
-            ? t.amber
-            : t.red;
-    final number = item.proposalNumber.isEmpty ? '' : '#${item.proposalNumber} · ';
-    return Padding(
+    final tone = _tone(t, item.score);
+    final number =
+        item.proposalNumber.isEmpty ? '' : 'Nº ${item.proposalNumber} · ';
+    final open = widget.onOpen;
+    final content = Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
         children: [
@@ -308,13 +347,14 @@ class _PdScoreListState extends State<PdScoreList> {
                 const SizedBox(height: 2),
                 Text(
                   '${number}Etapa ${item.etapaAtual}/3 · '
-                  '${item.assinaturasConcluidas} assinaturas · '
-                  '${item.ageDays} ${item.ageDays == 1 ? 'dia' : 'dias'}',
-                  maxLines: 1,
+                  '${pdPlural(item.assinaturasConcluidas, 'assinatura', 'assinaturas')} · '
+                  'aberta há ${pdPlural(item.ageDays, 'dia', 'dias')}',
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w500,
+                    height: 1.3,
                     color: t.muted,
                   ),
                 ),
@@ -338,8 +378,18 @@ class _PdScoreListState extends State<PdScoreList> {
               ),
             ),
           ),
+          if (open != null) ...[
+            const SizedBox(width: 6),
+            Icon(LucideIcons.chevronRight, size: 16, color: t.muted),
+          ],
         ],
       ),
+    );
+    if (open == null) return content;
+    return Semantics(
+      button: true,
+      label: 'Abrir assinaturas da proposta ${item.proposalNumber}',
+      child: InkWell(onTap: () => open(item), child: content),
     );
   }
 }

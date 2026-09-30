@@ -103,6 +103,27 @@ _DetailMeta _metaOf(OverviewDetailKind k) {
   }
 }
 
+/// Tinta do detalhe — a mesma do indicador que o abriu na Home (aço para o
+/// que entra, pedra para número derivado, musgo para venda, âmbar para
+/// agenda, vermelho para atraso).
+Color _toneOf(BuildContext context, OverviewDetailKind k) {
+  switch (k) {
+    case OverviewDetailKind.leads:
+    case OverviewDetailKind.documents:
+    case OverviewDetailKind.funnel:
+    case OverviewDetailKind.sources:
+      return OverviewTones.sky(context);
+    case OverviewDetailKind.conversion:
+      return OverviewTones.slate(context);
+    case OverviewDetailKind.sales:
+      return OverviewTones.green(context);
+    case OverviewDetailKind.appointments:
+      return OverviewTones.amber(context);
+    case OverviewDetailKind.tasks:
+      return OverviewTones.red(context);
+  }
+}
+
 /// O atalho do rodapé só aparece quando a pessoa pode abrir o destino
 /// (módulo contratado + permissão) — nunca leva a uma tela bloqueada.
 bool _canOpen(String route) {
@@ -155,6 +176,7 @@ class _OverviewDetailsSheet extends StatelessWidget {
     final theme = Theme.of(context);
     final mq = MediaQuery.of(context);
     final meta = _metaOf(kind);
+    final tone = _toneOf(context, kind);
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final metaRoute = meta.route;
     final String? ctaRoute =
@@ -174,33 +196,49 @@ class _OverviewDetailsSheet extends StatelessWidget {
               height: 4,
               margin: const EdgeInsets.only(top: 10, bottom: 6),
               decoration: BoxDecoration(
-                color: ThemeHelpers.borderLightColor(context),
+                color: ThemeHelpers.borderColor(context),
                 borderRadius: BorderRadius.circular(999),
               ),
             ),
           ),
+          // Título à esquerda com a chapa na tinta do indicador que abriu o
+          // detalhe; fechar à direita.
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 6, 8, 10),
+            padding: const EdgeInsets.fromLTRB(20, 6, 8, 12),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Icon(meta.icon, size: 20, color: ThemeHelpers.textColor(context)),
-                const SizedBox(width: 10),
+                Container(
+                  width: 40,
+                  height: 40,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: OverviewTones.wash(context, tone),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(meta.icon, size: 20, color: tone),
+                ),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         meta.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w900,
                           color: ThemeHelpers.textColor(context),
                           letterSpacing: -0.3,
+                          height: 1.2,
                         ),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         meta.subtitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: secondary,
                         ),
@@ -219,17 +257,33 @@ class _OverviewDetailsSheet extends StatelessWidget {
           Container(height: 1, color: OverviewTones.rule(context)),
           Flexible(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+              // Sem o atalho do rodapé, o fim da rolagem respeita a barra de
+              // gestos (o SafeArea do sheet não cobre a borda de baixo).
+              padding: EdgeInsets.fromLTRB(
+                20,
+                16,
+                20,
+                20 + (ctaRoute == null ? mq.padding.bottom : 0),
+              ),
               child: _body(context),
             ),
           ),
           if (ctaRoute != null)
-            SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-                child: SizedBox(
-                  height: 48,
+            Container(
+              decoration: BoxDecoration(
+                border: Border(
+                  top: BorderSide(color: OverviewTones.rule(context)),
+                ),
+              ),
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
+                  // Atalho de navegação: neutro (não é confirmar nem criar),
+                  // com corpo de controle e a seta de "ir". Altura MÍNIMA de
+                  // 48 com padding próprio: cravado em 48 com o padding
+                  // vertical 16 do tema, sobravam 16dp para o rótulo e o
+                  // `FittedBox` o encolhia para ~60% com fonte em 130%.
                   child: OutlinedButton(
                     onPressed: () {
                       final nav = Navigator.of(context);
@@ -238,7 +292,15 @@ class _OverviewDetailsSheet extends StatelessWidget {
                     },
                     style: OutlinedButton.styleFrom(
                       foregroundColor: ThemeHelpers.textColor(context),
-                      side: BorderSide(color: ThemeHelpers.borderColor(context)),
+                      backgroundColor: OverviewTones.track(context),
+                      side: BorderSide(
+                        color: ThemeHelpers.borderLightColor(context),
+                      ),
+                      minimumSize: const Size.fromHeight(48),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -295,40 +357,48 @@ class _OverviewDetailsSheet extends StatelessWidget {
   // ─── corpos ────────────────────────────────────────────────────────────────
 
   Widget _leadsBody(BuildContext context) {
-    final leads = data.leads.leads;
     final sources = data.leadSources.sources;
+    final shown = data.leads.leads.take(10).toList(growable: false);
+    final total = data.statistics.totalLeads;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _Stats(items: [
-          ('Total', ovInt(data.statistics.totalLeads)),
-          ('Hoje', ovInt(data.leads.newToday)),
-          ('Score médio', ovInt(data.leads.avgScore.round())),
-          ('Sem origem', ovInt(data.leadSources.withoutSource)),
+          _StatItem('Leads no período', ovInt(total)),
+          _StatItem('Novos hoje', ovInt(data.leads.newToday)),
+          _StatItem('Pontuação média', ovInt(data.leads.avgScore.round())),
+          _StatItem('Sem origem', ovInt(data.leadSources.withoutSource)),
         ]),
         if (sources.isNotEmpty) ...[
-          const _BlockTitle('Origem'),
+          const _BlockTitle('De onde vieram'),
           _SourceBars(sources: sources.take(8).toList(growable: false)),
         ],
-        const _BlockTitle('Mais recentes'),
-        if (leads.isEmpty)
-          const _Muted('Nenhum lead neste recorte.')
+        _BlockTitle(
+          'Mais recentes',
+          note: shown.isNotEmpty && total > shown.length
+              ? '${ovInt(shown.length)} de ${ovInt(total)}'
+              : null,
+        ),
+        if (shown.isEmpty)
+          const _Muted(
+            'Nenhum lead entrou neste recorte. Amplie o período nos filtros '
+            'para ver os anteriores.',
+          )
         else
-          ...leads.take(10).map((l) {
-            final sub = [l.location, _maskPhone(l.phone)]
-                .whereType<String>()
-                .where((s) => s.isNotEmpty)
-                .join(' · ');
-            return _ListRow(
+          for (final l in shown)
+            _ListRow(
               title: l.name,
-              subtitle: sub.isEmpty ? '—' : sub,
-              meta: [
-                ovSource(l.source),
-                ovLeadStatus(l.status),
-                l.assignedToName ?? '—',
+              subtitle: [l.location, _maskPhone(l.phone)]
+                  .whereType<String>()
+                  .map((s) => s.trim())
+                  .where((s) => s.isNotEmpty)
+                  .join(' · '),
+              bits: [
+                _bit(LucideIcons.radioTower, ovSource(l.source)),
+                _bit(LucideIcons.circleDot, ovLeadStatus(l.status)),
+                _bit(LucideIcons.userRound, l.assignedToName),
               ],
-            );
-          }),
+            ),
       ],
     );
   }
@@ -339,15 +409,27 @@ class _OverviewDetailsSheet extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _Stats(items: [
-          ('Leads', ovInt(s.totalLeads)),
-          ('Agendamentos', ovInt(s.appointments)),
-          ('Fichas finalizadas', ovInt(s.salesCount)),
-          ('Conversão', ovPct(s.realConversionRate)),
+          _StatItem('Leads', ovInt(s.totalLeads)),
+          _StatItem('Agendamentos', ovInt(s.appointments)),
+          _StatItem('Fichas finalizadas', ovInt(s.salesCount)),
+          _StatItem('Conversão', ovPct(s.realConversionRate)),
         ]),
+        const _BlockTitle('A conta'),
+        // A fórmula desenhada: o número que a pessoa vê no indicador sai
+        // desta divisão, com os mesmos números da tela.
+        _Formula(
+          numerator: (
+            ovInt(s.salesCount),
+            s.salesCount == 1 ? 'ficha finalizada' : 'fichas finalizadas',
+          ),
+          denominator: (ovInt(s.totalLeads), 'leads captados'),
+          result: (ovPct(s.realConversionRate), 'conversão'),
+        ),
+        const SizedBox(height: 12),
         const _Muted(
-          'Conversão = fichas de venda finalizadas ÷ leads captados, ambos no '
-          'mesmo período e filtros. A variação no indicador compara com o '
-          'período anterior de mesma duração.',
+          'Conversão = fichas de venda finalizadas ÷ leads captados, os dois '
+          'no mesmo período e filtros da tela. Com a comparação ligada nos '
+          'filtros, a seta do indicador compara com o período escolhido lá.',
         ),
       ],
     );
@@ -357,63 +439,106 @@ class _OverviewDetailsSheet extends StatelessWidget {
     final s = data.statistics;
     final g = data.monthlyGoal;
     final ticket = s.salesCount > 0 ? ovMoneyShort(s.totalSales / s.salesCount) : '—';
+    final progress = g.progress.clamp(0.0, 100.0).toDouble();
+    final remaining = g.remaining < 0 ? 0.0 : g.remaining;
+    final surplus = g.remaining < 0 ? -g.remaining : 0.0;
+    // Mesma cor do anel da Home: musgo batida, âmbar fora do ritmo, marca no
+    // caminho normal — a régua não pode contar outra história.
+    final tone = progress >= 100
+        ? OverviewTones.green(context)
+        : (!g.onTrack
+            ? OverviewTones.amber(context)
+            : OverviewTones.brand(context));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _Stats(items: [
-          ('VGV no período', ovMoney(s.totalSales)),
-          ('Fichas', ovInt(s.salesCount)),
-          ('Ticket médio', ticket),
-          ('Receita', ovMoney(s.totalRevenue)),
+          _StatItem('VGV no período', ovMoney(s.totalSales)),
+          _StatItem('Fichas finalizadas', ovInt(s.salesCount)),
+          _StatItem('Ticket médio', ticket),
+          _StatItem('Receita', ovMoney(s.totalRevenue)),
         ]),
         if (g.hasTarget) ...[
-          const _BlockTitle('Meta do mês'),
-          OverviewBar(
-            fraction: (g.progress / 100).clamp(0.0, 1.0).toDouble(),
-            tone: g.onTrack
-                ? OverviewTones.green(context)
-                : OverviewTones.amber(context),
-            height: 8,
-          ),
-          const SizedBox(height: 8),
-          _Muted(
-            '${ovMoney(g.current)} de ${ovMoney(g.target)} '
-            '(${ovPct(g.progress, 0)}) · faltam ${ovMoney(g.remaining < 0 ? 0 : g.remaining)} '
-            'em ${g.daysLeft} ${g.daysLeft == 1 ? 'dia' : 'dias'} '
-            '(${ovMoneyShort(g.dailyTarget)}/dia)'
-            '${data.projectedTotal > 0 ? ' · projeção ${ovMoneyShort(data.projectedTotal)}' : ''}',
-          ),
+          _BlockTitle('Meta do mês', note: '${ovPct(g.progress, 0)} atingido'),
+          OverviewBar(fraction: progress / 100, tone: tone, height: 8),
+          const SizedBox(height: 6),
+          // A conta da meta em linhas (antes era uma frase corrida com seis
+          // números entre parênteses).
+          _KeyLine(label: 'Atingido', value: ovMoney(g.current)),
+          _KeyLine(label: 'Meta', value: ovMoney(g.target)),
+          if (remaining > 0) ...[
+            _KeyLine(
+              label: 'Faltam',
+              value: ovMoney(remaining),
+              icon: LucideIcons.hourglass,
+              tone: OverviewTones.amber(context),
+            ),
+            _KeyLine(
+              label: 'Prazo',
+              value: '${ovInt(g.daysLeft)} ${g.daysLeft == 1 ? 'dia' : 'dias'}',
+            ),
+            if (g.dailyTarget > 0)
+              _KeyLine(
+                label: 'Ritmo necessário',
+                value: '${ovMoneyShort(g.dailyTarget)}/dia',
+              ),
+          ] else
+            _KeyLine(
+              label: surplus > 0 ? 'Acima da meta' : 'Situação',
+              value: surplus > 0 ? '+${ovMoney(surplus)}' : 'Meta batida',
+              icon: LucideIcons.circleCheck,
+              tone: OverviewTones.green(context),
+            ),
+          if (data.projectedTotal > 0)
+            _KeyLine(
+              label: 'Projeção do mês',
+              value: ovMoneyShort(data.projectedTotal),
+              icon: LucideIcons.trendingUp,
+            ),
         ] else
-          const _Muted('Nenhuma meta mensal definida para este recorte.'),
+          const _Muted(
+            'Nenhuma meta mensal definida para este recorte. Quando houver '
+            'meta cadastrada, o progresso do mês aparece aqui.',
+          ),
       ],
     );
   }
 
   Widget _appointmentsBody(BuildContext context) {
     final a = data.appointments;
+    final shown = a.upcoming.take(10).toList(growable: false);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _Stats(items: [
-          ('Total', ovInt(a.total)),
-          ('Marcados', ovInt(a.scheduled)),
-          ('Realizados', ovInt(a.completed)),
-          ('Cancelados', ovInt(a.cancelled)),
+          _StatItem('Total', ovInt(a.total)),
+          _StatItem('Marcados', ovInt(a.scheduled)),
+          _StatItem('Realizados', ovInt(a.completed)),
+          _StatItem('Cancelados', ovInt(a.cancelled)),
         ]),
         const _BlockTitle('Próximos'),
-        if (a.upcoming.isEmpty)
-          const _Muted('Nenhum agendamento próximo.')
+        if (shown.isEmpty)
+          const _Muted(
+            'Nenhum compromisso marcado para os próximos dias. Visitas e '
+            'reuniões criadas na agenda aparecem aqui.',
+          )
         else
-          ...a.upcoming.take(10).map((ap) {
-            final when = ap.dateTime == null
-                ? '—'
-                : DateFormat('dd/MM HH:mm', 'pt_BR').format(ap.dateTime!);
-            return _ListRow(
+          for (final ap in shown)
+            _ListRow(
               title: ap.title,
-              subtitle: ap.clientName ?? ap.propertyTitle ?? '—',
-              meta: [when, _appointmentType(ap.type), ap.assignedToName ?? '—'],
-            );
-          }),
+              subtitle: _firstFilled([ap.clientName, ap.propertyTitle]),
+              bits: [
+                _bit(
+                  LucideIcons.clock3,
+                  ap.dateTime == null
+                      ? null
+                      : DateFormat("dd/MM 'às' HH:mm", 'pt_BR')
+                          .format(ap.dateTime!),
+                ),
+                _bit(LucideIcons.calendarDays, _appointmentType(ap.type)),
+                _bit(LucideIcons.userRound, ap.assignedToName),
+              ],
+            ),
       ],
     );
   }
@@ -421,66 +546,88 @@ class _OverviewDetailsSheet extends StatelessWidget {
   Widget _tasksBody(BuildContext context) {
     final t = data.tasks;
     final today = DateUtils.dateOnly(DateTime.now());
+    final shown = t.tasks.take(12).toList(growable: false);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _Stats(items: [
-          ('Atrasadas', ovInt(t.overdue)),
-          ('Hoje', ovInt(t.dueToday)),
-          ('Amanhã', ovInt(t.dueTomorrow)),
-          ('Total', ovInt(t.total)),
+          _StatItem('Atrasadas', ovInt(t.overdue)),
+          _StatItem('Vencem hoje', ovInt(t.dueToday)),
+          _StatItem('Vencem amanhã', ovInt(t.dueTomorrow)),
+          _StatItem('Total', ovInt(t.total)),
         ]),
-        const SizedBox(height: 4),
-        if (t.tasks.isEmpty)
-          const _Muted('Nenhuma tarefa pendente neste recorte.')
+        _BlockTitle(
+          'Pendentes',
+          note: shown.isNotEmpty && t.total > shown.length
+              ? '${ovInt(shown.length)} de ${ovInt(t.total)}'
+              : null,
+        ),
+        if (shown.isEmpty)
+          const _Muted(
+            'Nenhuma tarefa pendente neste recorte — nada atrasado nem '
+            'vencendo.',
+          )
         else
-          ...t.tasks.take(12).map((task) {
-            final due = task.dueDate;
-            final overdue =
-                due != null && DateUtils.dateOnly(due).isBefore(today);
-            return _ListRow(
-              title: task.title,
-              subtitle: task.relatedName ?? '—',
-              meta: [
-                due == null ? '—' : DateFormat('dd/MM', 'pt_BR').format(due),
-                ovPriority(task.priority),
-                task.assigneeName ?? '—',
-              ],
-              dangerFirstMeta: overdue,
-            );
-          }),
+          for (final task in shown)
+            Builder(builder: (context) {
+              final due = task.dueDate;
+              final day = due == null ? null : DateUtils.dateOnly(due);
+              final overdue = day != null && day.isBefore(today);
+              final isToday = day != null && DateUtils.isSameDay(day, today);
+              // O prazo dito por extenso: "venceu 12/09" em vermelho diz o
+              // atraso sem depender só da cor.
+              final String? when = day == null
+                  ? null
+                  : overdue
+                      ? 'venceu ${DateFormat('dd/MM', 'pt_BR').format(day)}'
+                      : isToday
+                          ? 'vence hoje'
+                          : 'vence ${DateFormat('dd/MM', 'pt_BR').format(day)}';
+              return _ListRow(
+                title: task.title,
+                subtitle: task.relatedName,
+                bits: [
+                  _bit(LucideIcons.calendarClock, when, danger: overdue),
+                  _bit(LucideIcons.flag, ovPriority(task.priority)),
+                  _bit(LucideIcons.userRound, task.assigneeName),
+                ],
+              );
+            }),
       ],
     );
   }
 
   Widget _documentsBody(BuildContext context) {
     final d = data.documents;
+    final shown = d.documents.take(12).toList(growable: false);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _Stats(items: [
-          ('Pessoais', ovInt(d.personal)),
-          ('Do imóvel', ovInt(d.property)),
-          ('Contratos', ovInt(d.contract)),
-          ('Outros', ovInt(d.other)),
+          _StatItem('Pessoais', ovInt(d.personal)),
+          _StatItem('Do imóvel', ovInt(d.property)),
+          _StatItem('Contratos', ovInt(d.contract)),
+          _StatItem('Outros', ovInt(d.other)),
         ]),
-        const SizedBox(height: 4),
-        if (d.documents.isEmpty)
-          const _Muted('Nenhum documento pendente neste recorte.')
+        const _BlockTitle('Aguardando conferência'),
+        if (shown.isEmpty)
+          const _Muted('Nenhum documento esperando conferência neste recorte.')
         else
-          ...d.documents.take(12).map((doc) {
-            return _ListRow(
+          for (final doc in shown)
+            _ListRow(
               title: doc.title,
-              subtitle: doc.relatedName ?? '—',
-              meta: [
-                _documentType(doc.type),
-                doc.uploadedAt == null
-                    ? '—'
-                    : DateFormat('dd/MM', 'pt_BR').format(doc.uploadedAt!),
-                doc.uploadedByName ?? '—',
+              subtitle: doc.relatedName,
+              bits: [
+                _bit(LucideIcons.fileText, _documentType(doc.type)),
+                _bit(
+                  LucideIcons.calendarDays,
+                  doc.uploadedAt == null
+                      ? null
+                      : 'enviado ${DateFormat('dd/MM', 'pt_BR').format(doc.uploadedAt!)}',
+                ),
+                _bit(LucideIcons.userRound, doc.uploadedByName),
               ],
-            );
-          }),
+            ),
       ],
     );
   }
@@ -506,10 +653,13 @@ class _OverviewDetailsSheet extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _Stats(items: [
-          ('Topo do funil', ovInt(top)),
-          ('Conversão total', ovPct(s.realConversionRate)),
-          ('Lead → agend.', ovPct(pctOf(steps[1].value, top))),
-          ('Agend. → ficha', ovPct(pctOf(steps[2].value, steps[1].value))),
+          _StatItem('Topo do funil', ovInt(top)),
+          _StatItem('Conversão total', ovPct(s.realConversionRate)),
+          _StatItem('Lead → agendamento', ovPct(pctOf(steps[1].value, top))),
+          _StatItem(
+            'Agendamento → ficha',
+            ovPct(pctOf(steps[2].value, steps[1].value)),
+          ),
         ]),
         const _BlockTitle('Etapa a etapa'),
         for (var i = 0; i < steps.length; i++)
@@ -528,11 +678,21 @@ class _OverviewDetailsSheet extends StatelessWidget {
             return _ListRow(
               title: '${st.label} · ${ovInt(st.value)}',
               subtitle: sub.toString(),
-              meta: [
-                stepRate == null ? '—' : '${ovPct(stepRate)} da etapa anterior',
-                lost == null ? '—' : '${ovInt(lost)} não avançaram',
+              bits: [
+                if (stepRate != null)
+                  _bit(
+                    LucideIcons.percent,
+                    '${ovPct(stepRate)} da etapa anterior',
+                  ),
+                if (lost != null)
+                  _bit(
+                    LucideIcons.trendingDown,
+                    lost == 1
+                        ? '1 não avançou'
+                        : '${ovInt(lost)} não avançaram',
+                    danger: lost > 0,
+                  ),
               ],
-              dangerLastMeta: (lost ?? 0) > 0,
             );
           }),
         const SizedBox(height: 8),
@@ -553,18 +713,24 @@ class _OverviewDetailsSheet extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _Stats(items: [
-          ('Leads com origem', ovInt(ls.total)),
-          ('Sem origem', ovInt(ls.withoutSource)),
-          ('Canais', ovInt(sources.length)),
-          (
-            'Principal',
+          _StatItem('Leads com origem', ovInt(ls.total)),
+          _StatItem('Sem origem', ovInt(ls.withoutSource)),
+          _StatItem('Canais', ovInt(sources.length)),
+          // O nome do canal quebra linha em vez de encolher; o percentual
+          // vai para o rótulo.
+          _StatItem(
             first == null
-                ? '—'
-                : '${first.label} (${ovPct(first.percentage, 0)})',
+                ? 'Canal principal'
+                : 'Canal principal · ${ovPct(first.percentage, 0)}',
+            first?.label ?? '—',
+            isText: true,
           ),
         ]),
         if (sources.isEmpty)
-          const _Muted('Nenhum lead com origem informada neste recorte.')
+          const _Muted(
+            'Nenhum lead com origem informada neste recorte. A origem vem do '
+            'canal por onde o lead chegou (site, portais, WhatsApp).',
+          )
         else ...[
           const _BlockTitle('Por canal'),
           _SourceBars(sources: sources),
@@ -589,16 +755,37 @@ String? _maskPhone(String? raw) {
   return raw.trim().isEmpty ? null : raw.trim();
 }
 
+/// Primeiro texto preenchido (nulo se nenhum).
+String? _firstFilled(List<String?> values) {
+  for (final v in values) {
+    final t = v?.trim() ?? '';
+    if (t.isNotEmpty) return t;
+  }
+  return null;
+}
+
+/// Código desconhecido vindo do back ("follow_up") vira texto legível
+/// ("Follow up") em vez de aparecer cru.
+String _pretty(String raw) {
+  final t = raw.trim().replaceAll(RegExp(r'[_-]+'), ' ');
+  if (t.isEmpty) return '';
+  return t[0].toUpperCase() + t.substring(1);
+}
+
 String _appointmentType(String type) {
-  switch (type) {
+  switch (type.trim().toLowerCase()) {
     case 'visit':
       return 'Visita';
     case 'meeting':
       return 'Reunião';
     case 'call':
       return 'Ligação';
+    case 'inspection':
+      return 'Vistoria';
+    case 'other':
+      return 'Outro';
     default:
-      return type.isEmpty ? '—' : type;
+      return _pretty(type);
   }
 }
 
@@ -613,46 +800,75 @@ String _documentType(String type) {
     case 'other':
       return 'Outro';
     default:
-      return type.isEmpty ? '—' : type;
+      return _pretty(type);
   }
 }
 
 // ─── átomos ──────────────────────────────────────────────────────────────────
 
-/// Quatro leituras em 2×2, separadas por fio (sem chapa de card).
+/// Um par rótulo/valor da grade de leituras.
+class _StatItem {
+  const _StatItem(this.label, this.value, {this.isText = false});
+
+  final String label;
+  final String value;
+
+  /// O valor é um nome (canal), não um número: quebra em até duas linhas em
+  /// vez de encolher.
+  final bool isText;
+}
+
+/// Quatro leituras em 2×2, separadas por fio (sem chapa de card). Número
+/// nunca quebra linha: encolhe para caber (R$ 12.500.000 em 320dp com fonte
+/// grande quebrava em "R$" / "12.500.000").
 class _Stats extends StatelessWidget {
   const _Stats({required this.items});
 
-  final List<(String, String)> items;
+  final List<_StatItem> items;
 
   @override
   Widget build(BuildContext context) {
-    Widget cell((String, String) it) {
-      final theme = Theme.of(context);
+    final theme = Theme.of(context);
+    final valueStyle = theme.textTheme.titleMedium?.copyWith(
+      fontWeight: FontWeight.w900,
+      color: ThemeHelpers.textColor(context),
+      letterSpacing: -0.3,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    Widget cell(_StatItem it) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 2),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              it.$2,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: ThemeHelpers.textColor(context),
-                letterSpacing: -0.3,
-                fontFeatures: const [FontFeature.tabularFigures()],
+            if (it.isText)
+              Text(
+                it.value,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: valueStyle?.copyWith(height: 1.2),
+              )
+            else
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  it.value,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: valueStyle,
+                ),
               ),
-            ),
             const SizedBox(height: 2),
             Text(
-              it.$1,
+              it.label,
               maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: theme.textTheme.labelSmall?.copyWith(
                 color: ThemeHelpers.textSecondaryColor(context),
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.2,
+                height: 1.25,
               ),
             ),
           ],
@@ -695,16 +911,38 @@ class _Stats extends StatelessWidget {
   }
 }
 
+/// Cabeça de bloco, com a contagem do recorte à direita quando a lista
+/// mostra só parte ("10 de 45").
 class _BlockTitle extends StatelessWidget {
-  const _BlockTitle(this.text);
+  const _BlockTitle(this.text, {this.note});
 
   final String text;
+  final String? note;
 
   @override
   Widget build(BuildContext context) {
+    final n = note;
     return Padding(
-      padding: const EdgeInsets.only(top: 16, bottom: 8),
-      child: OverviewEyebrow(text),
+      padding: const EdgeInsets.only(top: 18, bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(child: OverviewEyebrow(text)),
+          if (n != null) ...[
+            const SizedBox(width: 8),
+            Text(
+              n,
+              maxLines: 1,
+              softWrap: false,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    fontWeight: FontWeight.w700,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -729,49 +967,212 @@ class _Muted extends StatelessWidget {
   }
 }
 
-/// Linha flush: título, linha de apoio e as colunas do web viram uma linha
-/// de meta separada por " · " (no telefone não cabem quatro colunas).
+/// Linha rótulo → valor (a conta da meta). O estado vem no ícone tingido;
+/// o valor fica no tom do texto — âmbar e verde miúdos não passam contraste
+/// no claro.
+class _KeyLine extends StatelessWidget {
+  const _KeyLine({
+    required this.label,
+    required this.value,
+    this.icon,
+    this.tone,
+  });
+
+  final String label;
+  final String value;
+  final IconData? icon;
+  final Color? tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final glyph = icon;
+    final labelText = Text(
+      label,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: theme.textTheme.bodySmall?.copyWith(
+        color: secondary,
+        fontWeight: FontWeight.w600,
+        height: 1.25,
+      ),
+    );
+    // O valor tem prioridade sobre o rótulo: lado a lado, cada um ficava com
+    // metade da linha e "R$ 12.500.000" saía "R$ 12.500.…" (um número
+    // errado) em 320dp com fonte grande. Dinheiro encolhe, nunca corta.
+    Widget valueLine({required bool end}) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (glyph != null) ...[
+              Icon(glyph, size: 14, color: tone ?? secondary),
+              const SizedBox(width: 5),
+            ],
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: end ? Alignment.centerRight : Alignment.centerLeft,
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: ThemeHelpers.textColor(context),
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: OverviewTones.rule(context))),
+      ),
+      child: LayoutBuilder(
+        builder: (context, c) {
+          // Linha estreita demais para o par (fonte muito grande): o valor
+          // desce para baixo do rótulo.
+          final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+          if (c.maxWidth < 176 * scale) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                labelText,
+                const SizedBox(height: 1),
+                valueLine(end: false),
+              ],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: labelText),
+              const SizedBox(width: 8),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: c.maxWidth * 0.62),
+                child: valueLine(end: true),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// A conta da conversão desenhada: "12 fichas ÷ 300 leads = 4,0%". Em tela
+/// estreita (ou fonte grande) o resultado desce de linha em vez de estourar.
+class _Formula extends StatelessWidget {
+  const _Formula({
+    required this.numerator,
+    required this.denominator,
+    required this.result,
+  });
+
+  /// (valor, rótulo).
+  final (String, String) numerator;
+  final (String, String) denominator;
+  final (String, String) result;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    Widget term((String, String) t) => Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              t.$1,
+              maxLines: 1,
+              softWrap: false,
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w900,
+                color: textColor,
+                height: 1.1,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+            Text(
+              t.$2,
+              maxLines: 1,
+              softWrap: false,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: secondary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        );
+    Widget op(String s) => Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: Text(
+            s,
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: secondary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        );
+    return Wrap(
+      spacing: 12,
+      runSpacing: 10,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        term(numerator),
+        op('÷'),
+        term(denominator),
+        op('='),
+        // O resultado ganha a chapa neutra de campo: é o número da tela.
+        Container(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          decoration: BoxDecoration(
+            color: OverviewTones.track(context),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: ThemeHelpers.borderLightColor(context)),
+          ),
+          child: term(result),
+        ),
+      ],
+    );
+  }
+}
+
+/// Pedaço da linha de meta de um item (ícone + texto; `danger` pinta de
+/// vermelho — atraso, perda).
+typedef _Bit = ({IconData icon, String text, bool danger});
+
+_Bit _bit(IconData icon, String? text, {bool danger = false}) =>
+    (icon: icon, text: text?.trim() ?? '', danger: danger);
+
+/// Linha flush: título, linha de apoio e as colunas do web viram pedaços com
+/// ícone (quando, quem, estado) que quebram linha em `Wrap` — no telefone não
+/// cabem quatro colunas. Dado que não veio SOME da linha: nada de "—" solto.
 class _ListRow extends StatelessWidget {
   const _ListRow({
     required this.title,
-    required this.subtitle,
-    required this.meta,
-    this.dangerFirstMeta = false,
-    this.dangerLastMeta = false,
+    this.subtitle,
+    this.bits = const [],
   });
 
   final String title;
-  final String subtitle;
-  final List<String> meta;
-  final bool dangerFirstMeta;
-  final bool dangerLastMeta;
+  final String? subtitle;
+  final List<_Bit> bits;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final danger = OverviewTones.red(context);
-    final metaStyle = theme.textTheme.labelSmall?.copyWith(
-      color: secondary,
-      fontWeight: FontWeight.w600,
-      height: 1.35,
-    );
-    final spans = <InlineSpan>[];
-    for (var i = 0; i < meta.length; i++) {
-      if (i > 0) spans.add(const TextSpan(text: ' · '));
-      final isDanger = (i == 0 && dangerFirstMeta) ||
-          (i == meta.length - 1 && dangerLastMeta);
-      spans.add(
-        TextSpan(
-          text: meta[i],
-          style: isDanger
-              ? TextStyle(color: danger, fontWeight: FontWeight.w800)
-              : null,
-        ),
-      );
-    }
+    final sub = subtitle?.trim() ?? '';
+    final shown = bits
+        .where((b) => b.text.isNotEmpty && b.text != '—')
+        .toList(growable: false);
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.symmetric(vertical: 11),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: OverviewTones.rule(context))),
       ),
@@ -785,22 +1186,49 @@ class _ListRow extends StatelessWidget {
             style: theme.textTheme.bodyMedium?.copyWith(
               fontWeight: FontWeight.w800,
               color: ThemeHelpers.textColor(context),
+              height: 1.25,
             ),
           ),
-          const SizedBox(height: 2),
-          Text(
-            subtitle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall?.copyWith(color: secondary),
-          ),
-          if (meta.isNotEmpty) ...[
-            const SizedBox(height: 3),
-            Text.rich(
-              TextSpan(children: spans),
-              maxLines: 2,
+          if (sub.isNotEmpty && sub != '—') ...[
+            const SizedBox(height: 2),
+            Text(
+              sub,
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: metaStyle,
+              style: theme.textTheme.bodySmall?.copyWith(color: secondary),
+            ),
+          ],
+          if (shown.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 12,
+              runSpacing: 4,
+              children: [
+                for (final b in shown)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        b.icon,
+                        size: 12,
+                        color: b.danger ? danger : secondary,
+                      ),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          b.text,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: b.danger ? danger : secondary,
+                            fontWeight:
+                                b.danger ? FontWeight.w800 : FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
             ),
           ],
         ],
@@ -846,6 +1274,8 @@ class _SourceBars extends StatelessWidget {
                     const SizedBox(width: 8),
                     Text(
                       '${ovInt(sources[i].count)} · ${ovPct(sources[i].percentage)}',
+                      maxLines: 1,
+                      softWrap: false,
                       style: theme.textTheme.labelSmall?.copyWith(
                         fontWeight: FontWeight.w800,
                         color: ThemeHelpers.textSecondaryColor(context),

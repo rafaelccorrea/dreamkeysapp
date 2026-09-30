@@ -23,6 +23,10 @@ class SdrRoulettePlate extends StatelessWidget {
   /// Quem recebe agora, na ordem que o back devolveu (como a pilha do web).
   final List<SdrAvailability> quemRecebe;
 
+  /// Recuo lateral do conteúdo — a página alarga em tablet/paisagem para a
+  /// placa não esticar a manchete de ponta a ponta.
+  final double recuo;
+
   const SdrRoulettePlate({
     super.key,
     required this.naRoleta,
@@ -32,6 +36,7 @@ class SdrRoulettePlate extends StatelessWidget {
     required this.deLocacao,
     required this.mostrarLocacao,
     required this.quemRecebe,
+    this.recuo = 16,
   });
 
   @override
@@ -44,7 +49,7 @@ class SdrRoulettePlate extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      padding: EdgeInsets.fromLTRB(recuo, 16, recuo, 14),
       decoration: BoxDecoration(
         color: RoletaTinta.banda(context),
         border: Border(
@@ -72,7 +77,8 @@ class SdrRoulettePlate extends StatelessWidget {
                       fontWeight: FontWeight.w900,
                       height: 1.0,
                       letterSpacing: -1.0,
-                      color: verde,
+                      // Ninguém recebendo não é "verde": a manchete apaga.
+                      color: naRoleta > 0 ? verde : secundario,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
@@ -84,9 +90,11 @@ class SdrRoulettePlate extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // Duas linhas antes das reticências: em 320dp com fonte
+                    // grande a frase quebra em vez de virar "SDRs rec…".
                     Text(
                       naRoleta == 1 ? 'SDR recebendo' : 'SDRs recebendo',
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 13,
@@ -97,7 +105,7 @@ class SdrRoulettePlate extends StatelessWidget {
                     ),
                     Text(
                       'agora, pelo rodízio',
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 11.5,

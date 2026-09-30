@@ -243,16 +243,21 @@ class ChatRoom {
       return name!;
     }
 
-    if (type == ChatRoomType.direct) {
+    // 30/09/2026: sala sem participantes na resposta (ex.: evento de socket
+    // incompleto) lançava StateError em `participants.first` e derrubava a
+    // lista e o cabeçalho da conversa. Agora cai no nome da sala.
+    if (type == ChatRoomType.direct && participants.isNotEmpty) {
       // Para conversas diretas, retorna o nome do outro participante
       final otherParticipant = participants.firstWhere(
         (p) => p.userId != currentUserId,
         orElse: () => participants.first,
       );
-      return otherParticipant.userName;
+      final other = otherParticipant.userName.trim();
+      if (other.isNotEmpty) return other;
     }
 
-    return name ?? 'Chat sem nome';
+    final own = (name ?? '').trim();
+    return own.isNotEmpty ? own : 'Conversa sem nome';
   }
 
   /// Retorna a imagem de exibição da sala
@@ -261,7 +266,7 @@ class ChatRoom {
       return imageUrl;
     }
 
-    if (type == ChatRoomType.direct) {
+    if (type == ChatRoomType.direct && participants.isNotEmpty) {
       // Para conversas diretas, retorna o avatar do outro participante
       final otherParticipant = participants.firstWhere(
         (p) => p.userId != currentUserId,

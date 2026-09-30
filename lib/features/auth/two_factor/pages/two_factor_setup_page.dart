@@ -14,6 +14,7 @@ import '../../../../shared/services/login_flow_service.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
 import '../../login/widgets/biometric_enrollment_dialog.dart';
 import '../services/two_factor_setup_service.dart';
+import '../widgets/two_factor_code_input.dart';
 
 /// Configuração de 2FA antes do login — paridade com o TwoFactorSetupModal
 /// do web. Aberta quando a empresa exige 2FA e o usuário ainda não
@@ -254,164 +255,280 @@ class _TwoFactorSetupPageState extends State<TwoFactorSetupPage> {
       body: SafeArea(
         top: false,
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Masthead
-              Text(
-                'SEGURANÇA DA CONTA',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: brand,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1.2,
-                ),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
+          child: Center(
+            child: ConstrainedBox(
+              // Tablet: o roteiro não estica em 1000dp.
+              constraints: const BoxConstraints(maxWidth: 560),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildMasthead(theme, text, textSec, brand, isDark),
+                  const SizedBox(height: 20),
+                  Divider(height: 1, color: divider),
+                  const SizedBox(height: 20),
+                  if (_loadError != null)
+                    _buildLoadError(theme, text, textSec, brand, isDark)
+                  else ...[
+                    _buildStep(
+                      theme: theme,
+                      number: '1',
+                      title: 'Adicione a conta no autenticador',
+                      subtitle: 'No Google Authenticator, Authy ou outro app '
+                          'autenticador, escaneie o QR Code.',
+                      brand: brand,
+                      text: text,
+                      textSec: textSec,
+                      divider: divider,
+                      done: false,
+                      last: false,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _buildQr(theme, textSec),
+                          const SizedBox(height: 16),
+                          _buildSecret(theme, text, textSec, brand, isDark),
+                        ],
+                      ),
+                    ),
+                    _buildStep(
+                      theme: theme,
+                      number: '2',
+                      title: 'Digite o código gerado',
+                      subtitle: 'O app mostra 6 dígitos que mudam a cada '
+                          '30 segundos.',
+                      brand: brand,
+                      text: text,
+                      textSec: textSec,
+                      divider: divider,
+                      done: _codeController.text.length == 6,
+                      last: true,
+                      child: _buildCodeField(theme, textSec, brand, isDark),
+                    ),
+                    const SizedBox(height: 24),
+                    _buildActions(theme, isDark),
+                  ],
+                ],
               ),
-              const SizedBox(height: 6),
-              Text(
-                'Configurar 2FA',
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  color: text,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Sua empresa exige a verificação em duas etapas. '
-                'Ative agora para entrar.',
-                style: theme.textTheme.bodyMedium?.copyWith(color: textSec),
-              ),
-              const SizedBox(height: 20),
-              Divider(height: 1, color: divider),
-              const SizedBox(height: 20),
-
-              if (_loadError != null)
-                _buildLoadError(theme, text, textSec, brand)
-              else ...[
-                _buildSteps(theme, text, textSec, brand),
-                const SizedBox(height: 20),
-                _buildQr(theme, text, textSec),
-                const SizedBox(height: 20),
-                _buildSecret(theme, text, textSec, brand, isDark),
-                const SizedBox(height: 20),
-                Divider(height: 1, color: divider),
-                const SizedBox(height: 20),
-                _buildCodeField(theme, text, textSec, brand, isDark),
-                const SizedBox(height: 20),
-                _buildActions(theme, isDark),
-              ],
-            ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildSteps(ThemeData theme, Color text, Color textSec, Color brand) {
-    Widget step(String n, String label) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  /// Abertura: selo de segurança + o porquê (empresa exige) + a conta.
+  Widget _buildMasthead(
+    ThemeData theme,
+    Color text,
+    Color textSec,
+    Color brand,
+    bool isDark,
+  ) {
+    final email = widget.email.trim();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Container(
-              width: 22,
-              height: 22,
-              alignment: Alignment.center,
+              width: 48,
+              height: 48,
               decoration: BoxDecoration(
-                color: brand.withValues(alpha: 0.12),
-                shape: BoxShape.circle,
+                color: brand.withValues(alpha: isDark ? 0.18 : 0.10),
+                borderRadius: BorderRadius.circular(14),
               ),
-              child: Text(
-                n,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: brand,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
+              child: Icon(Icons.verified_user_outlined, color: brand, size: 26),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             Expanded(
               child: Text(
-                label,
-                style: theme.textTheme.bodyMedium?.copyWith(color: text),
+                'Ative a verificação em duas etapas',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  color: text,
+                  fontWeight: FontWeight.w800,
+                  height: 1.2,
+                ),
               ),
             ),
           ],
         ),
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        step(
-          '1',
-          'Abra seu aplicativo autenticador (Google Authenticator, Authy, '
-              'etc.) e adicione a conta escaneando o QR Code.',
+        const SizedBox(height: 12),
+        Text(
+          'Sua empresa exige esta proteção para entrar. Leva menos de um '
+          'minuto: escaneie o QR Code e confirme com o código.',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: textSec,
+            height: 1.4,
+          ),
         ),
-        step(
-          '2',
-          'Digite abaixo o código de 6 dígitos para concluir a ativação.',
+        if (email.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Icon(Icons.person_outline_rounded, size: 16, color: textSec),
+              const SizedBox(width: 6),
+              Text(
+                'Conta ',
+                style: theme.textTheme.bodySmall?.copyWith(color: textSec),
+              ),
+              Expanded(
+                child: Text(
+                  email,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: text,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Passo numerado com trilho à esquerda ligando ao próximo — o conteúdo
+  /// (QR, chave, código) mora DENTRO do passo que ele resolve.
+  Widget _buildStep({
+    required ThemeData theme,
+    required String number,
+    required String title,
+    required String subtitle,
+    required Color brand,
+    required Color text,
+    required Color textSec,
+    required Color divider,
+    required bool done,
+    required bool last,
+    required Widget child,
+  }) {
+    final green = theme.brightness == Brightness.dark
+        ? AppColors.status.successDarkMode
+        : AppColors.status.success;
+    final badgeColor = done ? green : brand;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 26,
+              height: 26,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: badgeColor.withValues(alpha: 0.14),
+                shape: BoxShape.circle,
+                border: Border.all(color: badgeColor, width: 1.2),
+              ),
+              child: done
+                  ? Icon(Icons.check_rounded, size: 15, color: badgeColor)
+                  : Text(
+                      number,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: badgeColor,
+                        fontWeight: FontWeight.w800,
+                        height: 1,
+                      ),
+                    ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: text,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: textSec,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        Container(
+          // Trilho alinhado ao centro do número (26/2 - 1).
+          margin: const EdgeInsets.only(left: 12),
+          padding: EdgeInsets.fromLTRB(24, 14, 0, last ? 0 : 24),
+          decoration: BoxDecoration(
+            border: last
+                ? null
+                : Border(left: BorderSide(color: divider, width: 2)),
+          ),
+          child: child,
         ),
       ],
     );
   }
 
-  Widget _buildQr(ThemeData theme, Color text, Color textSec) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _sectionTitle(theme, 'QR Code', 'Escaneie no seu app autenticador',
-            text, textSec),
-        const SizedBox(height: 12),
-        Center(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final size = constraints.maxWidth < 220
-                  ? constraints.maxWidth
-                  : 220.0;
-              if (_loading) {
-                return SkeletonBox(
-                  width: size,
-                  height: size,
-                  borderRadius: 12,
-                );
-              }
-              // Fundo SEMPRE branco: QR escuro sobre claro, também no
-              // dark mode, senão o leitor do autenticador falha.
-              return Container(
-                width: size,
-                height: size,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: ThemeHelpers.borderColor(context),
-                  ),
-                ),
-                child: _qrBytes != null
-                    ? Image.memory(
-                        _qrBytes!,
-                        fit: BoxFit.contain,
-                        gaplessPlayback: true,
-                        semanticLabel: 'QR Code 2FA',
-                      )
-                    : Center(
-                        child: Text(
-                          'QR Code indisponível. Use a chave secreta.',
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: AppColors.text.textSecondary,
-                          ),
+  Widget _buildQr(ThemeData theme, Color textSec) {
+    return Center(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final size = constraints.maxWidth < 220
+              ? constraints.maxWidth
+              : 220.0;
+          if (_loading) {
+            return SkeletonBox(
+              width: size,
+              height: size,
+              borderRadius: 12,
+            );
+          }
+          // Fundo SEMPRE branco: QR escuro sobre claro, também no
+          // dark mode, senão o leitor do autenticador falha.
+          return Container(
+            width: size,
+            height: size,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: ThemeHelpers.borderColor(context),
+              ),
+            ),
+            child: _qrBytes != null
+                ? Image.memory(
+                    _qrBytes!,
+                    fit: BoxFit.contain,
+                    gaplessPlayback: true,
+                    semanticLabel: 'QR Code 2FA',
+                  )
+                : Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Text(
+                        'QR Code indisponível. Use a chave abaixo.',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          // Fundo branco fixo: texto do tema claro.
+                          color: AppColors.text.textSecondary,
                         ),
                       ),
-              );
-            },
-          ),
-        ),
-      ],
+                    ),
+                  ),
+          );
+        },
+      ),
     );
   }
 
@@ -428,14 +545,14 @@ class _TwoFactorSetupPageState extends State<TwoFactorSetupPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _sectionTitle(
-          theme,
-          'Chave secreta',
-          'Use se não conseguir escanear o QR Code',
-          text,
-          textSec,
+        Text(
+          'Não consegue escanear? Digite esta chave no app:',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: textSec,
+            fontWeight: FontWeight.w600,
+          ),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 8),
         if (_loading)
           const SkeletonBox(height: 48, borderRadius: 10)
         else
@@ -444,6 +561,7 @@ class _TwoFactorSetupPageState extends State<TwoFactorSetupPage> {
             decoration: BoxDecoration(
               color: fill,
               borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: ThemeHelpers.borderLightColor(context)),
             ),
             child: Row(
               children: [
@@ -461,12 +579,24 @@ class _TwoFactorSetupPageState extends State<TwoFactorSetupPage> {
                 const SizedBox(width: 6),
                 TextButton.icon(
                   onPressed: _secret.isEmpty ? null : _copySecret,
-                  style: TextButton.styleFrom(foregroundColor: brand),
+                  style: TextButton.styleFrom(
+                    foregroundColor: _copied
+                        ? (isDark
+                              ? AppColors.status.successDarkMode
+                              : AppColors.status.success)
+                        : brand,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    minimumSize: const Size(0, 40),
+                  ),
                   icon: Icon(
                     _copied ? Icons.check_rounded : Icons.copy_rounded,
                     size: 18,
                   ),
-                  label: Text(_copied ? 'Copiado!' : 'Copiar'),
+                  label: Text(
+                    _copied ? 'Copiada' : 'Copiar',
+                    maxLines: 1,
+                    softWrap: false,
+                  ),
                 ),
               ],
             ),
@@ -477,74 +607,39 @@ class _TwoFactorSetupPageState extends State<TwoFactorSetupPage> {
 
   Widget _buildCodeField(
     ThemeData theme,
-    Color text,
     Color textSec,
     Color brand,
     bool isDark,
   ) {
-    final fill = isDark
-        ? AppColors.background.backgroundSecondaryDarkMode
-        : AppColors.background.backgroundSecondary;
     final errorColor = isDark
         ? AppColors.status.errorDarkMode
         : AppColors.status.error;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _sectionTitle(theme, 'Código TOTP', null, text, textSec),
-        const SizedBox(height: 10),
-        TextField(
+        TwoFactorCodeInput(
           controller: _codeController,
           enabled: !_loading && !_verifying,
-          keyboardType: TextInputType.number,
-          textAlign: TextAlign.center,
-          maxLength: 6,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          hasError: _error != null,
           onSubmitted: (_) => _activate(),
-          style: theme.textTheme.titleLarge?.copyWith(
-            color: text,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 8,
-          ),
-          decoration: InputDecoration(
-            hintText: '000000',
-            hintStyle: theme.textTheme.titleLarge?.copyWith(
-              color: textSec.withValues(alpha: 0.5),
-              letterSpacing: 8,
-            ),
-            counterText: '',
-            filled: true,
-            fillColor: fill,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 14,
-              vertical: 14,
-            ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide.none,
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide.none,
-            ),
-            disabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide.none,
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: brand, width: 1.5),
-            ),
-          ),
         ),
         if (_error != null) ...[
-          const SizedBox(height: 8),
-          Text(
-            _error!,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: errorColor,
-              fontWeight: FontWeight.w600,
-            ),
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.error_outline_rounded, size: 16, color: errorColor),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  _error!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: errorColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ],
@@ -562,7 +657,7 @@ class _TwoFactorSetupPageState extends State<TwoFactorSetupPage> {
       children: [
         SizedBox(
           height: 50,
-          child: ElevatedButton(
+          child: ElevatedButton.icon(
             onPressed: canActivate ? _activate : null,
             style: ElevatedButton.styleFrom(
               backgroundColor: green,
@@ -571,13 +666,25 @@ class _TwoFactorSetupPageState extends State<TwoFactorSetupPage> {
               disabledForegroundColor: Colors.white.withValues(alpha: 0.85),
               elevation: 0,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(12),
               ),
             ),
-            child: FittedBox(
+            icon: _verifying
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.lock_open_rounded, size: 20),
+            label: FittedBox(
               fit: BoxFit.scaleDown,
               child: Text(
-                _verifying ? 'Ativando e entrando...' : 'Ativar 2FA',
+                _verifying ? 'Ativando e entrando...' : 'Ativar e entrar',
+                maxLines: 1,
+                softWrap: false,
                 style: theme.textTheme.titleSmall?.copyWith(
                   color: Colors.white,
                   fontWeight: FontWeight.w800,
@@ -586,6 +693,16 @@ class _TwoFactorSetupPageState extends State<TwoFactorSetupPage> {
             ),
           ),
         ),
+        if (!canActivate && !_verifying && !_loading) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Digite os 6 dígitos para liberar a ativação.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+            ),
+          ),
+        ],
         const SizedBox(height: 10),
         SizedBox(
           height: 46,
@@ -595,10 +712,10 @@ class _TwoFactorSetupPageState extends State<TwoFactorSetupPage> {
               foregroundColor: ThemeHelpers.textColor(context),
               side: BorderSide(color: ThemeHelpers.borderColor(context)),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(12),
               ),
             ),
-            child: const Text('Voltar'),
+            child: const Text('Voltar para o login'),
           ),
         ),
       ],
@@ -610,35 +727,52 @@ class _TwoFactorSetupPageState extends State<TwoFactorSetupPage> {
     Color text,
     Color textSec,
     Color brand,
+    bool isDark,
   ) {
+    final errorColor = isDark
+        ? AppColors.status.errorDarkMode
+        : AppColors.status.error;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Não foi possível gerar o QR Code',
-          style: theme.textTheme.titleMedium?.copyWith(
-            color: text,
-            fontWeight: FontWeight.w800,
-          ),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.error_outline_rounded, color: errorColor, size: 22),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Não foi possível gerar o QR Code',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: text,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 6),
-        Text(
-          _loadError ?? '',
-          style: theme.textTheme.bodyMedium?.copyWith(color: textSec),
+        Padding(
+          padding: const EdgeInsets.only(left: 32),
+          child: Text(
+            _loadError ?? '',
+            style: theme.textTheme.bodyMedium?.copyWith(color: textSec),
+          ),
         ),
         const SizedBox(height: 16),
         Wrap(
           spacing: 10,
           runSpacing: 10,
           children: [
-            ElevatedButton(
+            ElevatedButton.icon(
               onPressed: _start,
               style: ElevatedButton.styleFrom(
                 backgroundColor: brand,
                 foregroundColor: Colors.white,
                 elevation: 0,
               ),
-              child: const Text('Tentar novamente'),
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Tentar de novo'),
             ),
             OutlinedButton(
               onPressed: () => Navigator.of(context).pop(),
@@ -646,38 +780,10 @@ class _TwoFactorSetupPageState extends State<TwoFactorSetupPage> {
                 foregroundColor: ThemeHelpers.textColor(context),
                 side: BorderSide(color: ThemeHelpers.borderColor(context)),
               ),
-              child: const Text('Voltar'),
+              child: const Text('Voltar para o login'),
             ),
           ],
         ),
-      ],
-    );
-  }
-
-  Widget _sectionTitle(
-    ThemeData theme,
-    String title,
-    String? subtitle,
-    Color text,
-    Color textSec,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: theme.textTheme.titleSmall?.copyWith(
-            color: text,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        if (subtitle != null) ...[
-          const SizedBox(height: 2),
-          Text(
-            subtitle,
-            style: theme.textTheme.bodySmall?.copyWith(color: textSec),
-          ),
-        ],
       ],
     );
   }

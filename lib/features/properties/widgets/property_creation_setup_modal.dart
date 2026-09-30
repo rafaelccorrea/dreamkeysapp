@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -513,35 +514,93 @@ class _PropertyCreationSetupPageState extends State<PropertyCreationSetupPage> {
 
   // ---------- Type grid ----------
 
+  /// Estilo do rótulo da pastilha de tipo (sem cor — medido no grid).
+  TextStyle? _typeLabelStyle(ThemeData theme) {
+    return theme.textTheme.labelLarge?.copyWith(
+      fontWeight: FontWeight.w800,
+      fontSize: 12.5,
+      letterSpacing: 0.1,
+      height: 1.15,
+    );
+  }
+
   Widget _typeGrid(BuildContext context) {
     final theme = Theme.of(context);
+    final labelStyle = _typeLabelStyle(theme);
+    final scaler = MediaQuery.textScalerOf(context);
+    final groups = PropertyTypeVisual.grouped();
     return LayoutBuilder(
       builder: (context, c) {
-        // Os 16 tipos do back, na ordem e com os rótulos de
-        // `PropertyTypeOptions` do web. Grade de 3 colunas no celular e 4 nas
-        // telas largas (o web usa 4 → 3 → 2); altura fixa por célula para as
-        // 16 pastilhas não esticarem o setup.
-        final crossAxisCount = c.maxWidth >= 480 ? 4 : 3;
-        return GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: crossAxisCount,
-            crossAxisSpacing: 8,
-            mainAxisSpacing: 8,
-            mainAxisExtent: 78,
-          ),
-          itemCount: PropertyType.values.length,
-          itemBuilder: (context, i) {
-            final t = PropertyType.values[i];
-            return _typeCard(
-              theme,
-              t.label,
-              PropertyTypeVisual.rounded(t),
-              _type == t,
-              () => _onTypeChanged(t),
-            );
-          },
+        const gap = 8.0;
+        // Colunas pela MAIOR PALAVRA dos 16 rótulos, medida no tamanho real
+        // (inclui a escala de texto do sistema): nenhuma palavra parte no
+        // meio ("Aparta/mento") e nenhum rótulo corta. 3 colunas no celular
+        // comum, 2 em 320dp ou com texto grande, até 4 em tela larga (o web
+        // usa 4 → 3 → 2).
+        var widestWord = 0.0;
+        for (final t in PropertyType.values) {
+          for (final w in t.label.split(' ')) {
+            final tp = TextPainter(
+              text: TextSpan(text: w, style: labelStyle),
+              textDirection: TextDirection.ltr,
+              textScaler: scaler,
+              maxLines: 1,
+            )..layout();
+            widestWord = math.max(widestWord, tp.width);
+            tp.dispose();
+          }
+        }
+        // Padding lateral 6+6 da pastilha, borda de seleção 1.6+1.6 e folga.
+        final minCell = math.max(84.0, widestWord + 12 + 3.2 + 6);
+        final cols =
+            ((c.maxWidth + gap) / (minCell + gap)).floor().clamp(2, 4);
+        // Altura acompanha a escala do texto: padding + ícone + 2 linhas.
+        final extent = 16 + 3.2 + 20 + 6 + scaler.scale(12.5) * 1.15 * 2 + 4;
+
+        // Os 16 tipos do back, na ordem de `PropertyTypeOptions` do web, em
+        // três grupos com legenda: a pessoa acha "Kitnet" em Residencial em
+        // vez de varrer 16 pastilhas iguais.
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final (i, g) in groups.indexed) ...[
+              if (i > 0) const SizedBox(height: 14),
+              Text(
+                g.$1.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11.5,
+                  letterSpacing: 0.1,
+                  color: ThemeHelpers.textSecondaryColor(context),
+                ),
+              ),
+              const SizedBox(height: 8),
+              GridView.builder(
+                shrinkWrap: true,
+                padding: EdgeInsets.zero,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: cols,
+                  crossAxisSpacing: gap,
+                  mainAxisSpacing: gap,
+                  mainAxisExtent: extent,
+                ),
+                itemCount: g.$2.length,
+                itemBuilder: (context, j) {
+                  final t = g.$2[j];
+                  return _typeCard(
+                    theme,
+                    t.label,
+                    PropertyTypeVisual.rounded(t),
+                    _type == t,
+                    () => _onTypeChanged(t),
+                  );
+                },
+              ),
+            ],
+          ],
         );
       },
     );
@@ -589,21 +648,16 @@ class _PropertyCreationSetupPageState extends State<PropertyCreationSetupPage> {
             children: [
               Icon(icon, size: 20, color: fg),
               const SizedBox(height: 6),
-              // "Sala Comercial" quebra em 2 linhas; Flexible impede estouro
-              // com fonte ampliada.
+              // "Sala Comercial" quebra em 2 linhas (a altura da célula já
+              // reserva 2 linhas na escala atual); Flexible é a rede de
+              // segurança.
               Flexible(
                 child: Text(
                   label,
                   textAlign: TextAlign.center,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: fg,
-                    fontSize: 12.5,
-                    letterSpacing: 0.1,
-                    height: 1.15,
-                  ),
+                  style: _typeLabelStyle(theme)?.copyWith(color: fg),
                 ),
               ),
             ],
@@ -1284,48 +1338,55 @@ class _PropertyCreationSetupPageState extends State<PropertyCreationSetupPage> {
               Expanded(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _heroHeader(theme, accent, isDark),
-                      const SizedBox(height: 22),
-                      _eyebrow(
-                        context,
-                        'Finalidade',
-                        trailing: _requiredTag(context),
-                      ),
-                      _hairline(context),
-                      const SizedBox(height: 14),
-                      FinalidadePicker(
-                        value: _finalidade,
-                        onChanged: (f) => setState(() => _finalidade = f),
-                      ),
-                      const SizedBox(height: 26),
-                      _gatedRest(
-                        context,
+                  // Tablet/tela larga: coluna de leitura com teto, centrada —
+                  // sem esticar pastilhas e cartões em 1000dp.
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 720),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          _eyebrow(context, 'Tipo do imóvel'),
-                          _hairline(context),
-                          const SizedBox(height: 14),
-                          _typeGrid(context),
-                          const SizedBox(height: 26),
+                          _heroHeader(theme, accent, isDark),
+                          const SizedBox(height: 22),
                           _eyebrow(
                             context,
-                            'Equipe',
+                            'Finalidade',
                             trailing: _requiredTag(context),
                           ),
                           _hairline(context),
                           const SizedBox(height: 14),
-                          _teamPicker(context),
+                          FinalidadePicker(
+                            value: _finalidade,
+                            onChanged: (f) => setState(() => _finalidade = f),
+                          ),
                           const SizedBox(height: 26),
-                          _eyebrow(context, 'Endereço'),
-                          _hairline(context),
-                          const SizedBox(height: 14),
-                          _addressModeBlock(context),
+                          _gatedRest(
+                            context,
+                            children: [
+                              _eyebrow(context, 'Tipo do imóvel'),
+                              _hairline(context),
+                              const SizedBox(height: 14),
+                              _typeGrid(context),
+                              const SizedBox(height: 26),
+                              _eyebrow(
+                                context,
+                                'Equipe',
+                                trailing: _requiredTag(context),
+                              ),
+                              _hairline(context),
+                              const SizedBox(height: 14),
+                              _teamPicker(context),
+                              const SizedBox(height: 26),
+                              _eyebrow(context, 'Endereço'),
+                              _hairline(context),
+                              const SizedBox(height: 14),
+                              _addressModeBlock(context),
+                            ],
+                          ),
+                          const SizedBox(height: 28),
                         ],
                       ),
-                      const SizedBox(height: 28),
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -1436,72 +1497,82 @@ class _PropertyCreationSetupPageState extends State<PropertyCreationSetupPage> {
             ),
           ),
         ),
-        child: Row(
-          children: [
-            Expanded(
-              child: TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                style: TextButton.styleFrom(
-                  // O tema global pinta TextButton com o vermelho da marca —
-                  // o texto já vinha cinza, mas o ripple e o estado pressionado
-                  // saíam vermelhos. "Cancelar" não é destrutivo.
-                  foregroundColor: ThemeHelpers.textSecondaryColor(context),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: Text(
-                  'Cancelar',
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: ThemeHelpers.textSecondaryColor(context),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              flex: 2,
-              child: FilledButton(
-                onPressed: _confirmEnabled ? _confirm : null,
-                style: FilledButton.styleFrom(
-                  backgroundColor: accent,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                // O rótulo explica por que o botão está apagado, em vez de só
-                // estar apagado.
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      _finalidade == null
-                          ? Icons.lock_outline_rounded
-                          : Icons.arrow_forward_rounded,
-                      size: 18,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 720),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    style: TextButton.styleFrom(
+                      // O tema global pinta TextButton com o vermelho da marca —
+                      // o texto já vinha cinza, mas o ripple e o estado pressionado
+                      // saíam vermelhos. "Cancelar" não é destrutivo.
+                      foregroundColor: ThemeHelpers.textSecondaryColor(context),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
-                    const SizedBox(width: 8),
-                    Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
                       child: Text(
-                        _finalidade == null
-                            ? 'Escolha a finalidade'
-                            : 'Continuar',
+                        'Cancelar',
                         maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        softWrap: false,
                         style: theme.textTheme.labelLarge?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          color: ThemeHelpers.textSecondaryColor(context),
                         ),
                       ),
                     ),
-                  ],
+                  ),
                 ),
-              ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 2,
+                  child: FilledButton(
+                    onPressed: _confirmEnabled ? _confirm : null,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: accent,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    // O rótulo explica por que o botão está apagado, em vez de só
+                    // estar apagado.
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          _finalidade == null
+                              ? Icons.lock_outline_rounded
+                              : Icons.arrow_forward_rounded,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            _finalidade == null
+                                ? 'Escolha a finalidade'
+                                : 'Continuar',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

@@ -1,18 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/utils/input_formatters.dart';
-import '../../../shared/widgets/custom_text_field.dart';
 import '../models/client_model.dart';
 import '../utils/client_phone_rules.dart';
 import 'client_date_field.dart';
+import 'client_form_kit.dart';
 
 /// Formulário do cônjuge — mesmos campos e regras do `SpouseForm` do web
 /// (`components/modals/SpouseForm.tsx`): nome e CPF obrigatórios (CPF com
 /// dígito verificador), telefones que não podem repetir os do cliente,
 /// dados profissionais, renda e observações.
+///
+/// Feito para morar numa folha de baixo com altura limitada: cabeçalho e
+/// botões fixos, só o miolo rola. Em tela baixa com teclado aberto os botões
+/// descem para o fim da rolagem (fixos, espremeriam os campos até sumir).
 class SpouseForm extends StatefulWidget {
   final Spouse? initialSpouse;
 
@@ -75,8 +78,10 @@ class _SpouseFormState extends State<SpouseForm> {
       _companyController.text = s.companyName ?? '';
       _jobPositionController.text = s.jobPosition ?? '';
       if (s.monthlyIncome != null) {
-        _incomeController.text =
-            'R\$ ${s.monthlyIncome!.toStringAsFixed(2).replaceAll('.', ',')}';
+        // Máscara padrão de dinheiro (`1.234,56` + prefixo "R$ " no campo).
+        _incomeController.text = CurrencyInputFormatter.format(
+          (s.monthlyIncome! * 100).round() / 100,
+        );
       }
       _notesController.text = s.notes ?? '';
       _birthDate = DateTime.tryParse(s.birthDate ?? '');
@@ -175,297 +180,286 @@ class _SpouseFormState extends State<SpouseForm> {
     setState(() => _isSaving = false);
   }
 
-  Widget _pair(Widget a, Widget b) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(child: a),
-        const SizedBox(width: 12),
-        Expanded(child: b),
-      ],
-    );
-  }
+  // ───────────────────────── Layout ─────────────────────────
 
-  Widget _sectionLabel(BuildContext context, String text) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 6, bottom: 10),
-      child: Text(
-        text.toUpperCase(),
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.1,
-            ),
-      ),
-    );
-  }
-
-  Widget _switchRow(
-    BuildContext context, {
-    required String label,
-    required bool value,
-    required ValueChanged<bool> onChanged,
-  }) {
-    final accent = AppColors.primary.primary;
-    return InkWell(
-      onTap: () => onChanged(!value),
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                label,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: ThemeHelpers.textColor(context),
-                    ),
-              ),
-            ),
-            Switch.adaptive(
-              value: value,
-              onChanged: onChanged,
-              activeThumbColor: accent,
-            ),
-          ],
+  Widget _buildHeader(BuildContext context, bool isEditing) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = clientFormAccent(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: ThemeHelpers.borderColor(context)),
         ),
       ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isEditing = widget.initialSpouse != null;
-
-    return Form(
-      key: _formKey,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  isEditing ? 'Editar cônjuge' : 'Adicionar cônjuge',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.3,
-                    color: ThemeHelpers.textColor(context),
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              margin: const EdgeInsets.only(top: 8),
+              decoration: BoxDecoration(
+                color: ThemeHelpers.borderColor(context),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 10, 8, 14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: isDark ? 0.18 : 0.10),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(Icons.people_outline, size: 20, color: accent),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        isEditing ? 'Editar cônjuge' : 'Adicionar cônjuge',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.3,
+                          color: ThemeHelpers.textColor(context),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Nome e CPF são obrigatórios. Esses dados alimentam '
+                        'os signatários das fichas.',
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: muted,
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-              IconButton(
-                tooltip: 'Fechar',
-                icon: const Icon(Icons.close_rounded),
-                onPressed: _isSaving ? null : widget.onCancel,
-              ),
-            ],
-          ),
-          Text(
-            'Esses dados alimentam os signatários das fichas.',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-              height: 1.3,
-            ),
-          ),
-          const SizedBox(height: 12),
-          _sectionLabel(context, 'Dados pessoais'),
-          CustomTextField(
-            controller: _nameController,
-            label: 'Nome completo *',
-            prefixIcon: const Icon(Icons.person_outline),
-            validator: (value) {
-              final v = value?.trim() ?? '';
-              if (v.isEmpty) return 'Nome é obrigatório';
-              if (v.length < 3) return 'Mínimo 3 caracteres';
-              return null;
-            },
-          ),
-          const SizedBox(height: 12),
-          _pair(
-            CustomTextField(
-              controller: _cpfController,
-              label: 'CPF *',
-              prefixIcon: const Icon(Icons.fingerprint_rounded),
-              keyboardType: TextInputType.number,
-              inputFormatters: [CpfInputFormatter()],
-              validator: (value) {
-                final v = value?.trim() ?? '';
-                if (v.isEmpty) return 'CPF é obrigatório';
-                if (!ClientPhoneRules.isValidCpf(v)) return 'CPF inválido';
-                return null;
-              },
-            ),
-            CustomTextField(
-              controller: _rgController,
-              label: 'RG',
-              prefixIcon: const Icon(Icons.credit_card_outlined),
-            ),
-          ),
-          const SizedBox(height: 12),
-          ClientDateField(
-            label: 'Data de nascimento',
-            value: _birthDate,
-            icon: Icons.cake_outlined,
-            lastDate: DateTime.now(),
-            initialPickerDate:
-                DateTime.now().subtract(const Duration(days: 365 * 30)),
-            onChanged: (d) => setState(() => _birthDate = d),
-          ),
-          const SizedBox(height: 12),
-          CustomTextField(
-            controller: _emailController,
-            label: 'Email',
-            prefixIcon: const Icon(Icons.email_outlined),
-            keyboardType: TextInputType.emailAddress,
-            validator: (value) {
-              final v = value?.trim() ?? '';
-              if (v.isNotEmpty && !ClientPhoneRules.isValidEmail(v)) {
-                return 'Email inválido';
-              }
-              return null;
-            },
-          ),
-          const SizedBox(height: 12),
-          _pair(
-            CustomTextField(
-              controller: _phoneController,
-              label: 'Telefone',
-              prefixIcon: const Icon(Icons.phone_outlined),
-              keyboardType: TextInputType.phone,
-              inputFormatters: [PhoneInputFormatter()],
-              validator: (_) => _duplicateError('phone'),
-            ),
-            CustomTextField(
-              controller: _whatsappController,
-              label: 'WhatsApp',
-              prefixIcon: const Icon(Icons.chat_outlined),
-              keyboardType: TextInputType.phone,
-              inputFormatters: [PhoneInputFormatter()],
-              validator: (_) => _duplicateError('whatsapp'),
-            ),
-          ),
-          const SizedBox(height: 8),
-          _sectionLabel(context, 'Dados profissionais'),
-          CustomTextField(
-            controller: _professionController,
-            label: 'Profissão',
-            hint: 'Ex: Médico, Professor...',
-            prefixIcon: const Icon(Icons.work_outline),
-          ),
-          const SizedBox(height: 12),
-          _pair(
-            CustomTextField(
-              controller: _companyController,
-              label: 'Empresa',
-              prefixIcon: const Icon(Icons.business_outlined),
-            ),
-            CustomTextField(
-              controller: _jobPositionController,
-              label: 'Cargo',
-              prefixIcon: const Icon(Icons.badge_outlined),
-            ),
-          ),
-          const SizedBox(height: 12),
-          _pair(
-            CustomTextField(
-              controller: _incomeController,
-              label: 'Renda mensal',
-              hint: 'R\$ 0,00',
-              prefixIcon: const Icon(Icons.attach_money_outlined),
-              keyboardType: TextInputType.number,
-              inputFormatters: [MoneyInputFormatter()],
-            ),
-            ClientDateField(
-              label: 'Início no trabalho',
-              value: _jobStartDate,
-              icon: Icons.event_available_outlined,
-              lastDate: DateTime.now(),
-              onChanged: (d) => setState(() => _jobStartDate = d),
-            ),
-          ),
-          const SizedBox(height: 8),
-          _switchRow(
-            context,
-            label: 'Ainda está trabalhando',
-            value: _isCurrentlyWorking,
-            onChanged: (v) => setState(() => _isCurrentlyWorking = v),
-          ),
-          _switchRow(
-            context,
-            label: 'Aposentado(a)',
-            value: _isRetired,
-            onChanged: (v) => setState(() => _isRetired = v),
-          ),
-          const SizedBox(height: 8),
-          _sectionLabel(context, 'Observações'),
-          CustomTextField(
-            controller: _notesController,
-            hint: 'Observações adicionais...',
-            prefixIcon: const Icon(Icons.notes_outlined),
-            maxLines: 3,
-          ),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
+                IconButton(
+                  tooltip: 'Fechar',
+                  icon: Icon(Icons.close_rounded, color: muted),
                   onPressed: _isSaving ? null : widget.onCancel,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: ThemeHelpers.textColor(context),
-                    side: BorderSide(color: ThemeHelpers.borderColor(context)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                  child: const Text('Cancelar'),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                flex: 2,
-                child: FilledButton.icon(
-                  onPressed: _isSaving ? null : _handleSave,
-                  icon: _isSaving
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(Icons.check_rounded, size: 18),
-                  label: Text(
-                    _isSaving
-                        ? 'Salvando…'
-                        : (isEditing ? 'Salvar cônjuge' : 'Adicionar cônjuge'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.status.success,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    elevation: 0,
-                  ),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildActions({required bool isEditing, required bool framed}) {
+    return ClientFormActionBar(
+      confirmLabel: isEditing ? 'Salvar cônjuge' : 'Adicionar cônjuge',
+      confirmIcon: Icons.check_rounded,
+      confirmColor: clientFormSuccess(context),
+      onConfirm: _handleSave,
+      onCancel: widget.onCancel,
+      busy: _isSaving,
+      framed: framed,
+      horizontalPadding: 20,
+    );
+  }
+
+  List<Widget> _buildFields() {
+    return [
+      const ClientFormBand(
+        'Dados pessoais',
+        icon: Icons.person_outline,
+        topSpacing: 16,
+      ),
+      ClientFormField(
+        controller: _nameController,
+        label: 'Nome completo',
+        isRequired: true,
+        textCapitalization: TextCapitalization.words,
+        textInputAction: TextInputAction.next,
+        validator: (value) {
+          final v = value?.trim() ?? '';
+          if (v.isEmpty) return 'Nome é obrigatório';
+          if (v.length < 3) return 'Mínimo 3 caracteres';
+          return null;
+        },
+      ),
+      const SizedBox(height: 12),
+      ClientFormRow2(
+        minColumnWidth: 140,
+        left: ClientFormField(
+          controller: _cpfController,
+          label: 'CPF',
+          isRequired: true,
+          keyboardType: TextInputType.number,
+          inputFormatters: [CpfInputFormatter()],
+          validator: (value) {
+            final v = value?.trim() ?? '';
+            if (v.isEmpty) return 'CPF é obrigatório';
+            if (!ClientPhoneRules.isValidCpf(v)) return 'CPF inválido';
+            return null;
+          },
+        ),
+        right: ClientFormField(
+          controller: _rgController,
+          label: 'RG',
+        ),
+      ),
+      const SizedBox(height: 12),
+      ClientFormField(
+        controller: _emailController,
+        label: 'E-mail',
+        keyboardType: TextInputType.emailAddress,
+        validator: (value) {
+          final v = value?.trim() ?? '';
+          if (v.isNotEmpty && !ClientPhoneRules.isValidEmail(v)) {
+            return 'E-mail inválido';
+          }
+          return null;
+        },
+      ),
+      const SizedBox(height: 12),
+      ClientFormRow2(
+        minColumnWidth: 150,
+        left: ClientFormField(
+          controller: _phoneController,
+          label: 'Telefone',
+          keyboardType: TextInputType.phone,
+          inputFormatters: [PhoneInputFormatter()],
+          validator: (_) => _duplicateError('phone'),
+        ),
+        right: ClientFormField(
+          controller: _whatsappController,
+          label: 'WhatsApp',
+          keyboardType: TextInputType.phone,
+          inputFormatters: [PhoneInputFormatter()],
+          validator: (_) => _duplicateError('whatsapp'),
+        ),
+      ),
+      const SizedBox(height: 12),
+      ClientDateField(
+        label: 'Data de nascimento',
+        value: _birthDate,
+        icon: Icons.cake_outlined,
+        lastDate: DateTime.now(),
+        initialPickerDate:
+            DateTime.now().subtract(const Duration(days: 365 * 30)),
+        pickYearFirst: true,
+        onChanged: (d) => setState(() => _birthDate = d),
+      ),
+      const ClientFormBand(
+        'Dados profissionais',
+        icon: Icons.work_outline,
+      ),
+      ClientFormField(
+        controller: _professionController,
+        label: 'Profissão',
+        hint: 'Ex.: médica, professor',
+      ),
+      const SizedBox(height: 12),
+      ClientFormRow2(
+        minColumnWidth: 120,
+        left: ClientFormField(
+          controller: _companyController,
+          label: 'Empresa',
+        ),
+        right: ClientFormField(
+          controller: _jobPositionController,
+          label: 'Cargo',
+        ),
+      ),
+      const SizedBox(height: 12),
+      ClientFormRow2(
+        minColumnWidth: 175,
+        left: ClientFormField(
+          controller: _incomeController,
+          label: 'Renda mensal',
+          hint: '0,00',
+          prefixText: 'R\$ ',
+          keyboardType: TextInputType.number,
+          inputFormatters: [CurrencyInputFormatter()],
+        ),
+        right: ClientDateField(
+          label: 'Início no trabalho',
+          value: _jobStartDate,
+          icon: Icons.event_available_outlined,
+          lastDate: DateTime.now(),
+          onChanged: (d) => setState(() => _jobStartDate = d),
+        ),
+      ),
+      const SizedBox(height: 8),
+      ClientSwitchRow(
+        icon: Icons.work_history_outlined,
+        title: 'Ainda está trabalhando',
+        value: _isCurrentlyWorking,
+        onChanged: (v) => setState(() => _isCurrentlyWorking = v),
+      ),
+      ClientSwitchRow(
+        icon: Icons.work_off_outlined,
+        title: 'Aposentado(a)',
+        value: _isRetired,
+        onChanged: (v) => setState(() => _isRetired = v),
+      ),
+      const ClientFormBand('Observações', icon: Icons.notes_outlined),
+      ClientFormField(
+        controller: _notesController,
+        label: 'Anotações',
+        hint: 'Algo importante sobre o cônjuge',
+        maxLines: 3,
+      ),
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isEditing = widget.initialSpouse != null;
+    final media = MediaQuery.of(context);
+    final keyboard = media.viewInsets.bottom;
+    final cramped = keyboard > 0 && media.size.height - keyboard < 420;
+
+    return Theme(
+      data: clientFormTheme(context),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildHeader(context, isEditing),
+            Flexible(
+              child: SingleChildScrollView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ..._buildFields(),
+                    if (cramped) ...[
+                      const SizedBox(height: 20),
+                      _buildActions(isEditing: isEditing, framed: false),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            if (!cramped) _buildActions(isEditing: isEditing, framed: true),
+          ],
+        ),
       ),
     );
   }

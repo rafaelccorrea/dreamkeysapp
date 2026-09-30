@@ -287,6 +287,7 @@ class _ProposalsFiltersSheetState extends State<_ProposalsFiltersSheet> {
           FichasFilterSection(
             accent: cUnit,
             label: 'Unidade',
+            hint: 'Unidade de venda registrada na ficha.',
             child: FichasFilterField(
               icon: Icons.storefront_outlined,
               accent: cUnit,

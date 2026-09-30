@@ -21,26 +21,24 @@ import '../../organization/services/company_admin_service.dart';
 import '../widgets/avatar_edit_modal.dart';
 import '../widgets/change_password_modal.dart';
 
-// ─── Paleta editorial do Perfil ─────────────────────────────────────────────
-// Mesmo DNA da tela de Configurações (referência): 1 cor de identidade por
-// seção, sem arco-íris. Vermelho da marca = conta/identidade; violeta =
-// aparência; índigo = segurança. Tons de apoio com significado no strip.
+// ─── Cores do Perfil (só tokens) ────────────────────────────────────────────
+// Vermelho da marca = você (o crachá e o que você muda); violeta = gestão
+// (as empresas que o administrador controla); neutro com cadeado = o que
+// não muda por aqui. Nada de arco-íris.
 Color _pBrand(bool d) =>
     d ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
-Color _pIndigo(bool d) => d ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
-Color _pViolet(bool d) => d ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
-Color _pTeal(bool d) => d ? const Color(0xFF2DD4BF) : const Color(0xFF0F766E);
+Color _pAdmin(bool d) =>
+    d ? AppColors.status.purpleDarkMode : AppColors.status.purple;
 
-/// Página de Perfil — reconstruída sobre o sistema editorial da tela de
-/// Configurações (a referência do app):
-///   • Masthead (eyebrow + headline w900 + subtítulo) sem hero-card.
-///   • Manchete de perfil (avatar editável + nome + email + meta pills).
-///   • Quick KPI strip de 4 colunas separadas por linhas finas.
-///   • Seções full-bleed com header editorial (barra tonal + eyebrow + título
-///     grande + subtítulo + hint), divisores finos e placas de ícone tom-on-tom.
-///   • **Aparência**: troca de tema do app (claro/escuro/sistema) via sheet.
-///   • Rodapé com assinatura da marca.
-/// Uma cor de identidade por seção — coerente, sem virar rainbow.
+/// Meu perfil — um crachá, não um formulário. Responde de cara: quem sou,
+/// o que posso mudar e o que não muda por aqui.
+///   • Crachá: foto (toque para trocar), nome, e-mail, cargo e empresa.
+///   • "O que você pode mudar": foto, nome e telefone, tags, senha e tema —
+///     cada linha com o valor de hoje e o caminho para mudar.
+///   • "Não muda por aqui": e-mail de acesso, cargo e empresa, com cadeado
+///     e quem altera (travado e explicado, nunca escondido).
+///   • Empresas (admin/master): logo, dados e as duas regras de acesso.
+/// Flush: linhas com filete, sem cards encapsulando seções.
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
 
@@ -147,13 +145,64 @@ class _ProfilePageState extends State<ProfilePage> {
       });
     } else {
       setState(() {
-        _companiesError = 'Erro ao carregar empresas';
+        _companiesError = 'Não deu para carregar as empresas.';
         _companiesLoading = false;
       });
     }
   }
 
+  /// Confirmação de "2FA obrigatório": diz quem fica trancado e o que fazer.
+  Future<bool> _confirmRequire2FA(String companyId) async {
+    final name = _companies
+        .where((c) => c.id == companyId)
+        .map((c) => c.name.trim())
+        .firstWhere((n) => n.isNotEmpty, orElse: () => 'esta empresa');
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: ThemeHelpers.cardBackgroundColor(ctx),
+        icon: Icon(
+          Icons.shield_outlined,
+          color: Theme.of(ctx).brightness == Brightness.dark
+              ? AppColors.status.warningDarkMode
+              : AppColors.status.warning,
+        ),
+        title: const Text('Exigir verificação em duas etapas?'),
+        content: SingleChildScrollView(
+          child: Text(
+            'Em $name, todo usuário vai precisar configurar o código de '
+            'verificação (2FA) para entrar.\n\n'
+            'Quem ainda não configurou fica trancado no próximo login até '
+            'concluir a configuração — avise a equipe antes de ligar.',
+            style: TextStyle(color: muted, height: 1.45),
+          ),
+        ),
+        actions: [
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: muted),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.status.success,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Exigir 2FA'),
+          ),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
   Future<void> _toggleCompany2FA(String companyId, bool next) async {
+    // Ligar tranca fora quem ainda não configurou o código: pede confirmação
+    // antes de gravar (o web grava direto; aqui o aviso vem primeiro).
+    if (next && !await _confirmRequire2FA(companyId)) return;
+    if (!mounted) return;
     setState(() {
       _company2FA[companyId] = next;
       _saving2FA[companyId] = true;
@@ -169,11 +218,16 @@ class _ProfilePageState extends State<ProfilePage> {
     });
     if (res.success) {
       _toast(
-        '2FA obrigatório ${next ? 'ativado' : 'desativado'} para a empresa.',
+        next
+            ? 'Verificação em duas etapas agora é obrigatória na empresa.'
+            : 'Verificação em duas etapas deixou de ser obrigatória na empresa.',
         success: true,
       );
     } else {
-      _toast(res.message ?? 'Erro ao salvar 2FA da empresa.', success: false);
+      _toast(
+        res.message ?? 'Não deu para salvar a verificação em duas etapas.',
+        success: false,
+      );
     }
   }
 
@@ -214,6 +268,16 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
     );
     if (saved == true && mounted) await _loadCompanies();
+  }
+
+  /// Abre a edição e, na volta, relê o perfil sem piscar o skeleton — o
+  /// crachá mostra o nome e o telefone novos na hora.
+  Future<void> _openEditProfile() async {
+    await Navigator.pushNamed(context, AppRoutes.profileEdit);
+    if (!mounted) return;
+    final res = await ProfileService.instance.getProfile();
+    if (!mounted || !res.success || res.data == null) return;
+    setState(() => _profile = res.data);
   }
 
   // ─── Avatar ─────────────────────────────────────────────────────────────
@@ -317,29 +381,21 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  String _joinedYear(String iso) {
-    if (iso.isEmpty) return '—';
-    try {
-      return DateFormat('yyyy', 'pt_BR').format(DateTime.parse(iso));
-    } catch (_) {
-      return '—';
-    }
-  }
-
-  String _themeShort(ThemeMode m) => switch (m) {
-    ThemeMode.light => 'Claro',
-    ThemeMode.dark => 'Escuro',
-    ThemeMode.system => 'Auto',
-  };
-
   Color _brand(BuildContext context) =>
       _pBrand(Theme.of(context).brightness == Brightness.dark);
 
   // ─── Build ──────────────────────────────────────────────────────────────
 
+  /// Tablet/landscape largo: a coluna para em [_kMaxContentWidth] e
+  /// centraliza, sem esticar as linhas.
+  EdgeInsets _pagePadding({double top = 0, double bottom = 0}) {
+    final w = MediaQuery.sizeOf(context).width;
+    final side = w > _kMaxContentWidth ? (w - _kMaxContentWidth) / 2 : 0.0;
+    return EdgeInsets.fromLTRB(side, top, side, bottom);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final brand = _brand(context);
 
     return AppScaffold(
@@ -354,16 +410,15 @@ class _ProfilePageState extends State<ProfilePage> {
         switchInCurve: Curves.easeOut,
         switchOutCurve: Curves.easeIn,
         child: _isLoading
-            ? Padding(
+            ? KeyedSubtree(
                 key: const ValueKey('loading'),
-                padding: const EdgeInsets.only(top: 4),
-                child: _buildSkeleton(context, theme, brand),
+                child: _buildSkeleton(context),
               )
             : _errorMessage != null
             ? Padding(
                 key: ValueKey<String>('e-${_errorMessage.hashCode}'),
                 padding: const EdgeInsets.all(24),
-                child: _buildErrorState(context, theme),
+                child: _buildErrorState(),
               )
             : CustomRefreshIndicator(
                 key: const ValueKey('ok'),
@@ -372,35 +427,21 @@ class _ProfilePageState extends State<ProfilePage> {
                 builder: _pullRefreshBuilder,
                 child: SingleChildScrollView(
                   physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.only(top: 4, bottom: 40),
+                  padding: _pagePadding(top: 14, bottom: 40),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _buildMasthead(context, theme, brand),
-                      const SizedBox(height: 18),
-                      _buildProfileManchete(context, theme, brand),
-                      const SizedBox(height: 14),
-                      _buildQuickStrip(context, theme, brand),
-                      const SizedBox(height: 14),
-                      _sectionSeparator(context),
-                      const SizedBox(height: 22),
-                      _buildAccountSection(context, theme, brand),
+                      _buildBadge(context, brand),
+                      _sectionBreak(context),
+                      _buildCanChangeSection(context, brand),
+                      _sectionBreak(context),
+                      _buildLockedSection(context),
                       if (_canManageCompanies) ...[
-                        const SizedBox(height: 28),
-                        _sectionSeparator(context),
-                        const SizedBox(height: 22),
-                        _buildCompaniesSection(context, theme),
+                        _sectionBreak(context),
+                        _buildCompaniesSection(context),
                       ],
-                      const SizedBox(height: 28),
-                      _sectionSeparator(context),
-                      const SizedBox(height: 22),
-                      _buildAppearanceSection(context, theme),
-                      const SizedBox(height: 28),
-                      _sectionSeparator(context),
-                      const SizedBox(height: 22),
-                      _buildSecuritySection(context, theme),
-                      const SizedBox(height: 32),
-                      _buildFooterSignature(context, theme),
+                      const SizedBox(height: 30),
+                      _buildFooterSignature(context),
                     ],
                   ),
                 ),
@@ -468,14 +509,8 @@ class _ProfilePageState extends State<ProfilePage> {
         border: Border.all(
           color: accent.withValues(alpha: isDark ? 0.45 : 0.30),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: accent.withValues(alpha: isDark ? 0.20 : 0.12),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-            spreadRadius: -6,
-          ),
-        ],
+        // Claro: só o crisp de 1px do tema (nada de sombra difusa tingida).
+        boxShadow: ThemeHelpers.cardShadow(context),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -493,6 +528,8 @@ class _ProfilePageState extends State<ProfilePage> {
           const SizedBox(width: 8),
           Text(
             label,
+            maxLines: 1,
+            softWrap: false,
             style: TextStyle(
               fontSize: 12.5,
               fontWeight: FontWeight.w800,
@@ -505,323 +542,241 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // ─── Masthead ────────────────────────────────────────────────────────────
+  // ─── Crachá — quem é você ─────────────────────────────────────────────────
 
-  Widget _buildMasthead(BuildContext context, ThemeData theme, Color brand) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                'MINHA CONTA',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: brand,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.2,
-                  fontSize: 10,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                width: 4,
-                height: 4,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: brand.withValues(alpha: 0.6),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'CONECTADO',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(
-                    context,
-                  ).withValues(alpha: 0.85),
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1.8,
-                  fontSize: 9.5,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Meu perfil',
-            style: theme.textTheme.headlineMedium?.copyWith(
-              fontWeight: FontWeight.w900,
-              letterSpacing: -0.8,
-              color: ThemeHelpers.textColor(context),
-              height: 1.0,
-              fontSize: 30,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Seus dados, aparência do app e segurança da conta. Tudo o que te identifica na plataforma, em um lugar só.',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-              height: 1.4,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ─── Manchete de perfil ───────────────────────────────────────────────────
-
-  Widget _buildProfileManchete(
-    BuildContext context,
-    ThemeData theme,
-    Color brand,
-  ) {
+  Widget _buildBadge(BuildContext context, Color brand) {
     final p = _profile!;
-    final isDark = theme.brightness == Brightness.dark;
-    final violet = _pViolet(isDark);
-    final indigo = _pIndigo(isDark);
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final company = (p.companyName ?? '').trim();
+    final since = _joinedSince(p.createdAt);
+    final name = p.name.trim();
+    // Em tela estreita a foto desce um degrau para o nome caber em 2 linhas.
+    final avatarSize = MediaQuery.sizeOf(context).width < 360 ? 72.0 : 84.0;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.symmetric(horizontal: _kPadH),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              _AvatarPlate(profile: p, onTap: _openAvatarEditor),
-              const SizedBox(width: 16),
+              _AvatarPlate(
+                profile: p,
+                size: avatarSize,
+                onTap: _openAvatarEditor,
+              ),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      p.name.isEmpty ? 'Usuário' : p.name,
+                      name.isEmpty ? 'Seu nome' : name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w900,
                         color: ThemeHelpers.textColor(context),
-                        height: 1.08,
+                        height: 1.1,
                         letterSpacing: -0.4,
-                        fontSize: 20,
+                        fontSize: 21,
                       ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 4),
-                    Row(
+                    Text(
+                      p.email,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: secondary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
                       children: [
-                        Icon(
-                          Icons.mail_outline_rounded,
-                          size: 13,
-                          color: ThemeHelpers.textSecondaryColor(context),
+                        _IdChip(
+                          icon: Icons.workspace_premium_outlined,
+                          label: _getRoleLabel(p.role),
+                          tone: brand,
                         ),
-                        const SizedBox(width: 5),
-                        Expanded(
-                          child: Text(
-                            p.email,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: ThemeHelpers.textSecondaryColor(context),
-                              fontWeight: FontWeight.w600,
-                              height: 1.2,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                        if (company.isNotEmpty)
+                          _IdChip(
+                            icon: Icons.apartment_rounded,
+                            label: company,
+                            tone: secondary,
                           ),
-                        ),
                       ],
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              _GhostIconButton(
-                icon: Icons.edit_rounded,
-                tone: brand,
-                label: 'Editar',
-                onTap: () =>
-                    Navigator.pushNamed(context, AppRoutes.profileEdit),
-              ),
             ],
           ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              _MetaPill(
-                icon: Icons.workspace_premium_outlined,
-                label: _getRoleLabel(p.role),
-                tone: violet,
-              ),
-              if ((p.companyName ?? '').trim().isNotEmpty)
-                _MetaPill(
-                  icon: Icons.apartment_rounded,
-                  label: p.companyName!.trim(),
-                  tone: indigo,
+          if (since != null) ...[
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Icon(Icons.event_available_outlined, size: 15, color: secondary),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Na plataforma desde $since',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: secondary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
-              _AvatarStatusDot(active: true),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ─── Quick KPI strip ───────────────────────────────────────────────────────
-
-  Widget _buildQuickStrip(BuildContext context, ThemeData theme, Color brand) {
-    final p = _profile!;
-    final isDark = theme.brightness == Brightness.dark;
-    final mode = ThemeService.instance.themeMode;
-
-    final items = <_QuickKpi>[
-      _QuickKpi(
-        accent: _pViolet(isDark),
-        label: 'TEMA',
-        value: _themeShort(mode),
-        sub: mode == ThemeMode.system ? 'sistema' : 'manual',
-      ),
-      _QuickKpi(
-        accent: _pIndigo(isDark),
-        label: 'CARGO',
-        value: _getRoleLabel(p.role),
-        sub: 'função',
-      ),
-      _QuickKpi(
-        accent: brand,
-        label: 'DESDE',
-        value: _joinedYear(p.createdAt),
-        sub: 'membro',
-      ),
-    ];
-
-    final divColor = ThemeHelpers.borderColor(context).withValues(alpha: 0.45);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          for (var i = 0; i < items.length; i++) ...[
-            if (i > 0) Container(width: 1, height: 44, color: divColor),
-            Expanded(child: items[i].render(context)),
+              ],
+            ),
           ],
         ],
       ),
     );
   }
 
-  // ─── Seção: CONTA & DADOS (vermelho marca) ─────────────────────────────────
+  // ─── O que você pode mudar — cada linha com o valor de hoje ─────────────
 
-  Widget _buildAccountSection(
-    BuildContext context,
-    ThemeData theme,
-    Color brand,
-  ) {
+  Widget _buildCanChangeSection(BuildContext context, Color brand) {
     final p = _profile!;
-    final hasPhone = (p.phone ?? '').trim().isNotEmpty;
-    final hasCell = (p.cellphone ?? '').trim().isNotEmpty;
-    final hasCompany = (p.companyName ?? '').trim().isNotEmpty;
+    final themeService = ThemeService.instance;
+    final hasPhoto = (p.avatar ?? '').trim().isNotEmpty;
+    final phone = (p.phone ?? '').trim();
+    final cell = (p.cellphone ?? '').trim();
 
-    String? phoneLabel;
-    String? phoneValue;
-    if (hasPhone && hasCell) {
-      phoneLabel = 'Telefone / celular';
-      phoneValue =
-          '${Masks.phone(p.phone!.trim())}  ·  ${Masks.phone(p.cellphone!.trim())}';
-    } else if (hasPhone) {
-      phoneLabel = 'Telefone';
-      phoneValue = Masks.phone(p.phone!.trim());
-    } else if (hasCell) {
-      phoneLabel = 'Celular';
-      phoneValue = Masks.phone(p.cellphone!.trim());
+    final String phoneValue;
+    if (phone.isNotEmpty && cell.isNotEmpty) {
+      phoneValue = '${Masks.phone(phone)}  ·  ${Masks.phone(cell)}';
+    } else if (phone.isNotEmpty || cell.isNotEmpty) {
+      phoneValue = Masks.phone(phone.isNotEmpty ? phone : cell);
+    } else {
+      phoneValue = 'Sem telefone cadastrado';
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _SectionHeader(
-          eyebrow: 'IDENTIDADE',
-          title: 'Conta & dados',
-          subtitle: 'Seus dados pessoais e de contato no sistema.',
+        _ProfileSectionHeader(
+          icon: Icons.edit_rounded,
+          title: 'O que você pode mudar',
+          subtitle: 'Toque na linha para mudar. Cada uma mostra como está hoje.',
           tone: brand,
         ),
-        const SizedBox(height: 16),
-        _InfoRow(
+        const SizedBox(height: 8),
+        _ChangeRow(
+          tone: brand,
+          icon: Icons.photo_camera_outlined,
+          title: 'Foto',
+          value: hasPhoto ? 'Com foto' : 'Sem foto — toque para pôr uma',
+          onTap: _openAvatarEditor,
+        ),
+        _rowDivider(context),
+        _ChangeRow(
           tone: brand,
           icon: Icons.badge_outlined,
-          label: 'Nome completo',
-          value: p.name.isEmpty ? '—' : p.name,
+          title: 'Nome e telefone',
+          value: phoneValue,
+          onTap: _openEditProfile,
         ),
         _rowDivider(context),
-        _InfoRow(
+        _ChangeRow(
           tone: brand,
-          icon: Icons.mail_outline_rounded,
-          label: 'E-mail',
-          value: p.email,
+          icon: Icons.sell_outlined,
+          title: 'Tags',
+          value: 'Como você é classificado nas listas e filtros',
+          onTap: _openEditProfile,
         ),
-        if (phoneValue != null) ...[
-          _rowDivider(context),
-          _InfoRow(
-            tone: brand,
-            icon: Icons.phone_iphone_rounded,
-            label: phoneLabel!,
-            value: phoneValue,
-          ),
-        ],
         _rowDivider(context),
-        _InfoRow(
+        _ChangeRow(
           tone: brand,
-          icon: Icons.workspace_premium_outlined,
-          label: 'Cargo / função',
-          value: _getRoleLabel(p.role),
+          icon: Icons.password_rounded,
+          title: 'Senha',
+          value: 'Pede a senha atual; sessões antigas podem ser encerradas',
+          onTap: () => ChangePasswordModal.show(context: context),
         ),
-        if (hasCompany) ...[
-          _rowDivider(context),
-          _InfoRow(
-            tone: brand,
-            icon: Icons.apartment_rounded,
-            label: 'Empresa',
-            value: p.companyName!.trim(),
-          ),
-        ],
         _rowDivider(context),
-        _NavigationRow(
+        _ChangeRow(
           tone: brand,
-          icon: Icons.edit_note_rounded,
-          title: 'Editar perfil',
-          subtitle: 'Altera nome, telefone e foto. Salva ao confirmar.',
-          trailing: Icon(
-            Icons.arrow_forward_rounded,
-            size: 18,
-            color: ThemeHelpers.textSecondaryColor(context),
-          ),
-          onTap: () => Navigator.pushNamed(context, AppRoutes.profileEdit),
+          icon: themeService.getThemeIcon(),
+          title: 'Tema do app',
+          value: themeService.getThemeName(),
+          onTap: () => _showThemeSheet(context, brand),
         ),
       ],
     );
   }
 
-  // ─── Seção: EMPRESAS (petróleo) — só admin/master ──────────────────────────
+  // ─── Não muda por aqui — travado e explicado, nunca escondido ────────────
 
-  Widget _buildCompaniesSection(BuildContext context, ThemeData theme) {
-    final tone = _pTeal(theme.brightness == Brightness.dark);
+  Widget _buildLockedSection(BuildContext context) {
+    final p = _profile!;
+    final company = (p.companyName ?? '').trim();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _ProfileSectionHeader(
+          icon: Icons.lock_outline_rounded,
+          title: 'Não muda por aqui',
+          subtitle: _canManageCompanies
+              ? 'Cargo e e-mail mudam na gestão de usuários; os dados da empresa, em Empresas.'
+              : 'Para corrigir algum destes, fale com o administrador da sua empresa.',
+          tone: ThemeHelpers.textSecondaryColor(context),
+        ),
+        const SizedBox(height: 8),
+        _LockedRow(
+          icon: Icons.mail_outline_rounded,
+          label: 'E-mail de acesso',
+          value: p.email,
+        ),
+        _rowDivider(context),
+        _LockedRow(
+          icon: Icons.workspace_premium_outlined,
+          label: 'Cargo',
+          value: _getRoleLabel(p.role),
+        ),
+        if (company.isNotEmpty) ...[
+          _rowDivider(context),
+          _LockedRow(
+            icon: Icons.apartment_rounded,
+            label: 'Empresa',
+            value: company,
+          ),
+        ],
+      ],
+    );
+  }
+
+  // ─── Empresas (violeta = gestão) — só admin/master ─────────────────────────
+
+  Widget _buildCompaniesSection(BuildContext context) {
+    final theme = Theme.of(context);
+    final tone = _pAdmin(theme.brightness == Brightness.dark);
     final secondary = ThemeHelpers.textSecondaryColor(context);
+    final n = _companies.length;
+    final appForAll = _companies
+        .where((c) => _companyAppAccess[c.id] ?? false)
+        .length;
+    final twoFactor = _companies.where((c) => _company2FA[c.id] ?? false).length;
 
     final List<Widget> body;
     if (_companiesLoading && _companies.isEmpty) {
       body = [
         for (var i = 0; i < 2; i++)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: _kPadH, vertical: 12),
             child: Row(
-              children: const [
-                SkeletonBox(width: 42, height: 42, borderRadius: 12),
-                SizedBox(width: 14),
+              children: [
+                SkeletonBox(width: 44, height: 44, borderRadius: 12),
+                SizedBox(width: 12),
                 Expanded(child: SkeletonBox(height: 38, borderRadius: 10)),
               ],
             ),
@@ -830,7 +785,7 @@ class _ProfilePageState extends State<ProfilePage> {
     } else if (_companiesError != null && _companies.isEmpty) {
       body = [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+          padding: const EdgeInsets.fromLTRB(_kPadH, 6, 6, 6),
           child: Row(
             children: [
               Expanded(
@@ -842,6 +797,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 ),
               ),
+              const SizedBox(width: 8),
               TextButton.icon(
                 onPressed: _loadCompanies,
                 icon: const Icon(Icons.refresh_rounded, size: 16),
@@ -855,33 +811,37 @@ class _ProfilePageState extends State<ProfilePage> {
     } else if (_companies.isEmpty) {
       body = [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: _kPadH, vertical: 6),
           child: Text(
-            'Você ainda não possui empresas cadastradas.',
-            style: theme.textTheme.bodySmall?.copyWith(color: secondary),
+            'Nenhuma empresa para administrar ainda. Quando houver, os dados e as regras de acesso de cada uma aparecem aqui.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: secondary,
+              height: 1.35,
+            ),
           ),
         ),
       ];
     } else {
       body = [];
       for (var i = 0; i < _companies.length; i++) {
-        if (i > 0) body.add(_rowDivider(context));
-        body.add(_buildCompanyBlock(context, theme, _companies[i], tone));
+        if (i > 0) body.add(_rowDivider(context, indent: _kPadH));
+        body.add(_buildCompanyBlock(context, _companies[i], tone));
       }
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _SectionHeader(
-          eyebrow: 'ADMINISTRAÇÃO',
+        _ProfileSectionHeader(
+          icon: Icons.apartment_rounded,
           title: 'Empresas',
-          subtitle:
-              'Dados, logo e regras de acesso de cada empresa. Só '
-              'administradores veem esta seção.',
+          subtitle: n == 0
+              ? 'Dados, logo e regras de acesso de cada empresa que você administra.'
+              : 'App liberado para todos em $appForAll de $n · verificação em duas etapas obrigatória em $twoFactor de $n.',
           tone: tone,
+          trailing: n == 0 ? null : '$n empresa${n == 1 ? '' : 's'}',
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 6),
         ...body,
       ],
     );
@@ -889,18 +849,18 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _buildCompanyBlock(
     BuildContext context,
-    ThemeData theme,
     CompanyAdminRecord c,
     Color tone,
   ) {
+    final theme = Theme.of(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final place = [
-      c.city,
-      c.state.toUpperCase(),
-    ].where((s) => s.trim().isNotEmpty).join('/');
+      c.city.trim(),
+      c.state.trim().toUpperCase(),
+    ].where((s) => s.isNotEmpty).join('/');
     final meta = [
-      if (c.cnpj.isNotEmpty) 'CNPJ ${c.cnpj}',
-      if (place.isNotEmpty) place,
+      if (c.isMatrix) 'Matriz',
+      if (c.cnpj.trim().isNotEmpty) 'CNPJ ${c.cnpj.trim()}',
     ].join('  ·  ');
     final initials = c.name
         .trim()
@@ -911,52 +871,21 @@ class _ProfilePageState extends State<ProfilePage> {
         .join();
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 8, 8),
+      padding: const EdgeInsets.fromLTRB(_kPadH, 12, 4, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              Container(
-                width: 42,
-                height: 42,
-                clipBehavior: Clip.antiAlias,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  color: tone.withValues(alpha: 0.12),
-                  border: Border.all(color: tone.withValues(alpha: 0.35)),
-                ),
-                alignment: Alignment.center,
-                child: (c.logoUrl ?? '').isNotEmpty
-                    ? Image.network(
-                        c.logoUrl!,
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, _, _) => Text(
-                          initials,
-                          style: TextStyle(
-                            color: tone,
-                            fontWeight: FontWeight.w900,
-                            fontSize: 14,
-                          ),
-                        ),
-                      )
-                    : Text(
-                        initials.isEmpty ? '—' : initials,
-                        style: TextStyle(
-                          color: tone,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 14,
-                        ),
-                      ),
-              ),
-              const SizedBox(width: 14),
+              _CompanyLogo(url: c.logoUrl, initials: initials, tone: tone),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      c.name.isEmpty ? '—' : c.name,
+                      c.name.trim().isEmpty ? 'Empresa sem nome' : c.name.trim(),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleSmall?.copyWith(
@@ -967,15 +896,27 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
                     ),
                     if (meta.isNotEmpty) ...[
-                      const SizedBox(height: 3),
+                      const SizedBox(height: 2),
                       Text(
                         meta,
-                        maxLines: 2,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: secondary,
-                          fontWeight: FontWeight.w500,
-                          height: 1.3,
+                          fontWeight: FontWeight.w600,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                    if (place.isNotEmpty) ...[
+                      const SizedBox(height: 1),
+                      Text(
+                        place,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: secondary,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ],
@@ -994,9 +935,7 @@ class _ProfilePageState extends State<ProfilePage> {
             tone: tone,
             icon: Icons.smartphone_rounded,
             title: 'App liberado para todos',
-            subtitle:
-                'Todos os colaboradores acessam o app, ignorando o acesso '
-                'individual.',
+            subtitle: 'Todo colaborador entra no app, sem liberação individual.',
             value: _companyAppAccess[c.id] ?? false,
             saving: _savingAppAccess[c.id] ?? false,
             onChanged: (v) => _toggleCompanyAppAccess(c.id, v),
@@ -1004,8 +943,9 @@ class _ProfilePageState extends State<ProfilePage> {
           _CompanySwitchRow(
             tone: tone,
             icon: Icons.verified_user_outlined,
-            title: '2FA obrigatório (TOTP)',
-            subtitle: 'Todos precisam configurar o 2FA antes de entrar.',
+            title: 'Verificação em duas etapas',
+            subtitle:
+                'Obrigatória: cada um configura o código (2FA) antes de entrar.',
             value: _company2FA[c.id] ?? false,
             saving: _saving2FA[c.id] ?? false,
             onChanged: (v) => _toggleCompany2FA(c.id, v),
@@ -1015,81 +955,17 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // ─── Seção: APARÊNCIA (violeta) — troca de tema ────────────────────────────
-
-  Widget _buildAppearanceSection(BuildContext context, ThemeData theme) {
-    final tone = _pViolet(theme.brightness == Brightness.dark);
-    final themeService = ThemeService.instance;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _SectionHeader(
-          eyebrow: 'COMO VOCÊ VÊ',
-          title: 'Aparência',
-          subtitle: 'Tema visual do app — claro, escuro ou seguindo o sistema.',
-          tone: tone,
-        ),
-        const SizedBox(height: 16),
-        _NavigationRow(
-          tone: tone,
-          icon: themeService.getThemeIcon(),
-          title: 'Tema do app',
-          subtitle: 'Atualmente: ${themeService.getThemeName().toLowerCase()}',
-          trailing: _ValueChip(label: themeService.getThemeName(), tone: tone),
-          onTap: () => _showThemeSheet(context, tone),
-        ),
-      ],
-    );
-  }
-
-  // ─── Seção: SEGURANÇA & PRIVACIDADE (índigo) ───────────────────────────────
-
-  Widget _buildSecuritySection(BuildContext context, ThemeData theme) {
-    final tone = _pIndigo(theme.brightness == Brightness.dark);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _SectionHeader(
-          eyebrow: 'ACESSO & PRIVACIDADE',
-          title: 'Segurança',
-          subtitle: 'Gerencie a senha da sua conta.',
-          tone: tone,
-        ),
-        const SizedBox(height: 16),
-        _NavigationRow(
-          tone: tone,
-          icon: Icons.lock_outline_rounded,
-          title: 'Alterar senha',
-          subtitle: 'Fluxo seguro · sessões antigas podem ser invalidadas.',
-          trailing: Icon(
-            Icons.chevron_right_rounded,
-            size: 22,
-            color: ThemeHelpers.textSecondaryColor(context),
-          ),
-          onTap: () => ChangePasswordModal.show(context: context),
-        ),
-      ],
-    );
-  }
-
   // ─── Rodapé — assinatura da marca ──────────────────────────────────────────
 
-  Widget _buildFooterSignature(BuildContext context, ThemeData theme) {
-    final p = _profile!;
-    final since = _joinedSince(p.createdAt);
-    final themeName = ThemeService.instance.getThemeName();
+  Widget _buildFooterSignature(BuildContext context) {
+    final theme = Theme.of(context);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+      padding: const EdgeInsets.fromLTRB(_kPadH, 0, _kPadH, 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            height: 1,
-            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
-          ),
+          _hairline(context),
           const SizedBox(height: 16),
           const BrandWordmarkLogo(height: 26, alignment: Alignment.centerLeft),
           const SizedBox(height: 6),
@@ -1102,22 +978,12 @@ class _ProfilePageState extends State<ProfilePage> {
               fontSize: 10,
             ),
           ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 14,
-            runSpacing: 6,
-            children: [
-              _FooterMeta(label: 'CARGO', value: _getRoleLabel(p.role)),
-              _FooterMeta(label: 'TEMA', value: themeName),
-              if (since != null) _FooterMeta(label: 'DESDE', value: since),
-            ],
-          ),
         ],
       ),
     );
   }
 
-  // ─── Theme sheet — troca de tema (mesma sheet da tela de Configurações) ────
+  // ─── Folha do tema — escolha única; em tela baixa rola por dentro ─────────
 
   Future<void> _showThemeSheet(BuildContext context, Color tone) async {
     final themeService = ThemeService.instance;
@@ -1127,129 +993,124 @@ class _ProfilePageState extends State<ProfilePage> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
+        final mq = MediaQuery.of(sheetContext);
+        final theme = Theme.of(sheetContext);
+        final secondary = ThemeHelpers.textSecondaryColor(sheetContext);
         return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.paddingOf(sheetContext).bottom,
-          ),
-          child: Container(
-            decoration: BoxDecoration(
-              color: ThemeHelpers.cardBackgroundColor(sheetContext),
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(22),
-              ),
-              border: Border(
-                top: BorderSide(
-                  color: tone.withValues(alpha: 0.35),
-                  width: 1.2,
+          padding: EdgeInsets.only(bottom: mq.padding.bottom),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: mq.size.height * 0.88),
+            child: Container(
+              decoration: BoxDecoration(
+                color: ThemeHelpers.cardBackgroundColor(sheetContext),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(22),
+                ),
+                border: Border(
+                  top: BorderSide(color: ThemeHelpers.borderColor(sheetContext)),
                 ),
               ),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 10),
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: ThemeHelpers.textSecondaryColor(
-                        sheetContext,
-                      ).withValues(alpha: 0.35),
-                      borderRadius: BorderRadius.circular(99),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: 10),
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: secondary.withValues(alpha: 0.35),
+                        borderRadius: BorderRadius.circular(99),
+                      ),
                     ),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 12, 0),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'APARÊNCIA',
-                              style: Theme.of(sheetContext).textTheme.labelSmall
-                                  ?.copyWith(
-                                    color: tone,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: 2.0,
-                                    fontSize: 10,
-                                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(_kPadH, 10, 6, 0),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Tema do app',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.5,
+                              color: ThemeHelpers.textColor(sheetContext),
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Tema do app',
-                              style: Theme.of(sheetContext)
-                                  .textTheme
-                                  .headlineSmall
-                                  ?.copyWith(
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: -0.6,
-                                    color: ThemeHelpers.textColor(sheetContext),
-                                    height: 1.05,
-                                  ),
-                            ),
-                          ],
+                          ),
                         ),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.pop(sheetContext),
-                        icon: const Icon(Icons.close_rounded),
-                      ),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 6),
-                  child: Text(
-                    'Escolhe como queres ver o app. Pode mudar a qualquer momento.',
-                    style: Theme.of(sheetContext).textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(sheetContext),
-                      height: 1.35,
+                        IconButton(
+                          tooltip: 'Fechar',
+                          onPressed: () => Navigator.pop(sheetContext),
+                          icon: Icon(Icons.close_rounded, color: secondary),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                const SizedBox(height: 6),
-                _themeOptionTile(
-                  sheetContext,
-                  tone,
-                  ThemeMode.light,
-                  'Claro',
-                  'Melhor em ambientes luminosos e durante o dia.',
-                  Icons.light_mode_rounded,
-                  themeService,
-                ),
-                _themeOptionTile(
-                  sheetContext,
-                  tone,
-                  ThemeMode.dark,
-                  'Escuro',
-                  'Menos cansaço visual à noite, contraste reduzido.',
-                  Icons.dark_mode_rounded,
-                  themeService,
-                ),
-                _themeOptionTile(
-                  sheetContext,
-                  tone,
-                  ThemeMode.system,
-                  'Sistema',
-                  'Segue automaticamente o tema do telemóvel.',
-                  Icons.brightness_auto_rounded,
-                  themeService,
-                ),
-                const SizedBox(height: 14),
-              ],
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(
+                              _kPadH,
+                              0,
+                              _kPadH,
+                              6,
+                            ),
+                            child: Text(
+                              'Escolha como quer ver o app. Dá para mudar quando quiser.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: secondary,
+                                height: 1.35,
+                              ),
+                            ),
+                          ),
+                          _themeOptionTile(
+                            sheetContext,
+                            tone,
+                            ThemeMode.light,
+                            'Claro',
+                            'Fundo branco. Melhor de dia e em lugar claro.',
+                            Icons.light_mode_rounded,
+                            themeService,
+                          ),
+                          _themeOptionTile(
+                            sheetContext,
+                            tone,
+                            ThemeMode.dark,
+                            'Escuro',
+                            'Fundo grafite. Cansa menos a vista à noite.',
+                            Icons.dark_mode_rounded,
+                            themeService,
+                          ),
+                          _themeOptionTile(
+                            sheetContext,
+                            tone,
+                            ThemeMode.system,
+                            'Sistema',
+                            'Acompanha o tema do celular.',
+                            Icons.brightness_auto_rounded,
+                            themeService,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         );
       },
     );
 
-    // Atualiza chip/KPI de tema caso a seleção não dispare rebuild global.
+    // Atualiza a linha do tema caso a seleção não dispare rebuild global.
     if (mounted) setState(() {});
   }
 
@@ -1264,6 +1125,7 @@ class _ProfilePageState extends State<ProfilePage> {
   ) {
     final selected = themeService.themeMode == mode;
     final theme = Theme.of(sheetContext);
+    final secondary = ThemeHelpers.textSecondaryColor(sheetContext);
 
     return InkWell(
       onTap: () async {
@@ -1271,22 +1133,10 @@ class _ProfilePageState extends State<ProfilePage> {
         if (sheetContext.mounted) Navigator.pop(sheetContext);
       },
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: _kPadH, vertical: 12),
         child: Row(
           children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: tone.withValues(alpha: selected ? 0.18 : 0.1),
-                border: Border.all(
-                  color: tone.withValues(alpha: selected ? 0.5 : 0.25),
-                ),
-              ),
-              alignment: Alignment.center,
-              child: Icon(icon, color: tone, size: 20),
-            ),
+            _ToneIconPlate(tone: tone, icon: icon, active: selected),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
@@ -1295,7 +1145,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   Text(
                     title,
                     style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w900,
+                      fontWeight: FontWeight.w800,
                       color: ThemeHelpers.textColor(sheetContext),
                       letterSpacing: -0.2,
                     ),
@@ -1304,7 +1154,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   Text(
                     subtitle,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(sheetContext),
+                      color: secondary,
                       height: 1.3,
                     ),
                   ),
@@ -1313,11 +1163,11 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
             const SizedBox(width: 8),
             Icon(
-              selected ? Icons.check_circle_rounded : Icons.circle_outlined,
-              color: selected
-                  ? tone
-                  : ThemeHelpers.textSecondaryColor(sheetContext),
-              size: 24,
+              selected
+                  ? Icons.radio_button_checked_rounded
+                  : Icons.radio_button_unchecked_rounded,
+              color: selected ? tone : secondary,
+              size: 22,
             ),
           ],
         ),
@@ -1327,143 +1177,143 @@ class _ProfilePageState extends State<ProfilePage> {
 
   // ─── Helpers de layout ─────────────────────────────────────────────────────
 
-  Widget _rowDivider(BuildContext context) {
+  /// Filete entre linhas — começa onde começa o texto (placa sem corte).
+  Widget _rowDivider(BuildContext context, {double indent = _kRowTextInset}) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: EdgeInsets.only(left: indent, right: _kPadH),
       child: Divider(
         height: 1,
         thickness: 0.5,
-        color: ThemeHelpers.borderColor(context).withValues(alpha: 0.4),
+        color: ThemeHelpers.borderColor(context).withValues(alpha: 0.7),
       ),
     );
   }
 
-  Widget _sectionSeparator(BuildContext context) {
+  Widget _hairline(BuildContext context) {
     return Container(
       height: 1,
-      color: ThemeHelpers.borderColor(context).withValues(alpha: 0.3),
+      color: ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
+    );
+  }
+
+  Widget _sectionBreak(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 22),
+      child: _hairline(context),
     );
   }
 
   // ─── Skeleton / Error ───────────────────────────────────────────────────
 
-  Widget _buildSkeleton(BuildContext context, ThemeData theme, Color brand) {
+  /// Espelha a tela real: crachá, e duas seções de linhas com placa.
+  Widget _buildSkeleton(BuildContext context) {
+    final hair = ThemeHelpers.borderColor(context).withValues(alpha: 0.3);
+
+    Widget header() => const Padding(
+      padding: EdgeInsets.symmetric(horizontal: _kPadH),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SkeletonBox(width: 30, height: 30, borderRadius: 15),
+          SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SkeletonText(width: 170, height: 17),
+                SizedBox(height: 6),
+                SkeletonText(width: 230, height: 11),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    Widget row() => const Padding(
+      padding: EdgeInsets.symmetric(horizontal: _kPadH, vertical: 12),
+      child: Row(
+        children: [
+          SkeletonBox(width: 40, height: 40, borderRadius: 12),
+          SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SkeletonText(width: 110, height: 13),
+                SizedBox(height: 6),
+                SkeletonText(width: 170, height: 11),
+              ],
+            ),
+          ),
+          SizedBox(width: 10),
+          SkeletonBox(width: 14, height: 14, borderRadius: 4),
+        ],
+      ),
+    );
+
+    Widget divider() => Padding(
+      padding: const EdgeInsets.only(left: _kRowTextInset, right: _kPadH),
+      child: Container(height: 1, color: hair),
+    );
+
     return SingleChildScrollView(
-      padding: const EdgeInsets.only(top: 4, bottom: 16),
+      physics: const NeverScrollableScrollPhysics(),
+      padding: _pagePadding(top: 14, bottom: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                SkeletonText(width: 90, height: 11),
-                SizedBox(height: 12),
-                SkeletonText(width: 200, height: 28),
-                SizedBox(height: 10),
-                SkeletonText(width: 280, height: 14),
-              ],
-            ),
-          ),
-          const SizedBox(height: 22),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: _kPadH),
             child: Row(
               children: [
-                SkeletonBox(width: 88, height: 88, borderRadius: 44),
-                const SizedBox(width: 16),
+                SkeletonBox(width: 84, height: 84, borderRadius: 42),
+                SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
-                      SkeletonText(width: 170, height: 18),
+                    children: [
+                      SkeletonText(width: 170, height: 20),
                       SizedBox(height: 8),
-                      SkeletonText(width: 210, height: 12),
+                      SkeletonText(width: 190, height: 11),
                       SizedBox(height: 12),
-                      SkeletonText(width: 120, height: 12),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          SkeletonBox(width: 76, height: 24, borderRadius: 999),
+                          SkeletonBox(width: 92, height: 24, borderRadius: 999),
+                        ],
+                      ),
                     ],
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 26),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              children: List.generate(
-                4,
-                (i) => Expanded(
-                  child: Column(
-                    children: const [
-                      SkeletonText(width: 40, height: 22),
-                      SizedBox(height: 6),
-                      SkeletonText(width: 50, height: 9),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          const SizedBox(height: 16),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: _kPadH),
+            child: SkeletonText(width: 180, height: 11),
           ),
-          const SizedBox(height: 30),
-          for (var s = 0; s < 3; s++) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  SkeletonText(width: 70, height: 10),
-                  SizedBox(height: 8),
-                  SkeletonText(width: 160, height: 22),
-                  SizedBox(height: 6),
-                  SkeletonText(width: 240, height: 12),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            for (var i = 0; i < 2; i++) ...[
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
-                ),
-                child: Row(
-                  children: [
-                    SkeletonBox(width: 42, height: 42, borderRadius: 12),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          SkeletonText(width: 120, height: 13),
-                          SizedBox(height: 6),
-                          SkeletonText(width: 200, height: 11),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (i < 1)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Divider(
-                    height: 1,
-                    color: ThemeHelpers.borderColor(
-                      context,
-                    ).withValues(alpha: 0.3),
-                  ),
-                ),
-            ],
-            const SizedBox(height: 22),
-          ],
+          const SizedBox(height: 22),
+          Container(height: 1, color: hair),
+          const SizedBox(height: 22),
+          header(),
+          const SizedBox(height: 8),
+          for (var i = 0; i < 5; i++) ...[if (i > 0) divider(), row()],
+          const SizedBox(height: 22),
+          Container(height: 1, color: hair),
+          const SizedBox(height: 22),
+          header(),
+          const SizedBox(height: 8),
+          for (var i = 0; i < 3; i++) ...[if (i > 0) divider(), row()],
         ],
       ),
     );
   }
 
-  Widget _buildErrorState(BuildContext context, ThemeData theme) {
+  Widget _buildErrorState() {
     // Exceção solta traz seu próprio diagnóstico; falha de API vem da resposta.
     final cause = _errorCause;
     if (cause != null) {
@@ -1479,173 +1329,133 @@ class _ProfilePageState extends State<ProfilePage> {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// COMPONENTES INTERNOS — sistema editorial (mesmo DNA da tela de Configurações)
+// COMPONENTES INTERNOS — crachá e linhas flush
 // ════════════════════════════════════════════════════════════════════════
 
-/// Cabeçalho editorial de seção. Barra tonal + eyebrow uppercase colorido +
-/// título w900 grande + subtítulo opcional + hint à direita.
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({
-    required this.eyebrow,
+/// Margem lateral da tela (gramática flush do app).
+const double _kPadH = 16;
+
+/// Onde começa o texto das linhas com placa (16 + placa 40 + 14).
+const double _kRowTextInset = 70;
+
+/// Largura máxima da coluna em tela larga.
+const double _kMaxContentWidth = 720;
+
+/// Cabeçalho de seção do Perfil — disco com o ícone do assunto (lápis = você
+/// muda, cadeado = não muda por aqui), título, explicação curta e contagem.
+class _ProfileSectionHeader extends StatelessWidget {
+  const _ProfileSectionHeader({
+    required this.icon,
     required this.title,
     required this.tone,
     this.subtitle,
+    this.trailing,
   });
 
-  final String eyebrow;
+  final IconData icon;
   final String title;
   final String? subtitle;
+  final String? trailing;
   final Color tone;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.symmetric(horizontal: _kPadH),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: tone.withValues(alpha: 0.12),
+              border: Border.all(color: tone.withValues(alpha: 0.3)),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 15, color: tone),
+          ),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 18,
-                      height: 2,
-                      decoration: BoxDecoration(
-                        color: tone,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Text(
+                    title,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.4,
+                      height: 1.2,
+                      fontSize: 18,
+                      color: ThemeHelpers.textColor(context),
                     ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        eyebrow,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: tone,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.8,
-                          fontSize: 10,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  title,
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.6,
-                    color: ThemeHelpers.textColor(context),
-                    height: 1.05,
-                    fontSize: 22,
                   ),
                 ),
                 if (subtitle != null) ...[
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 3),
                   Text(
                     subtitle!,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: ThemeHelpers.textSecondaryColor(context),
                       fontWeight: FontWeight.w500,
-                      height: 1.3,
+                      height: 1.35,
                     ),
                   ),
                 ],
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Linha de informação (read-only) — placa de ícone tom-on-tom + label
-/// uppercase pequeno + valor selecionável.
-class _InfoRow extends StatelessWidget {
-  const _InfoRow({
-    required this.tone,
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-
-  final Color tone;
-  final IconData icon;
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          _ToneIconPlate(tone: tone, icon: icon, active: true),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  label.toUpperCase(),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    fontWeight: FontWeight.w700,
-                    fontSize: 10,
-                    letterSpacing: 0.8,
+          if (trailing != null) ...[
+            const SizedBox(width: 10),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 120),
+              child: Padding(
+                padding: const EdgeInsets.only(top: 5),
+                child: Text(
+                  trailing!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: tone,
+                    fontWeight: FontWeight.w900,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
-                const SizedBox(height: 3),
-                SelectableText(
-                  value,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: ThemeHelpers.textColor(context),
-                    fontWeight: FontWeight.w700,
-                    height: 1.25,
-                    fontSize: 14,
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
   }
 }
 
-/// Row de navegação — tap leva para outra tela / abre sheet. Sem moldura.
-class _NavigationRow extends StatelessWidget {
-  const _NavigationRow({
+/// Linha "você pode mudar" — o que é, como está hoje e a seta de ir mudar.
+class _ChangeRow extends StatelessWidget {
+  const _ChangeRow({
     required this.tone,
     required this.icon,
     required this.title,
-    required this.subtitle,
-    required this.trailing,
+    required this.value,
     required this.onTap,
   });
 
   final Color tone;
   final IconData icon;
   final String title;
-  final String subtitle;
-  final Widget trailing;
-  final VoidCallback? onTap;
+  final String value;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -1653,7 +1463,7 @@ class _NavigationRow extends StatelessWidget {
         splashColor: tone.withValues(alpha: 0.10),
         highlightColor: tone.withValues(alpha: 0.05),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          padding: const EdgeInsets.fromLTRB(_kPadH, 12, 10, 12),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -1667,26 +1477,28 @@ class _NavigationRow extends StatelessWidget {
                     Text(
                       title,
                       style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w800,
                         color: ThemeHelpers.textColor(context),
                         letterSpacing: -0.2,
                         height: 1.2,
                       ),
                     ),
-                    const SizedBox(height: 3),
+                    const SizedBox(height: 2),
                     Text(
-                      subtitle,
+                      value,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: ThemeHelpers.textSecondaryColor(context),
-                        height: 1.35,
-                        fontWeight: FontWeight.w500,
+                        color: secondary,
+                        height: 1.3,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 10),
-              trailing,
+              const SizedBox(width: 6),
+              Icon(Icons.chevron_right_rounded, size: 22, color: secondary),
             ],
           ),
         ),
@@ -1695,8 +1507,71 @@ class _NavigationRow extends StatelessWidget {
   }
 }
 
-/// Linha de configuração da empresa com switch — flush, sem moldura. Enquanto
-/// grava, o switch dá lugar a um indicador discreto (sem trocar o layout).
+/// Linha "não muda por aqui" — rótulo pequeno em cima, valor em destaque,
+/// cadeado à direita. Placa apagada: é dado, não ação.
+class _LockedRow extends StatelessWidget {
+  const _LockedRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(_kPadH, 12, _kPadH, 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          _ToneIconPlate(tone: secondary, icon: icon, active: false),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: secondary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: ThemeHelpers.textColor(context),
+                    fontWeight: FontWeight.w800,
+                    height: 1.25,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Tooltip(
+            message: 'Não muda por aqui',
+            child: Icon(Icons.lock_outline_rounded, size: 17, color: secondary),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Regra da empresa com interruptor — flush, sem moldura. Enquanto grava,
+/// o interruptor fica travado e a linha diz "Salvando…" (sem trocar layout).
 class _CompanySwitchRow extends StatelessWidget {
   const _CompanySwitchRow({
     required this.tone,
@@ -1724,18 +1599,18 @@ class _CompanySwitchRow extends StatelessWidget {
       onTap: saving ? null : () => onChanged(!value),
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(0, 6, 4, 6),
+        padding: const EdgeInsets.fromLTRB(0, 6, 8, 6),
         child: Row(
           children: [
             SizedBox(
-              width: 42,
+              width: 44,
               child: Icon(
                 icon,
                 size: 18,
                 color: value ? tone : secondary.withValues(alpha: 0.8),
               ),
             ),
-            const SizedBox(width: 14),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1751,9 +1626,10 @@ class _CompanySwitchRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    subtitle,
+                    saving ? 'Salvando…' : subtitle,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: secondary,
+                      color: saving ? tone : secondary,
+                      fontWeight: saving ? FontWeight.w700 : null,
                       height: 1.3,
                       fontSize: 11.5,
                     ),
@@ -1762,25 +1638,10 @@ class _CompanySwitchRow extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            SizedBox(
-              width: 56,
-              height: 36,
-              child: Center(
-                child: saving
-                    ? SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: tone,
-                        ),
-                      )
-                    : Switch.adaptive(
-                        value: value,
-                        activeTrackColor: tone,
-                        onChanged: onChanged,
-                      ),
-              ),
+            Switch.adaptive(
+              value: value,
+              activeTrackColor: tone,
+              onChanged: saving ? null : onChanged,
             ),
           ],
         ),
@@ -1789,7 +1650,7 @@ class _CompanySwitchRow extends StatelessWidget {
   }
 }
 
-/// Placa de ícone tom-on-tom — mantém a identidade da seção.
+/// Placa de ícone tom-sobre-tom, chapada (sem degradê).
 class _ToneIconPlate extends StatelessWidget {
   const _ToneIconPlate({
     required this.tone,
@@ -1804,185 +1665,27 @@ class _ToneIconPlate extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 42,
-      height: 42,
+      width: 40,
+      height: 40,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
-        gradient: LinearGradient(
-          colors: [
-            tone.withValues(alpha: active ? 0.22 : 0.12),
-            tone.withValues(alpha: active ? 0.08 : 0.04),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        border: Border.all(color: tone.withValues(alpha: active ? 0.42 : 0.22)),
+        color: tone.withValues(alpha: active ? 0.12 : 0.07),
+        border: Border.all(color: tone.withValues(alpha: active ? 0.3 : 0.2)),
       ),
       alignment: Alignment.center,
       child: Icon(
         icon,
-        color: tone.withValues(alpha: active ? 1.0 : 0.6),
+        color: tone.withValues(alpha: active ? 1.0 : 0.85),
         size: 20,
       ),
     );
   }
 }
 
-/// Chip de valor à direita de uma navigation row (ex. "Escuro").
-class _ValueChip extends StatelessWidget {
-  const _ValueChip({required this.label, required this.tone});
-
-  final String label;
-  final Color tone;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        color: tone.withValues(alpha: 0.14),
-        border: Border.all(color: tone.withValues(alpha: 0.35)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w900,
-          color: tone,
-          letterSpacing: 0.2,
-        ),
-      ),
-    );
-  }
-}
-
-/// Coluna de KPI rápida — valor grande em accent + label uppercase +
-/// sub-rótulo sutil + traço accent fino.
-class _QuickKpi {
-  const _QuickKpi({
-    required this.accent,
-    required this.label,
-    required this.value,
-    required this.sub,
-  });
-
-  final Color accent;
-  final String label;
-  final String value;
-  final String sub;
-
-  Widget render(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              value,
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: accent,
-                letterSpacing: -0.6,
-                height: 1,
-                fontSize: 22,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            label,
-            style: theme.textTheme.labelSmall?.copyWith(
-              fontWeight: FontWeight.w900,
-              color: ThemeHelpers.textSecondaryColor(context),
-              letterSpacing: 1.4,
-              fontSize: 9.5,
-              height: 1,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 3),
-          Text(
-            sub,
-            style: theme.textTheme.labelSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-              color: ThemeHelpers.textSecondaryColor(
-                context,
-              ).withValues(alpha: 0.65),
-              letterSpacing: 0.3,
-              fontSize: 9,
-              height: 1,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 6),
-          Container(
-            height: 2,
-            width: 16,
-            decoration: BoxDecoration(
-              color: accent,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Bloco de meta no rodapé — label uppercase fino + valor compacto.
-class _FooterMeta extends StatelessWidget {
-  const _FooterMeta({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          label,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(
-              context,
-            ).withValues(alpha: 0.65),
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1.2,
-            fontSize: 9,
-          ),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          value,
-          style: theme.textTheme.labelMedium?.copyWith(
-            color: ThemeHelpers.textColor(context).withValues(alpha: 0.85),
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.2,
-            fontSize: 11,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Pill outline simples — ícone + label numa única cor.
-class _MetaPill extends StatelessWidget {
-  const _MetaPill({
-    required this.icon,
-    required this.label,
-    required this.tone,
-  });
+/// Carimbo de informação do crachá (cargo, empresa) — em contorno, nunca
+/// chapa cinza; nome longo de empresa corta com reticências.
+class _IdChip extends StatelessWidget {
+  const _IdChip({required this.icon, required this.label, required this.tone});
 
   final IconData icon;
   final String label;
@@ -1990,13 +1693,11 @@ class _MetaPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
-        color: tone.withValues(alpha: isDark ? 0.14 : 0.08),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: tone.withValues(alpha: isDark ? 0.30 : 0.22)),
+        border: Border.all(color: tone.withValues(alpha: 0.4)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -2006,15 +1707,15 @@ class _MetaPill extends StatelessWidget {
           Flexible(
             child: Text(
               label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: tone,
                 fontWeight: FontWeight.w800,
-                fontSize: 11,
-                letterSpacing: 0.15,
-                height: 1,
+                fontSize: 11.5,
+                letterSpacing: 0.1,
+                height: 1.1,
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
@@ -2023,88 +1724,76 @@ class _MetaPill extends StatelessWidget {
   }
 }
 
-/// Atalho de edição da manchete — pill tonal com rótulo. O círculo oco
-/// anterior ("só um lápis") lia como decoração; com plate tom-sobre-tom,
-/// rótulo e splash, vira ação inequívoca sem pesar a manchete.
-class _GhostIconButton extends StatelessWidget {
-  const _GhostIconButton({
-    required this.icon,
+/// Logo da empresa numa caixa de tamanho fixo (44) — a logo fica sobre o
+/// fundo do card (não tinge marca de terceiro); sem logo, as iniciais.
+class _CompanyLogo extends StatelessWidget {
+  const _CompanyLogo({
+    required this.url,
+    required this.initials,
     required this.tone,
-    required this.onTap,
-    this.label,
   });
 
-  final IconData icon;
+  final String? url;
+  final String initials;
   final Color tone;
-  final VoidCallback onTap;
-  final String? label;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    return Semantics(
-      button: true,
-      label: label ?? 'Editar',
-      child: Material(
-        color: tone.withValues(alpha: isDark ? 0.14 : 0.09),
-        shape: StadiumBorder(
-          side: BorderSide(color: tone.withValues(alpha: 0.32)),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          splashColor: tone.withValues(alpha: 0.14),
-          highlightColor: tone.withValues(alpha: 0.08),
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: label != null ? 12 : 10,
-              vertical: 8,
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, color: tone, size: 15),
-                if (label != null) ...[
-                  const SizedBox(width: 6),
-                  Text(
-                    label!,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: tone,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 11.5,
-                      letterSpacing: 0.3,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
+    final hasLogo = (url ?? '').isNotEmpty;
+    final fallback = Text(
+      initials.isEmpty ? '·' : initials,
+      style: TextStyle(color: tone, fontWeight: FontWeight.w900, fontSize: 14),
+    );
+    return Container(
+      width: 44,
+      height: 44,
+      clipBehavior: Clip.antiAlias,
+      padding: hasLogo ? const EdgeInsets.all(4) : EdgeInsets.zero,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        color: hasLogo
+            ? ThemeHelpers.cardBackgroundColor(context)
+            : tone.withValues(alpha: 0.12),
+        border: Border.all(
+          color: hasLogo
+              ? ThemeHelpers.borderColor(context)
+              : tone.withValues(alpha: 0.32),
         ),
       ),
+      alignment: Alignment.center,
+      child: hasLogo
+          ? Image.network(
+              url!,
+              fit: BoxFit.contain,
+              errorBuilder: (_, _, _) => fallback,
+            )
+          : fallback,
     );
   }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Avatar (com chip da câmera para editar)
+// Avatar (com selo da câmera para trocar a foto)
 // ──────────────────────────────────────────────────────────────────────────
 
 class _AvatarPlate extends StatelessWidget {
-  const _AvatarPlate({required this.profile, required this.onTap});
+  const _AvatarPlate({
+    required this.profile,
+    required this.size,
+    required this.onTap,
+  });
 
   final Profile profile;
+  final double size;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final accent = _pBrand(isDark);
-    const size = 84.0;
 
     return Semantics(
-      label: 'Alterar foto de perfil',
+      label: 'Trocar foto de perfil',
       button: true,
       child: Material(
         color: Colors.transparent,
@@ -2113,8 +1802,8 @@ class _AvatarPlate extends StatelessWidget {
           customBorder: const CircleBorder(),
           onTap: onTap,
           child: SizedBox(
-            width: size + 12,
-            height: size + 12,
+            width: size + 8,
+            height: size + 8,
             child: Stack(
               clipBehavior: Clip.none,
               children: [
@@ -2130,23 +1819,14 @@ class _AvatarPlate extends StatelessWidget {
                         color: accent.withValues(alpha: isDark ? 0.5 : 0.34),
                         width: 1.5,
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: accent.withValues(alpha: isDark ? 0.26 : 0.16),
-                          blurRadius: 18,
-                          spreadRadius: -4,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
                     ),
                     child: (profile.avatar ?? '').isNotEmpty
                         ? Image.network(
                             profile.avatar!,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) =>
-                                _fallback(context, isDark),
+                            errorBuilder: (_, _, _) => _fallback(accent),
                           )
-                        : _fallback(context, isDark),
+                        : _fallback(accent),
                   ),
                 ),
                 Positioned(
@@ -2177,90 +1857,27 @@ class _AvatarPlate extends StatelessWidget {
     );
   }
 
-  Widget _fallback(BuildContext context, bool isDark) {
+  /// Sem foto: iniciais na cor da marca sobre o mesmo tom bem claro
+  /// (chapado — sem degradê inventado).
+  Widget _fallback(Color accent) {
     final parts = profile.name.trim().split(RegExp(r'\s+'));
     final initials = parts.isEmpty || parts.first.isEmpty
         ? '?'
         : parts.length == 1
         ? parts.first[0].toUpperCase()
         : (parts.first[0] + parts.last[0]).toUpperCase();
-    final accent = _pBrand(isDark);
-    final toneDeep = HSLColor.fromColor(accent)
-        .withLightness(
-          (HSLColor.fromColor(accent).lightness * 0.78).clamp(0.0, 1.0),
-        )
-        .toColor();
 
     return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [accent, toneDeep],
-        ),
-      ),
+      color: accent.withValues(alpha: 0.14),
       alignment: Alignment.center,
       child: Text(
         initials,
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: accent,
           fontWeight: FontWeight.w900,
-          fontSize: 26,
+          fontSize: size * 0.3,
           letterSpacing: 0.5,
         ),
-      ),
-    );
-  }
-}
-
-/// Chip de status "Ativo/Inativo" — usado na manchete do perfil.
-class _AvatarStatusDot extends StatelessWidget {
-  const _AvatarStatusDot({required this.active});
-  final bool active;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = active
-        ? AppColors.status.success
-        : ThemeHelpers.textSecondaryColor(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.32)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: color,
-              boxShadow: active
-                  ? [
-                      BoxShadow(
-                        color: color.withValues(alpha: 0.55),
-                        blurRadius: 4,
-                      ),
-                    ]
-                  : null,
-            ),
-          ),
-          const SizedBox(width: 5),
-          Text(
-            active ? 'Ativo' : 'Inativo',
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w800,
-              fontSize: 11,
-              letterSpacing: 0.2,
-              height: 1,
-            ),
-          ),
-        ],
       ),
     );
   }

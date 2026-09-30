@@ -60,9 +60,15 @@ class VisitsPage extends StatefulWidget {
 class _VisitsPageState extends State<VisitsPage> {
   static const double _kPagePadH = 16;
   static const double _kPagePadTop = 10;
-  static const double _kPagePadBottom = 110;
+  // Folga para o "Nova visita" E o botão flutuante do chat (que fica logo
+  // acima dele): com 110 o último item ficava sob o botão do chat.
+  static const double _kPagePadBottom = 156;
   static const double _kSectionGap = 12;
   static const int _pageSize = 25;
+
+  /// Coluna máxima em tablet/paisagem: a linha de agenda não estica em
+  /// 1000dp (a leitura e as ações ficam perto uma da outra).
+  static const double _kMaxContentWidth = 820;
 
   late _VisitScope _activeScope;
   final Map<_VisitScope, _ScopeState> _state = {
@@ -75,7 +81,6 @@ class _VisitsPageState extends State<VisitsPage> {
   final TextEditingController _searchController = TextEditingController();
   Timer? _searchDebounce;
   String _appliedSearch = '';
-  bool _searchFocused = false;
 
   /// Id do relatório com ação de link em andamento.
   String? _linkBusyId;
@@ -250,26 +255,29 @@ class _VisitsPageState extends State<VisitsPage> {
     });
   }
 
-  /// Refino local: status (paridade com o web, que filtra em memória) + busca
-  /// por cliente/endereço/referência/corretor/negociação.
-  List<VisitReport> _refined(List<VisitReport> items) {
-    var out = items;
-    if (_filters.status != null) {
-      out = out.where((r) => r.signatureStatus == _filters.status).toList();
-    }
+  /// Busca local por cliente/endereço/referência/código/corretor/negociação.
+  /// Separada do status (30/09/2026) para a régua contar cada estado DENTRO
+  /// da busca — tocar em "Aguardando 3" mostra exatamente 3.
+  List<VisitReport> _searched(List<VisitReport> items) {
     final q = _appliedSearch.toLowerCase();
-    if (q.isNotEmpty) {
-      out = out.where((r) {
-        if (r.clientLabel.toLowerCase().contains(q)) return true;
-        if ((r.createdByName ?? '').toLowerCase().contains(q)) return true;
-        if ((r.kanbanTaskTitle ?? '').toLowerCase().contains(q)) return true;
-        return r.properties.any((p) =>
-            p.address.toLowerCase().contains(q) ||
-            (p.reference ?? '').toLowerCase().contains(q) ||
-            (p.propertyCode ?? '').toLowerCase().contains(q));
-      }).toList();
-    }
-    return out;
+    if (q.isEmpty) return items;
+    return items.where((r) {
+      if (r.clientLabel.toLowerCase().contains(q)) return true;
+      if ((r.createdByName ?? '').toLowerCase().contains(q)) return true;
+      if ((r.kanbanTaskTitle ?? '').toLowerCase().contains(q)) return true;
+      return r.properties.any((p) =>
+          p.address.toLowerCase().contains(q) ||
+          (p.reference ?? '').toLowerCase().contains(q) ||
+          (p.propertyCode ?? '').toLowerCase().contains(q));
+    }).toList();
+  }
+
+  /// Refino local: status (paridade com o web, que filtra em memória) sobre
+  /// a busca.
+  List<VisitReport> _byStatus(List<VisitReport> searched) {
+    final status = _filters.status;
+    if (status == null) return searched;
+    return searched.where((r) => r.signatureStatus == status).toList();
   }
 
   // ─── Navegação / ações ───────────────────────────────────────────────────
@@ -305,14 +313,20 @@ class _VisitsPageState extends State<VisitsPage> {
           'Excluir relatório',
           style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: -0.3),
         ),
-        content: Text(
-          'O relatório de visita de ${r.clientLabel} será excluído. '
-          'Esta ação não pode ser desfeita.',
-          style: const TextStyle(height: 1.4),
+        content: SingleChildScrollView(
+          child: Text(
+            'O relatório de visita de ${r.clientLabel} será excluído. '
+            'Esta ação não pode ser desfeita.',
+            style: const TextStyle(height: 1.4),
+          ),
         ),
         actions: [
+          // Cancelar NEUTRO: o tema pinta TextButton de vermelho.
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
+            style: TextButton.styleFrom(
+              foregroundColor: ThemeHelpers.textSecondaryColor(ctx),
+            ),
             child: const Text('Cancelar'),
           ),
           FilledButton(
@@ -429,6 +443,17 @@ class _VisitsPageState extends State<VisitsPage> {
         body: const _DeniedView(),
       );
     }
+    // Coluna centrada com teto de largura (tablet/paisagem). Os filhos ficam
+    // direto no ListView — o RefreshIndicator segue com o scroll como filho
+    // imediato (LayoutBuilder no meio quebra o puxar-para-atualizar).
+    Widget col(Widget child) => Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: _kMaxContentWidth),
+            child: child,
+          ),
+        );
+
     return AppScaffold(
       title: _pageTitle,
       showBottomNavigation: false,
@@ -439,44 +464,59 @@ class _VisitsPageState extends State<VisitsPage> {
             onRefresh: _refresh,
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: const EdgeInsets.only(
                   top: _kPagePadTop, bottom: _kPagePadBottom),
               children: [
-                Padding(
+                col(Padding(
                   padding:
                       const EdgeInsets.symmetric(horizontal: _kPagePadH),
                   child: _buildSpotlight(context),
-                ),
+                )),
                 const SizedBox(height: _kSectionGap),
-                Padding(
+                col(Padding(
                   padding:
                       const EdgeInsets.symmetric(horizontal: _kPagePadH),
                   child: _buildSearchRow(context),
-                ),
+                )),
                 const SizedBox(height: _kSectionGap),
-                if (_showScopeRail) _buildScopeRail(context),
-                Padding(
+                if (_showScopeRail) col(_buildScopeRail(context)),
+                col(Padding(
                   padding: const EdgeInsets.fromLTRB(
                       _kPagePadH, _kSectionGap, _kPagePadH, 0),
                   child: _buildActivePanel(context),
-                ),
+                )),
               ],
             ),
           ),
-          if (_canCreate)
+          // Some com o teclado aberto: em paisagem ele cobriria a busca.
+          if (MediaQuery.viewInsetsOf(context).bottom == 0)
             Positioned(
               right: _kPagePadH,
               bottom: 22,
               child: SafeArea(
                 child: _CreateFab(
                   accent: _accentColor(context),
-                  onTap: _openCreate,
+                  // Sem `visit:create` o botão fica à vista, apagado, com
+                  // cadeado — o toque explica o motivo (antes sumia).
+                  locked: !_canCreate,
+                  onTap: _canCreate ? _openCreate : _explainCreateLocked,
                 ),
               ),
             ),
         ],
       ),
     );
+  }
+
+  void _explainCreateLocked() {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      behavior: SnackBarBehavior.floating,
+      content: Text(
+        'Registrar visita exige a permissão de criar relatórios de visita. '
+        'Peça ao administrador.',
+      ),
+    ));
   }
 
   // ─── Spotlight de agenda (próxima visita + pendências) ──────────────────
@@ -551,143 +591,151 @@ class _VisitsPageState extends State<VisitsPage> {
     final accent = _accentColor(context);
     final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final cardColor = ThemeHelpers.cardBackgroundColor(context);
-    final borderColor = isDark
-        ? Colors.white.withValues(alpha: 0.08)
-        : Colors.black.withValues(alpha: 0.06);
+    // Campo cheio no molde da busca de Imóveis (cinza sólido de campo, sem
+    // brilho colorido — sombra difusa não existe no modo claro).
+    final fieldFill = isDark
+        ? AppColors.background.backgroundTertiaryDarkMode
+        : AppColors.background.backgroundTertiary;
+    final hairline = ThemeHelpers.borderColor(context).withValues(alpha: 0.4);
     final hasText = _searchController.text.isNotEmpty;
-    final showAccent = _searchFocused || hasText;
-    final filtersActive = _filters.activeCount > 0;
+    final filtersCount = _filters.activeCount;
+    final filtersActive = filtersCount > 0;
 
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Expanded(
-          child: Focus(
-            onFocusChange: (f) => setState(() => _searchFocused = f),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOutCubic,
-              height: 50,
-              decoration: BoxDecoration(
-                color: cardColor,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: showAccent
-                      ? accent.withValues(alpha: isDark ? 0.5 : 0.42)
-                      : borderColor,
-                  width: showAccent ? 1.4 : 1,
-                ),
-                boxShadow: showAccent
-                    ? [
-                        BoxShadow(
-                          color:
-                              accent.withValues(alpha: isDark ? 0.18 : 0.12),
-                          blurRadius: 14,
-                          offset: const Offset(0, 5),
-                          spreadRadius: -4,
-                        ),
-                      ]
-                    : null,
-              ),
-              child: Row(
-                children: [
-                  const SizedBox(width: 14),
-                  Icon(LucideIcons.search,
-                      size: 18, color: showAccent ? accent : secondary),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: _searchController,
-                      textInputAction: TextInputAction.search,
-                      cursorColor: accent,
-                      style: TextStyle(
-                        color: textColor,
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.1,
-                      ),
-                      decoration: InputDecoration(
-                        hintText: 'Buscar por cliente, imóvel…',
-                        hintStyle: TextStyle(
-                          color: secondary.withValues(alpha: 0.75),
-                          fontWeight: FontWeight.w500,
-                          fontSize: 13.5,
-                        ),
-                        filled: false,
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        contentPadding: EdgeInsets.zero,
-                        isDense: true,
-                      ),
-                      onChanged: (v) {
-                        _onSearchChanged(v);
-                        setState(() {});
-                      },
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 48),
+            decoration: BoxDecoration(
+              color: fieldFill,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: hairline),
+            ),
+            child: Row(
+              children: [
+                const SizedBox(width: 14),
+                Icon(LucideIcons.search, size: 18, color: secondary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    textInputAction: TextInputAction.search,
+                    cursorColor: accent,
+                    style: TextStyle(
+                      color: textColor,
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.1,
                     ),
+                    decoration: InputDecoration(
+                      hintText: 'Cliente, endereço, código ou corretor',
+                      hintMaxLines: 1,
+                      hintStyle: TextStyle(
+                        color: secondary,
+                        fontWeight: FontWeight.w500,
+                        fontSize: 13.5,
+                      ),
+                      // O fill vive no Container (o tema global pintaria
+                      // um segundo fundo).
+                      filled: false,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 13),
+                      isDense: true,
+                    ),
+                    onChanged: (v) {
+                      _onSearchChanged(v);
+                      setState(() {});
+                    },
                   ),
-                  if (hasText)
-                    InkResponse(
-                      radius: 18,
-                      onTap: () {
-                        _searchController.clear();
-                        _onSearchChanged('');
-                        setState(() {});
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.all(6),
-                        child: Icon(LucideIcons.x, size: 15, color: secondary),
-                      ),
-                    ),
+                ),
+                if (hasText)
+                  IconButton(
+                    tooltip: 'Limpar busca',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () {
+                      _searchController.clear();
+                      _onSearchChanged('');
+                      setState(() {});
+                    },
+                    icon: Icon(LucideIcons.x, size: 16, color: secondary),
+                  )
+                else
                   const SizedBox(width: 8),
-                ],
-              ),
+              ],
             ),
           ),
         ),
         const SizedBox(width: 10),
-        // Botão de filtros (modal padrão CRM) com dot quando há filtro ativo.
-        InkWell(
-          onTap: _openFilters,
-          borderRadius: BorderRadius.circular(14),
-          child: Container(
-            width: 50,
-            height: 50,
-            decoration: BoxDecoration(
-              color: filtersActive
-                  ? accent.withValues(alpha: isDark ? 0.16 : 0.09)
-                  : cardColor,
+        // Filtros do modal padrão CRM, com a CONTAGEM de filtros ligados (o
+        // ponto sozinho não dizia quantos nem quais).
+        Tooltip(
+          message: !filtersActive
+              ? 'Filtros'
+              : filtersCount == 1
+                  ? '1 filtro ligado'
+                  : '$filtersCount filtros ligados',
+          child: Material(
+            color: filtersActive
+                ? accent.withValues(alpha: isDark ? 0.16 : 0.09)
+                : fieldFill,
+            shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: filtersActive
-                    ? accent.withValues(alpha: 0.5)
-                    : borderColor,
+              side: BorderSide(
+                color: filtersActive ? accent.withValues(alpha: 0.5) : hairline,
                 width: filtersActive ? 1.4 : 1,
               ),
             ),
-            child: Stack(
-              children: [
-                Center(
-                  child: Icon(
-                    Icons.tune_rounded,
-                    size: 21,
-                    color: filtersActive ? accent : secondary,
-                  ),
-                ),
-                if (filtersActive)
-                  Positioned(
-                    right: 9,
-                    top: 9,
-                    child: Container(
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        color: accent,
-                        shape: BoxShape.circle,
+            child: InkWell(
+              onTap: _openFilters,
+              customBorder: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: SizedBox(
+                width: 48,
+                height: 48,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Center(
+                      child: Icon(
+                        LucideIcons.slidersHorizontal,
+                        size: 19,
+                        color: filtersActive
+                            ? visitInk(context, accent)
+                            : secondary,
                       ),
                     ),
-                  ),
-              ],
+                    if (filtersActive)
+                      Positioned(
+                        right: 5,
+                        top: 5,
+                        child: Container(
+                          constraints: const BoxConstraints(minWidth: 16),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: accent,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            '$filtersCount',
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              height: 1.25,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
@@ -736,49 +784,95 @@ class _VisitsPageState extends State<VisitsPage> {
     );
   }
 
-  // ─── Chips de status ─────────────────────────────────────────────────────
+  // ─── Régua de estado com contagem ────────────────────────────────────────
 
-  Widget _buildStatusChips(BuildContext context) {
+  /// Estado em palavra COM a contagem (30/09/2026), como a tela aprovada do
+  /// web: o número decide para onde o corretor olha primeiro. Antes eram
+  /// pílulas soltas numa faixa rolável ("Todas / Aguardando / …") sem
+  /// número. Conta dentro da busca; tocar filtra (tocar de novo volta para
+  /// Todas). 4 colunas quando cabem (a largura é lida já com a escala do
+  /// texto), 2×2 em 320dp ou com fonte grande.
+  Widget _buildStatusRuler(BuildContext context, List<VisitReport> searched) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final amber =
         isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
     final green =
         isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
     final neutral = ThemeHelpers.textSecondaryColor(context);
-    final accent = _accentColor(context);
+    final allTone = _scopeColor(context, _activeScope);
 
-    Widget chip(String label, VisitSignatureStatus? status, Color tone) {
-      final selected = _filters.status == status;
-      return _StatusChip(
-        label: label,
-        tone: tone,
-        selected: selected,
-        onTap: () => _setStatusChip(status),
-      );
-    }
+    int count(VisitSignatureStatus s) =>
+        searched.where((r) => r.signatureStatus == s).length;
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      clipBehavior: Clip.none,
-      child: Row(
-        children: [
-          chip('Todas', null, accent),
-          const SizedBox(width: 8),
-          chip('Aguardando', VisitSignatureStatus.pending, amber),
-          const SizedBox(width: 8),
-          chip('Assinadas', VisitSignatureStatus.signed, green),
-          const SizedBox(width: 8),
-          chip('Expiradas', VisitSignatureStatus.expired, neutral),
-        ],
+    final segments = <Widget>[
+      _StatusSegment(
+        label: 'Todas',
+        count: searched.length,
+        tone: allTone,
+        selected: _filters.status == null,
+        onTap: () => _setStatusChip(null),
       ),
+      _StatusSegment(
+        label: 'Aguardando',
+        count: count(VisitSignatureStatus.pending),
+        tone: amber,
+        selected: _filters.status == VisitSignatureStatus.pending,
+        onTap: () => _toggleStatus(VisitSignatureStatus.pending),
+      ),
+      _StatusSegment(
+        label: 'Assinadas',
+        count: count(VisitSignatureStatus.signed),
+        tone: green,
+        selected: _filters.status == VisitSignatureStatus.signed,
+        onTap: () => _toggleStatus(VisitSignatureStatus.signed),
+      ),
+      _StatusSegment(
+        label: 'Expiradas',
+        count: count(VisitSignatureStatus.expired),
+        tone: neutral,
+        selected: _filters.status == VisitSignatureStatus.expired,
+        onTap: () => _toggleStatus(VisitSignatureStatus.expired),
+      ),
+    ];
+
+    const gap = 6.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final scale = MediaQuery.textScalerOf(context).scale(1);
+        final cols = constraints.maxWidth / scale >= 320 ? 4 : 2;
+        Widget row(List<Widget> items) => IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var i = 0; i < items.length; i++) ...[
+                    if (i > 0) const SizedBox(width: gap),
+                    Expanded(child: items[i]),
+                  ],
+                ],
+              ),
+            );
+        if (cols == 4) return row(segments);
+        return Column(
+          children: [
+            row(segments.sublist(0, 2)),
+            const SizedBox(height: gap),
+            row(segments.sublist(2)),
+          ],
+        );
+      },
     );
+  }
+
+  void _toggleStatus(VisitSignatureStatus status) {
+    _setStatusChip(_filters.status == status ? null : status);
   }
 
   // ─── Painel ativo ────────────────────────────────────────────────────────
 
   Widget _buildActivePanel(BuildContext context) {
     final st = _state[_activeScope]!;
-    final refined = _refined(st.items);
+    final searched = _searched(st.items);
+    final refined = _byStatus(searched);
 
     Widget child;
     if (st.loading && st.items.isEmpty) {
@@ -786,7 +880,7 @@ class _VisitsPageState extends State<VisitsPage> {
     } else if (st.error != null && st.items.isEmpty) {
       child = _buildError(context, st);
     } else if (refined.isEmpty) {
-      child = _buildEmpty(context);
+      child = _buildEmpty(context, st);
     } else {
       child = _buildAgenda(context, st, refined);
     }
@@ -795,7 +889,10 @@ class _VisitsPageState extends State<VisitsPage> {
       key: ValueKey('panel-${_activeScope.name}'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _buildStatusChips(context),
+        // A atualização falhou mas há lista: avisa sem apagar nada.
+        if (st.error != null && st.items.isNotEmpty)
+          _buildRefreshFailed(context),
+        if (st.items.isNotEmpty) _buildStatusRuler(context, searched),
         child,
       ],
     ).animate(key: ValueKey('panel-${_activeScope.name}')).fadeIn(
@@ -824,8 +921,13 @@ class _VisitsPageState extends State<VisitsPage> {
     final visible = ordered.take(st.visible).toList();
 
     final counts = <String, int>{};
+    final pendingByDay = <String, int>{};
     for (final r in ordered) {
-      counts.update(_dayKey(r.visitDate), (v) => v + 1, ifAbsent: () => 1);
+      final k = _dayKey(r.visitDate);
+      counts.update(k, (v) => v + 1, ifAbsent: () => 1);
+      if (r.signatureStatus == VisitSignatureStatus.pending) {
+        pendingByDay.update(k, (v) => v + 1, ifAbsent: () => 1);
+      }
     }
 
     final showBroker = _activeScope == _VisitScope.all;
@@ -840,6 +942,7 @@ class _VisitsPageState extends State<VisitsPage> {
         children.add(_DayHeader(
           date: r.visitDate,
           count: counts[key] ?? 0,
+          pending: pendingByDay[key] ?? 0,
           tone: _dayTone(context, r.visitDate),
           first: firstHeader,
         ));
@@ -852,6 +955,7 @@ class _VisitsPageState extends State<VisitsPage> {
           showBroker: showBroker,
           canEdit: _canUpdate,
           canDelete: _canDelete,
+          canGenerateLink: _canUpdate,
           linkBusy: _linkBusyId == r.id,
           onTap: () => _openDetail(r),
           onShareWhatsApp: () => _shareWhatsApp(r),
@@ -866,25 +970,50 @@ class _VisitsPageState extends State<VisitsPage> {
       );
     }
 
-    if (ordered.length > st.visible) {
+    // Rodapé da lista: quantas estão na tela, de quantas, e o próximo passo.
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final remaining = ordered.length - visible.length;
+    children.add(
+      Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: Text(
+          remaining > 0
+              ? 'Mostrando ${visible.length} de ${ordered.length} visitas'
+              : ordered.length == 1
+                  ? '1 visita · fim da lista'
+                  : '${ordered.length} visitas · fim da lista',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: secondary,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+    if (remaining > 0) {
+      final accent = _accentColor(context);
       children.add(
         Padding(
-          padding: const EdgeInsets.only(top: 16),
+          padding: const EdgeInsets.only(top: 10),
           child: Center(
             child: OutlinedButton.icon(
               onPressed: () => setState(() => st.visible += _pageSize),
               style: OutlinedButton.styleFrom(
-                foregroundColor: _accentColor(context),
-                side: BorderSide(
-                  color: _accentColor(context).withValues(alpha: 0.45),
-                ),
+                foregroundColor: visitInk(context, accent),
+                side: BorderSide(color: accent.withValues(alpha: 0.45)),
+                minimumSize: const Size(0, 44),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
               icon: const Icon(LucideIcons.chevronDown, size: 16),
               label: Text(
-                'Carregar mais (${ordered.length - st.visible})',
+                remaining > _pageSize
+                    ? 'Mostrar mais $_pageSize'
+                    : 'Mostrar mais $remaining',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ),
@@ -900,34 +1029,41 @@ class _VisitsPageState extends State<VisitsPage> {
 
   // ─── Estados ─────────────────────────────────────────────────────────────
 
-  /// Skeleton fiel à agenda nova: cabeçalho de dia (bolha de data + linha)
-  /// seguido de itens em trilho (nó circular + conteúdo).
+  /// Skeleton fiel à agenda: régua de estado, cabeçalho de dia (bolha de
+  /// data + título + filete) e itens em trilho (nó circular + conteúdo).
   Widget _buildSkeleton() {
     Widget header({bool first = false}) => Padding(
           padding: EdgeInsets.only(top: first ? 16 : 22, bottom: 12),
-          child: Row(
-            children: const [
-              SkeletonBox(width: 30, height: 30, borderRadius: 10),
+          child: const Row(
+            children: [
+              SkeletonBox(width: 32, height: 32, borderRadius: 10),
               SizedBox(width: 10),
-              SkeletonText(width: 140, height: 13),
-              Spacer(),
-              SkeletonText(width: 48, height: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonText(width: 90, height: 13),
+                    SizedBox(height: 5),
+                    SkeletonText(width: 160, height: 10),
+                  ],
+                ),
+              ),
             ],
           ),
         );
 
-    Widget row() => Padding(
-          padding: const EdgeInsets.only(bottom: 18, top: 4),
+    Widget row() => const Padding(
+          padding: EdgeInsets.only(bottom: 18, top: 4),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: const [
+            children: [
               SkeletonBox(width: 28, height: 28, borderRadius: 999),
               SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SkeletonText(width: 88, height: 16, borderRadius: 999),
+                    SkeletonText(width: 150, height: 16, borderRadius: 999),
                     SizedBox(height: 9),
                     SkeletonText(width: double.infinity, height: 14),
                     SizedBox(height: 6),
@@ -935,9 +1071,9 @@ class _VisitsPageState extends State<VisitsPage> {
                     SizedBox(height: 10),
                     Row(
                       children: [
-                        SkeletonText(width: 72, height: 12),
-                        SizedBox(width: 14),
-                        SkeletonText(width: 72, height: 12),
+                        SkeletonBox(width: 140, height: 34, borderRadius: 10),
+                        SizedBox(width: 8),
+                        SkeletonText(width: 60, height: 12),
                       ],
                     ),
                   ],
@@ -950,39 +1086,147 @@ class _VisitsPageState extends State<VisitsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        const Row(
+          children: [
+            Expanded(child: SkeletonBox(height: 52, borderRadius: 12)),
+            SizedBox(width: 6),
+            Expanded(child: SkeletonBox(height: 52, borderRadius: 12)),
+            SizedBox(width: 6),
+            Expanded(child: SkeletonBox(height: 52, borderRadius: 12)),
+            SizedBox(width: 6),
+            Expanded(child: SkeletonBox(height: 52, borderRadius: 12)),
+          ],
+        ),
         header(first: true),
         row(),
         row(),
         header(),
         row(),
-        row(),
       ],
     );
   }
 
-  Widget _buildEmpty(BuildContext context) {
+  /// Vazio que ENSINA (30/09/2026): diz por que está vazio e oferece a saída
+  /// certa — limpar a busca, limpar os filtros, ver todas ou registrar.
+  Widget _buildEmpty(BuildContext context, _ScopeState st) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final tone = _scopeColor(context, _activeScope);
+    final ink = visitInk(context, tone);
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final hasSearch = _appliedSearch.trim().isNotEmpty;
-    final hasFilters = _filters.activeCount > 0;
-    final (icon, title, body) = hasSearch
-        ? (
-            LucideIcons.searchX,
-            'Nada encontrado',
-            'Nenhuma visita corresponde a "${_appliedSearch.trim()}".',
-          )
-        : hasFilters
-            ? (
-                LucideIcons.listFilter,
-                'Nada com esses filtros',
-                'Ajuste ou limpe os filtros para ver mais visitas.',
-              )
-            : (
-                LucideIcons.calendarDays,
-                'Agenda vazia',
-                'Registre a primeira visita e envie o link de assinatura ao cliente.',
-              );
+    final status = _filters.status;
+    final onlyStatus = status != null && !_filters.hasBackendFilters;
+    final hasBackendFilters = _filters.hasBackendFilters;
+    final isTeam = _activeScope == _VisitScope.all;
+
+    String statusWord(VisitSignatureStatus s) {
+      switch (s) {
+        case VisitSignatureStatus.pending:
+          return 'aguardando assinatura';
+        case VisitSignatureStatus.signed:
+          return 'assinada';
+        case VisitSignatureStatus.expired:
+          return 'com link expirado';
+        case VisitSignatureStatus.unknown:
+          return 'nesse estado';
+      }
+    }
+
+    late final IconData icon;
+    late final String title;
+    late final String body;
+    String? actionLabel;
+    IconData? actionIcon;
+    VoidCallback? onAction;
+    var primary = false;
+
+    if (hasSearch) {
+      icon = LucideIcons.searchX;
+      title = 'Nada encontrado';
+      body = 'Nenhuma visita corresponde a "${_appliedSearch.trim()}". '
+          'Busque pelo nome do cliente, pelo endereço, pelo código do imóvel '
+          'ou pelo corretor.';
+      actionLabel = 'Limpar busca';
+      actionIcon = LucideIcons.x;
+      onAction = () {
+        _searchController.clear();
+        _onSearchChanged('');
+        setState(() {});
+      };
+    } else if (onlyStatus && st.items.isNotEmpty) {
+      icon = LucideIcons.listFilter;
+      title = 'Nenhuma visita ${statusWord(status)}';
+      body = 'As outras visitas continuam na lista — toque em "Todas" na '
+          'régua acima ou no botão abaixo.';
+      actionLabel = 'Ver todas';
+      actionIcon = LucideIcons.list;
+      onAction = () => _setStatusChip(null);
+    } else if (hasBackendFilters) {
+      icon = LucideIcons.filterX;
+      title = 'Nada com esses filtros';
+      body = 'Nenhuma visita bate com o cliente ou o período escolhidos. '
+          'Ajuste nos filtros ou limpe tudo.';
+      actionLabel = 'Limpar filtros';
+      actionIcon = LucideIcons.filterX;
+      onAction = () => _applyFilters(VisitReportFilters.empty);
+    } else if (isTeam) {
+      icon = LucideIcons.calendarDays;
+      title = 'Nenhuma visita da equipe';
+      body = 'Quando os corretores registrarem visitas, elas aparecem aqui '
+          'agrupadas por dia, com o estado da assinatura de cada uma.';
+    } else {
+      icon = LucideIcons.calendarDays;
+      title = 'Agenda vazia';
+      body = _canCreate
+          ? 'Registre a visita depois de mostrar os imóveis: o cliente recebe '
+              'um link para conferir e assinar, e o estado aparece aqui.'
+          : 'As visitas registradas aparecem aqui, agrupadas por dia. '
+              'Registrar visita exige a permissão de criar relatórios — '
+              'peça ao administrador.';
+      if (_canCreate) {
+        actionLabel = 'Registrar visita';
+        actionIcon = LucideIcons.plus;
+        onAction = _openCreate;
+        primary = true;
+      }
+    }
+
+    final Widget? action;
+    if (actionLabel == null || onAction == null) {
+      action = null;
+    } else if (primary) {
+      action = FilledButton.icon(
+        onPressed: onAction,
+        icon: Icon(actionIcon, size: 16),
+        label: Text(actionLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
+        style: FilledButton.styleFrom(
+          backgroundColor: _accentColor(context),
+          foregroundColor: Colors.white,
+          minimumSize: const Size(0, 44),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          elevation: 0,
+        ),
+      );
+    } else {
+      // Saída do vazio (limpar/ver todas) é navegação: neutra.
+      action = OutlinedButton.icon(
+        onPressed: onAction,
+        icon: Icon(actionIcon, size: 16),
+        label: Text(actionLabel, maxLines: 1, overflow: TextOverflow.ellipsis),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: ThemeHelpers.textColor(context),
+          side: BorderSide(color: ThemeHelpers.borderColor(context)),
+          minimumSize: const Size(0, 44),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 4),
       child: Column(
@@ -992,13 +1236,10 @@ class _VisitsPageState extends State<VisitsPage> {
             height: 64,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(colors: [
-                tone.withValues(alpha: 0.18),
-                tone.withValues(alpha: 0.06),
-              ]),
+              color: tone.withValues(alpha: isDark ? 0.16 : 0.09),
               border: Border.all(color: tone.withValues(alpha: 0.32)),
             ),
-            child: Icon(icon, color: tone, size: 28),
+            child: Icon(icon, color: ink, size: 28),
           ),
           const SizedBox(height: 14),
           Text(
@@ -1011,30 +1252,66 @@ class _VisitsPageState extends State<VisitsPage> {
             ),
           ),
           const SizedBox(height: 4),
-          Text(
-            body,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: secondary,
-              height: 1.4,
-            ),
-          ),
-          if (!hasSearch && !hasFilters && _canCreate) ...[
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: _openCreate,
-              icon: const Icon(LucideIcons.plus, size: 16),
-              label: const Text('Registrar visita'),
-              style: FilledButton.styleFrom(
-                backgroundColor: _accentColor(context),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                elevation: 0,
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Text(
+              body,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: secondary,
+                height: 1.4,
               ),
             ),
+          ),
+          if (action != null) ...[
+            const SizedBox(height: 16),
+            action,
           ],
+        ],
+      ),
+    );
+  }
+
+  /// Atualização falhou com lista na tela: faixa curta com a causa e
+  /// "Tentar de novo" (antes a falha passava em silêncio).
+  Widget _buildRefreshFailed(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = ThemeHelpers.textColor(context);
+    final amber =
+        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+      decoration: BoxDecoration(
+        color: amber.withValues(alpha: isDark ? 0.12 : 0.10),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            LucideIcons.triangleAlert,
+            size: 16,
+            color: visitInk(context, amber),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Não deu para atualizar agora. Esta é a última lista carregada.',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: textColor,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                height: 1.3,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: _refresh,
+            style: TextButton.styleFrom(foregroundColor: textColor),
+            child: const Text('Tentar de novo', maxLines: 1),
+          ),
         ],
       ),
     );
@@ -1075,11 +1352,14 @@ class _AgendaSpotlight extends StatelessWidget {
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final amber =
         isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
-    final amberText = isDark
-        ? AppColors.message.warningTextDarkMode
-        : AppColors.message.warningText;
-    final blue =
-        isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
+    // Texto colorido pela tinta legível (≥ 4,5:1): o warningText (#D97706)
+    // dava 3,2:1 no branco e o violeta da Gestão 4,2:1 no rótulo de 11sp.
+    final amberText = visitInk(context, amber);
+    final blue = visitInk(
+      context,
+      isDark ? AppColors.status.blueDarkMode : AppColors.status.blue,
+    );
+    final toneInk = visitInk(context, tone);
 
     final n = next;
     final d = n?.visitDate;
@@ -1150,25 +1430,27 @@ class _AgendaSpotlight extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
+                          // Wrap: a 320dp/130% "Em 12 dias" desce inteiro
+                          // em vez de cortar "Próxima vis…".
+                          Wrap(
+                            spacing: 7,
+                            runSpacing: 3,
+                            crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
-                              Flexible(
-                                child: Text(
-                                  n != null
-                                      ? 'Próxima visita'
-                                      : 'Agenda de visitas',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: tone,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 0.2,
-                                  ),
+                              Text(
+                                n != null
+                                    ? 'Próxima visita'
+                                    : 'Agenda de visitas',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: toneInk,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.2,
                                 ),
                               ),
-                              if (proximity != null) ...[
-                                const SizedBox(width: 7),
+                              if (proximity != null)
                                 Container(
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 7, vertical: 2),
@@ -1180,16 +1462,16 @@ class _AgendaSpotlight extends StatelessWidget {
                                   ),
                                   child: Text(
                                     proximity,
+                                    maxLines: 1,
                                     style: TextStyle(
                                       color: proximityTone,
-                                      fontSize: 9.5,
+                                      fontSize: 10,
                                       fontWeight: FontWeight.w900,
                                       letterSpacing: 0.2,
                                       height: 1.0,
                                     ),
                                   ),
                                 ),
-                              ],
                             ],
                           ),
                           const SizedBox(height: 5),
@@ -1304,11 +1586,17 @@ class _AgendaSpotlight extends StatelessWidget {
   }
 }
 
-// ─── Cabeçalho de dia da agenda (data pt-BR + divisor + contagem) ────────────
+// ─── Cabeçalho de dia da agenda (data pt-BR + contagem + filete) ────────────
 
+/// Cabeçalho do dia (30/09/2026): "Hoje" / "Quinta" em destaque, a data por
+/// extenso embaixo e a contagem do dia ("3 visitas · 1 aguardando") à
+/// direita, com filete de largura inteira por baixo. Antes a data dividia a
+/// linha meio a meio com um filete decorativo (Flexible + Expanded) e ficava
+/// cortada em qualquer largura ("Hoje · quarta-f…").
 class _DayHeader extends StatelessWidget {
   final DateTime? date;
   final int count;
+  final int pending;
   final Color tone;
   final bool first;
 
@@ -1316,6 +1604,7 @@ class _DayHeader extends StatelessWidget {
     required this.date,
     required this.count,
     required this.tone,
+    this.pending = 0,
     this.first = false,
   });
 
@@ -1327,6 +1616,9 @@ class _DayHeader extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
+    final ink = visitInk(context, tone);
+    final amber =
+        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
 
     String main;
     String? sub;
@@ -1357,73 +1649,109 @@ class _DayHeader extends StatelessWidget {
       }
     }
 
-    return Padding(
-      padding: EdgeInsets.only(top: first ? 16 : 22, bottom: 12),
+    return Container(
+      margin: EdgeInsets.only(top: first ? 14 : 20, bottom: 12),
+      padding: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
+        ),
+      ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
-            width: 30,
-            height: 30,
+            width: 32,
+            height: 32,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(10),
               color: tone.withValues(alpha: isDark ? 0.18 : 0.1),
             ),
             child: Center(
               child: d == null
-                  ? Icon(LucideIcons.calendarDays, size: 14, color: tone)
-                  : Text(
-                      '${d.day}',
-                      style: TextStyle(
-                        color: tone,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 13,
-                        height: 1.0,
+                  ? Icon(LucideIcons.calendarDays, size: 15, color: ink)
+                  : FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 3),
+                        child: Text(
+                          '${d.day}',
+                          maxLines: 1,
+                          style: TextStyle(
+                            color: ink,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 14,
+                            height: 1.0,
+                          ),
+                        ),
                       ),
                     ),
             ),
           ),
           const SizedBox(width: 10),
-          Flexible(
-            child: Text.rich(
-              TextSpan(
-                children: [
-                  TextSpan(
-                    text: main,
-                    style: TextStyle(
-                      color: textColor,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 13.5,
-                      letterSpacing: -0.2,
-                    ),
-                  ),
-                  if (sub != null)
-                    TextSpan(
-                      text: '  ·  $sub',
-                      style: TextStyle(
-                        color: secondary,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 11.5,
+          // Linha 1: o dia + "N aguardando" (âmbar legível — é o que pede
+          // ação) e, à direita, a contagem curta. Linha 2: a data por
+          // extenso na largura toda (a 320dp/130% cabe inteira).
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(
+                              text: main,
+                              style: TextStyle(
+                                color: textColor,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 14,
+                                letterSpacing: -0.2,
+                              ),
+                            ),
+                            if (pending > 0)
+                              TextSpan(
+                                text: '  ·  $pending aguardando',
+                                style: TextStyle(
+                                  color: visitInk(context, amber),
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 11.5,
+                                ),
+                              ),
+                          ],
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(height: 1.2),
                       ),
                     ),
-                ],
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          Expanded(
-            child: Container(
-              height: 1,
-              margin: const EdgeInsets.symmetric(horizontal: 10),
-              color: ThemeHelpers.borderLightColor(context),
-            ),
-          ),
-          Text(
-            count == 1 ? '1 visita' : '$count visitas',
-            style: TextStyle(
-              color: secondary,
-              fontWeight: FontWeight.w800,
-              fontSize: 10.5,
+                    const SizedBox(width: 8),
+                    Text(
+                      count == 1 ? '1 visita' : '$count visitas',
+                      maxLines: 1,
+                      style: TextStyle(
+                        color: secondary,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+                if (sub != null)
+                  Text(
+                    sub,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: secondary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 11.5,
+                      height: 1.25,
+                    ),
+                  ),
+              ],
             ),
           ),
         ],
@@ -1435,37 +1763,72 @@ class _DayHeader extends StatelessWidget {
 // ─── FAB "Nova visita" (mesma gramática das fichas de venda) ─────────────────
 
 class _CreateFab extends StatelessWidget {
-  const _CreateFab({required this.accent, required this.onTap});
+  const _CreateFab({
+    required this.accent,
+    required this.onTap,
+    this.locked = false,
+  });
   final Color accent;
   final VoidCallback onTap;
 
+  /// Sem permissão: pílula neutra com cadeado (o toque explica o motivo).
+  final bool locked;
+
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: accent,
-      shape: const StadiumBorder(),
-      elevation: 6,
-      shadowColor: accent.withValues(alpha: 0.4),
-      child: InkWell(
-        customBorder: const StadiumBorder(),
-        onTap: onTap,
-        child: const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.add_rounded, color: Colors.white, size: 22),
-              SizedBox(width: 8),
-              Text(
-                'Nova visita',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 15,
-                  letterSpacing: 0.2,
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final Color fill;
+    final Color fg;
+    if (locked) {
+      fill = isDark
+          ? AppColors.background.backgroundTertiaryDarkMode
+          : AppColors.background.backgroundTertiary;
+      fg = ThemeHelpers.textSecondaryColor(context);
+    } else {
+      fill = accent;
+      fg = Colors.white;
+    }
+    return Semantics(
+      button: true,
+      label: locked ? 'Nova visita, bloqueado' : 'Nova visita',
+      excludeSemantics: true,
+      child: Material(
+        color: fill,
+        shape: locked
+            ? StadiumBorder(
+                side: BorderSide(color: ThemeHelpers.borderColor(context)),
+              )
+            : const StadiumBorder(),
+        elevation: locked ? 1 : 6,
+        shadowColor: locked
+            ? Colors.black.withValues(alpha: 0.08)
+            : accent.withValues(alpha: 0.4),
+        child: InkWell(
+          customBorder: const StadiumBorder(),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  locked ? LucideIcons.lock : Icons.add_rounded,
+                  color: fg,
+                  size: locked ? 17 : 22,
                 ),
-              ),
-            ],
+                const SizedBox(width: 8),
+                Text(
+                  'Nova visita',
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: fg,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 15,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1495,7 +1858,11 @@ class _FlushTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final fg = selected ? tone : ThemeHelpers.textSecondaryColor(context);
+    // Rótulo na tinta legível do tom (o violeta puro dava 4,2:1 no branco);
+    // o sublinhado segue no tom.
+    final fg = selected
+        ? visitInk(context, tone)
+        : ThemeHelpers.textSecondaryColor(context);
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -1538,7 +1905,7 @@ class _FlushTab extends StatelessWidget {
                           count > 99 ? '99+' : '$count',
                           style: theme.textTheme.labelSmall?.copyWith(
                             color: selected
-                                ? tone
+                                ? fg
                                 : ThemeHelpers.textSecondaryColor(context),
                             fontWeight: FontWeight.w900,
                             fontSize: 11,
@@ -1567,16 +1934,21 @@ class _FlushTab extends StatelessWidget {
   }
 }
 
-// ─── Chip de status (tint — nunca preenchimento sólido) ──────────────────────
+// ─── Segmento da régua de estado (número + rótulo) ──────────────────────────
 
-class _StatusChip extends StatelessWidget {
+/// Um estado da régua: o número em destaque (tinta legível do tom quando há
+/// algum, cinza quando zero), o ponto do tom e o rótulo. Selecionado ganha
+/// fundo e borda no tom. Número e rótulo encolhem em vez de estourar.
+class _StatusSegment extends StatelessWidget {
   final String label;
+  final int count;
   final Color tone;
   final bool selected;
   final VoidCallback onTap;
 
-  const _StatusChip({
+  const _StatusSegment({
     required this.label,
+    required this.count,
     required this.tone,
     required this.selected,
     required this.onTap,
@@ -1585,32 +1957,90 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
-        decoration: BoxDecoration(
-          color: selected
-              ? tone.withValues(alpha: isDark ? 0.18 : 0.11)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final ink = visitInk(context, tone);
+    final idleFill = isDark
+        ? AppColors.background.backgroundTertiaryDarkMode
+        : AppColors.background.backgroundTertiary;
+
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: '$label: $count',
+      excludeSemantics: true,
+      child: Material(
+        color: selected
+            ? tone.withValues(alpha: isDark ? 0.18 : 0.10)
+            : idleFill,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
             color: selected
-                ? tone.withValues(alpha: 0.5)
-                : ThemeHelpers.borderColor(context),
-            width: selected ? 1.3 : 1,
+                ? tone.withValues(alpha: 0.6)
+                : ThemeHelpers.borderColor(context).withValues(alpha: 0.4),
+            width: selected ? 1.4 : 1,
           ),
         ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12.5,
-            fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-            color:
-                selected ? tone : ThemeHelpers.textSecondaryColor(context),
-            letterSpacing: -0.1,
+        child: InkWell(
+          onTap: onTap,
+          customBorder: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '$count',
+                          maxLines: 1,
+                          style: TextStyle(
+                            color: count > 0 ? ink : secondary,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.5,
+                            height: 1.05,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Container(
+                      width: 7,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: tone,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: selected
+                          ? ThemeHelpers.textColor(context)
+                          : secondary,
+                      fontSize: 11.5,
+                      fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                      letterSpacing: -0.1,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1618,35 +2048,103 @@ class _StatusChip extends StatelessWidget {
   }
 }
 
+/// Sem acesso (30/09/2026): diz o que falta e quem libera, e rola em tela
+/// baixa (paisagem) — antes era um Column centrado que podia estourar.
 class _DeniedView extends StatelessWidget {
   const _DeniedView();
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Padding(
-      padding: const EdgeInsets.all(28),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.lock, size: 38, color: secondary),
-            const SizedBox(height: 12),
-            Text(
-              'Você não tem acesso aos relatórios de visita.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
+    final purple =
+        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(28),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 60,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: purple.withValues(alpha: isDark ? 0.16 : 0.1),
+                      ),
+                      child: Icon(
+                        LucideIcons.lock,
+                        size: 26,
+                        color: visitInk(context, purple),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'Você não tem acesso às visitas',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: ThemeHelpers.textColor(context),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Para ver as suas visitas é preciso a permissão de '
+                      'visualizar relatórios de visita; para ver as da '
+                      'empresa, a de gerir visitas.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: secondary,
+                        fontSize: 13,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? AppColors.background.backgroundTertiaryDarkMode
+                            : AppColors.background.backgroundTertiary,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            LucideIcons.userRound,
+                            size: 15,
+                            color: secondary,
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              'Quem libera: o administrador da empresa.',
+                              style: TextStyle(
+                                color: ThemeHelpers.textColor(context),
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(height: 6),
-            Text(
-              'Solicite ao administrador a permissão de visualizar visitas.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: secondary, fontSize: 12.5),
-            ),
-          ],
+          ),
         ),
       ),
     );

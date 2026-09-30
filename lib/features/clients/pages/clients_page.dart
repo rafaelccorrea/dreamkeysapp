@@ -8,10 +8,9 @@ import '../../../core/constants/feature_visibility.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../core/theme/shell_visual_tokens.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
-import '../../../shared/utils/masks.dart';
+import '../../../shared/utils/broker_contact_actions.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
@@ -23,9 +22,20 @@ import '../services/client_service.dart';
 import '../widgets/async_excel_import_modal.dart';
 import '../widgets/client_filters_drawer.dart';
 import '../widgets/transfer_client_modal.dart';
+import '../utils/client_phone_rules.dart';
 import '../utils/client_spreadsheet.dart';
 
 final _compactIntFormatter = NumberFormat.decimalPattern('pt_BR');
+
+/// Largura máxima do conteúdo em tablet/tela larga: a lista não estica
+/// linhas por 1000dp — o excedente vira margem dos dois lados.
+const double _kMaxContentWidth = 760;
+
+/// Verde do WhatsApp — cor de identidade da marca, sem equivalente em
+/// `AppColors`. No claro vale o tom escuro oficial (contraste no branco);
+/// no escuro, o verde vivo. Mesmo par usado no Kanban e na Roleta.
+const Color _kWhatsappGreen = Color(0xFF25D366);
+const Color _kWhatsappGreenDeep = Color(0xFF128C7E);
 
 /// Permissões das ações de cliente — as mesmas do web
 /// (`PermissionButton`/`PermissionMenuItem` em `ClientsPage.tsx`).
@@ -47,42 +57,31 @@ const Map<String, String> _kExportSourceLabels = {
   'other': 'Outros',
 };
 
-/// Métricas agregadas a partir da listagem carregada (página atual).
-class _ListedClientMetrics {
-  const _ListedClientMetrics({
-    required this.active,
-    required this.inactive,
-    required this.contacted,
-    required this.interested,
-    required this.closed,
-    required this.buyers,
-    required this.sellers,
-    required this.renters,
-    required this.lessors,
-    required this.investors,
-    required this.general,
-    required this.withSpouse,
-    required this.withWhatsapp,
-    required this.mcmv,
-  });
-
-  final int active;
-  final int inactive;
-  final int contacted;
-  final int interested;
-  final int closed;
-  final int buyers;
-  final int sellers;
-  final int renters;
-  final int lessors;
-  final int investors;
-  final int general;
-  final int withSpouse;
-  final int withWhatsapp;
-  final int mcmv;
+/// Ícone de cada tipo de cliente — o mesmo na linha da lista e no resumo
+/// da carteira, para o olho ligar um ao outro.
+IconData _clientTypeIcon(ClientType type) {
+  switch (type) {
+    case ClientType.buyer:
+      return Icons.shopping_bag_outlined;
+    case ClientType.seller:
+      return Icons.sell_outlined;
+    case ClientType.renter:
+      return Icons.vpn_key_outlined;
+    case ClientType.lessor:
+      return Icons.home_work_outlined;
+    case ClientType.investor:
+      return Icons.trending_up_outlined;
+    case ClientType.general:
+      return Icons.person_outline;
+  }
 }
 
 /// Página de listagem de clientes.
+///
+/// Gramática de lista pesada (inspirada em Imóveis): no topo, o tamanho da
+/// carteira em destaque, a busca com o botão de filtros colado, o cadastro
+/// e as planilhas à vista; abaixo, linhas flush com filete, cada uma com
+/// quem é, situação, telefone, quem atende e os atalhos de WhatsApp/ligar.
 class ClientsPage extends StatefulWidget {
   const ClientsPage({super.key});
 
@@ -91,12 +90,12 @@ class ClientsPage extends StatefulWidget {
 }
 
 class _ClientsPageState extends State<ClientsPage> {
-  static const double _kHeaderPadH = 20;
-  static const double _kHeaderPadVTop = 10;
-
   final ClientService _clientService = ClientService.instance;
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+
+  /// Foco da busca do topo — o item "Buscar" do menu leva direto a ela.
+  final FocusNode _searchFocus = FocusNode();
 
   bool _isLoading = true;
   bool _isLoadingMore = false;
@@ -136,6 +135,7 @@ class _ClientsPageState extends State<ClientsPage> {
     _searchDebounce?.cancel();
     _persistState();
     _searchController.dispose();
+    _searchFocus.dispose();
     _scrollController
       ..removeListener(_onScroll)
       ..dispose();
@@ -287,6 +287,30 @@ class _ClientsPageState extends State<ClientsPage> {
     });
   }
 
+  void _clearSearch() {
+    _searchController.clear();
+    _handleSearch('');
+  }
+
+  void _clearFilters() {
+    setState(() => _filters = null);
+    _persistState();
+    _loadClients(refresh: true);
+    _loadStatistics();
+  }
+
+  /// "Buscar" do menu: sobe para o topo e põe o cursor na busca.
+  void _focusSearch() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+      );
+    }
+    _searchFocus.requestFocus();
+  }
+
   // ───────────────────────── Permissões ─────────────────────────
 
   bool _can(String permission) =>
@@ -315,28 +339,88 @@ class _ClientsPageState extends State<ClientsPage> {
       currentBottomNavIndex: 3,
       showBottomNavigation: true,
       actions: [_buildOverflowMenu(context)],
-      body: _isLoading && _clients.isEmpty
-          ? Column(
-              children: [
-                _buildClientsHeader(context),
-                Expanded(child: _buildSkeleton(context)),
-              ],
-            )
-          : _errorMessage != null && _clients.isEmpty
-              ? Column(
-                  children: [
-                    _buildClientsHeader(context),
-                    Expanded(child: _buildErrorState(context)),
-                  ],
-                )
-              : _clients.isEmpty
-                  ? Column(
-                      children: [
-                        _buildClientsHeader(context),
-                        Expanded(child: _buildEmptyState(context)),
-                      ],
-                    )
-                  : _buildScrollableViewport(context),
+      body: _buildViewport(context),
+    );
+  }
+
+  Color _accentColor(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark
+        ? AppColors.primary.primaryDarkMode
+        : AppColors.primary.primary;
+  }
+
+  /// Um único scroll para todos os estados: o topo (com a busca) fica
+  /// montado enquanto a lista troca entre esqueleto, erro, vazio e itens —
+  /// assim o teclado não fecha no meio da digitação.
+  Widget _buildViewport(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    final sidePad =
+        width > _kMaxContentWidth ? (width - _kMaxContentWidth) / 2 : 0.0;
+    final firstLoad = _isLoading && _clients.isEmpty;
+    final failed = !firstLoad && _errorMessage != null && _clients.isEmpty;
+    final empty = !firstLoad && !failed && _clients.isEmpty;
+
+    final slivers = <Widget>[
+      SliverToBoxAdapter(child: _buildHeader(context, firstLoad: firstLoad)),
+      if (firstLoad)
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, index) => _ClientRowSkeleton(isLast: index == 5),
+            childCount: 6,
+          ),
+        )
+      else if (failed)
+        SliverToBoxAdapter(child: _buildErrorState(context))
+      else if (empty)
+        SliverToBoxAdapter(child: _buildEmptyState(context))
+      else ...[
+        SliverToBoxAdapter(child: _buildListHeader(context)),
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, index) => _buildClientRow(
+              context,
+              _clients[index],
+              isLast: index == _clients.length - 1 && !_isLoadingMore,
+            ),
+            childCount: _clients.length,
+          ),
+        ),
+        if (_isLoadingMore)
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) => _ClientRowSkeleton(isLast: index == 1),
+              childCount: 2,
+            ),
+          ),
+        SliverToBoxAdapter(child: _buildListFooter(context)),
+      ],
+      const SliverToBoxAdapter(child: SizedBox(height: 28)),
+    ];
+
+    return RefreshIndicator(
+      onRefresh: () async {
+        await Future.wait([
+          _loadClients(refresh: true),
+          _loadStatistics(),
+        ]);
+      },
+      color: AppColors.primary.primary,
+      child: CustomScrollView(
+        controller: _scrollController,
+        physics: const BouncingScrollPhysics(
+          parent: AlwaysScrollableScrollPhysics(),
+        ),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        slivers: [
+          for (final sliver in slivers)
+            sidePad > 0
+                ? SliverPadding(
+                    padding: EdgeInsets.symmetric(horizontal: sidePad),
+                    sliver: sliver,
+                  )
+                : sliver,
+        ],
+      ),
     );
   }
 
@@ -346,6 +430,7 @@ class _ClientsPageState extends State<ClientsPage> {
     final brightness = Theme.of(context).brightness;
     final pm = AppTheme.styledPopupMenu(brightness);
     final base = Theme.of(context);
+    final accent = _accentColor(context);
 
     return Theme(
       data: base.copyWith(
@@ -373,7 +458,7 @@ class _ClientsPageState extends State<ClientsPage> {
               _navigateToCreate();
               break;
             case 'search':
-              _showSearchSheet(context);
+              _focusSearch();
               break;
             case 'filters':
               _openFilters(context);
@@ -396,123 +481,80 @@ class _ClientsPageState extends State<ClientsPage> {
           );
           final canCreate = _can(_kPermClientCreate);
           final canExport = _can(_kPermClientExport);
+          final filterCount = _activeFilterCount();
+
+          PopupMenuItem<String> item({
+            required String value,
+            required IconData icon,
+            required String label,
+            bool enabled = true,
+            bool locked = false,
+            Widget? trailing,
+          }) {
+            return PopupMenuItem<String>(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              value: value,
+              enabled: enabled,
+              child: Row(
+                children: [
+                  Icon(
+                    locked ? Icons.lock_outline_rounded : icon,
+                    size: 20,
+                    color: iconColor,
+                  ),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: locked ? lockedStyle : labelStyle,
+                    ),
+                  ),
+                  if (trailing != null) ...[
+                    const SizedBox(width: 8),
+                    trailing,
+                  ],
+                ],
+              ),
+            );
+          }
+
           return [
-            PopupMenuItem(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            item(
               value: 'new',
+              icon: Icons.person_add_alt_1,
+              label: 'Novo cliente',
               enabled: canCreate,
-              child: Text.rich(
-                TextSpan(children: [
-                  WidgetSpan(
-                    alignment: PlaceholderAlignment.middle,
-                    child: Icon(
-                      canCreate
-                          ? Icons.person_add_alt_1
-                          : Icons.lock_outline_rounded,
-                      size: 20,
-                      color: iconColor,
-                    ),
-                  ),
-                  const WidgetSpan(child: SizedBox(width: 10)),
-                  TextSpan(
-                    text: 'Novo cliente',
-                    style: canCreate ? labelStyle : lockedStyle,
-                  ),
-                ]),
-              ),
+              locked: !canCreate,
             ),
-            PopupMenuItem(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            item(
               value: 'search',
-              child: Text.rich(
-                TextSpan(children: [
-                  WidgetSpan(
-                    alignment: PlaceholderAlignment.middle,
-                    child: Icon(Icons.search, size: 20, color: iconColor),
-                  ),
-                  const WidgetSpan(child: SizedBox(width: 10)),
-                  TextSpan(text: 'Buscar', style: labelStyle),
-                ]),
-              ),
+              icon: Icons.search_rounded,
+              label: 'Buscar',
             ),
-            PopupMenuItem(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            item(
               value: 'filters',
-              child: Text.rich(
-                TextSpan(children: [
-                  WidgetSpan(
-                    alignment: PlaceholderAlignment.middle,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Icon(Icons.filter_list, size: 20, color: iconColor),
-                        if (_hasActiveFilters())
-                          Positioned(
-                            right: -2,
-                            top: -2,
-                            child: Container(
-                              width: 8,
-                              height: 8,
-                              decoration: const BoxDecoration(
-                                color: Colors.red,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  const WidgetSpan(child: SizedBox(width: 10)),
-                  TextSpan(text: 'Filtros', style: labelStyle),
-                ]),
-              ),
+              icon: Icons.tune_rounded,
+              label: 'Filtros',
+              trailing: filterCount > 0
+                  ? _CountBadge(count: filterCount, tone: accent)
+                  : null,
             ),
             const PopupMenuDivider(height: 10, thickness: 1),
-            PopupMenuItem(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            item(
               value: 'import',
+              icon: Icons.upload_file_rounded,
+              label: 'Importar planilha',
               enabled: canCreate,
-              child: Text.rich(
-                TextSpan(children: [
-                  WidgetSpan(
-                    alignment: PlaceholderAlignment.middle,
-                    child: Icon(
-                      canCreate ? Icons.upload_file : Icons.lock_outline_rounded,
-                      size: 20,
-                      color: iconColor,
-                    ),
-                  ),
-                  const WidgetSpan(child: SizedBox(width: 10)),
-                  TextSpan(
-                    text: 'Importar Excel',
-                    style: canCreate ? labelStyle : lockedStyle,
-                  ),
-                ]),
-              ),
+              locked: !canCreate,
             ),
-            PopupMenuItem(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            item(
               value: 'export',
+              icon: Icons.file_download_outlined,
+              label: _exporting ? 'Exportando…' : 'Exportar planilha',
               enabled: canExport && !_exporting,
-              child: Text.rich(
-                TextSpan(children: [
-                  WidgetSpan(
-                    alignment: PlaceholderAlignment.middle,
-                    child: Icon(
-                      canExport
-                          ? Icons.download_outlined
-                          : Icons.lock_outline_rounded,
-                      size: 20,
-                      color: iconColor,
-                    ),
-                  ),
-                  const WidgetSpan(child: SizedBox(width: 10)),
-                  TextSpan(
-                    text: _exporting ? 'Exportando…' : 'Exportar dados',
-                    style: canExport ? labelStyle : lockedStyle,
-                  ),
-                ]),
-              ),
+              locked: !canExport,
             ),
           ];
         },
@@ -520,1680 +562,1040 @@ class _ClientsPageState extends State<ClientsPage> {
     );
   }
 
-  // ───────────────────────── Hero Header ─────────────────────────
+  // ───────────────────────── Topo da carteira ─────────────────────────
 
-  Color _accentColor(BuildContext context) {
-    return Theme.of(context).brightness == Brightness.dark
-        ? const Color(0xFFFF4D67)
-        : AppColors.primary.primary;
+  Widget _buildHeader(BuildContext context, {required bool firstLoad}) {
+    final hasFilters = _hasActiveFilters();
+    final showSummary = firstLoad || _clients.isNotEmpty;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.7),
+          ),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (showSummary) ...[
+              firstLoad
+                  ? const _SummarySkeleton()
+                  : _buildPortfolioSummary(context),
+              const SizedBox(height: 16),
+            ],
+            // Busca (a ação mais usada) com o botão de filtros colado nela.
+            Row(
+              children: [
+                Expanded(child: _buildSearchField(context)),
+                const SizedBox(width: 10),
+                _buildFilterButton(context),
+              ],
+            ),
+            _buildSearchHint(context),
+            const SizedBox(height: 12),
+            _buildHeaderActions(context),
+            if (hasFilters) ...[
+              const SizedBox(height: 12),
+              _buildFilterStrip(context),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
-  Widget _buildClientsHeader(BuildContext context) {
+  /// Quantos clientes há (o número que importa) + a composição por tipo.
+  /// Sem busca, as estatísticas seguem os mesmos filtros da lista.
+  Widget _buildPortfolioSummary(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final accent = _accentColor(context);
-    final hasFilters = _hasActiveFilters();
+    final textColor = ThemeHelpers.textColor(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
     final hasSearch = _searchQuery.trim().isNotEmpty;
-    final gatedGlobal = !hasFilters && !hasSearch;
+    final hasFilters = _hasActiveFilters();
+    final stats = hasSearch ? null : _statistics;
+    final total = _total;
 
-    final subtitleParts = [
-      DateFormat("'Atualização' HH:mm · d MMMM", 'pt_BR').format(DateTime.now()),
-      if (_totalPages > 1) 'página $_currentPage de $_totalPages',
-      if (_statistics != null && gatedGlobal) 'KPIs sincronizados com o CRM',
-      if (hasSearch)
-        'busca ativa para “${_searchQuery.length > 32 ? '${_searchQuery.substring(0, 32)}…' : _searchQuery}”'
-      else if (hasFilters)
-        'filtro granular ativo'
-    ].where((s) => s.trim().isNotEmpty).join(' · ');
+    final String label;
+    if (hasSearch) {
+      label = total == 1 ? 'cliente encontrado' : 'clientes encontrados';
+    } else if (hasFilters) {
+      label = total == 1
+          ? 'cliente com estes filtros'
+          : 'clientes com estes filtros';
+    } else {
+      label = total == 1 ? 'cliente na carteira' : 'clientes na carteira';
+    }
 
-    final headline = hasSearch ? 'Radar de clientes' : 'Hub de relacionamento';
+    String? detail;
+    if (hasSearch) {
+      final q = _searchQuery.trim();
+      detail = 'para “${q.length > 40 ? '${q.substring(0, 40)}…' : q}”';
+    } else if (stats != null && stats.totalClients > 0) {
+      final inactive = stats.totalClients - stats.activeClients;
+      detail = '${_compactIntFormatter.format(stats.activeClients)} '
+          '${stats.activeClients == 1 ? 'ativo' : 'ativos'} · '
+          '${_compactIntFormatter.format(inactive < 0 ? 0 : inactive)} '
+          '${inactive == 1 ? 'inativo' : 'inativos'}';
+    }
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final w = constraints.maxWidth;
-        final compact = w < 360;
-        final narrow = w < 332;
-        final spread = w >= 480;
-        final actionsTop = w >= 640;
-        final pillsBesideInsight = w >= 520;
+    final typeCounts = <MapEntry<ClientType, int>>[
+      if (stats != null) ...[
+        MapEntry(ClientType.buyer, stats.buyers),
+        MapEntry(ClientType.seller, stats.sellers),
+        MapEntry(ClientType.renter, stats.renters),
+        MapEntry(ClientType.lessor, stats.lessors),
+        MapEntry(ClientType.investor, stats.investors),
+        MapEntry(ClientType.general, stats.generalClients),
+      ],
+    ].where((e) => e.value > 0).toList();
 
-        final padH = narrow ? 12.0 : (compact ? 16.0 : _kHeaderPadH);
-        final statSep = compact ? 6.0 : 8.0;
-        final innerW = (w - padH * 2).clamp(0.0, double.infinity).toDouble();
-        final kpiCols = innerW >= 360 ? 4 : 2;
-        final statH = compact ? 72.0 : (w >= 520 ? 78.0 : 74.0);
-
-        final mainTitles = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
           children: [
-            Text(
-              'GESTÃO DE CLIENTES',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: accent,
-                letterSpacing: compact ? 1.15 : 2.35,
-                fontWeight: FontWeight.w900,
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 180),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _compactIntFormatter.format(total),
+                  maxLines: 1,
+                  softWrap: false,
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -1.0,
+                    height: 1.0,
+                    color: textColor,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              headline,
-              style: (compact
-                      ? theme.textTheme.titleMedium
-                      : theme.textTheme.titleLarge)
-                  ?.copyWith(
-                fontWeight: FontWeight.w900,
-                height: 1.02,
-                color: ThemeHelpers.textColor(context),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      height: 1.2,
+                      color: textColor,
+                    ),
+                  ),
+                  if (detail != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      detail,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        height: 1.3,
+                        color: muted,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           ],
-        );
-
-        final dateLineWidget = Text(
-          subtitleParts,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: ThemeHelpers.textSecondaryColor(context),
-            fontWeight: FontWeight.w600,
-            height: 1.35,
-          ),
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
-          textAlign: spread ? TextAlign.right : TextAlign.start,
-        );
-
-        final quickActions = <Widget>[
-          _buildQuickActionButton(
-            context,
-            icon: _can(_kPermClientCreate)
-                ? Icons.person_add_alt_1
-                : Icons.lock_outline_rounded,
-            label: 'Novo cliente',
-            isPrimary: true,
-            onPressed: _navigateToCreate,
-          ),
-          _buildQuickActionButton(
-            context,
-            icon: Icons.tune_rounded,
-            label: hasFilters ? 'Filtros ativos' : 'Filtros',
-            highlight: hasFilters,
-            onPressed: () => _openFilters(context),
-          ),
-        ];
-
-        Widget pillRow() => Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _heroContextPills(
-                context,
-                gatedGlobal: gatedGlobal,
-                compact: compact,
-              ),
-            );
-
-        Widget insightBlock() => _buildHeroInsight(
-              context,
-              gatedGlobal: gatedGlobal,
-              hasSearch: hasSearch,
-              hasFilters: hasFilters,
-            );
-
-        Widget actionsBar() => Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              alignment: WrapAlignment.end,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: quickActions,
-            );
-
-        Widget heroTop;
-        if (!spread) {
-          heroTop = Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        ),
+        if (typeCounts.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 14,
+            runSpacing: 8,
             children: [
-              Row(
+              for (final e in typeCounts)
+                _TypeCount(
+                  icon: _clientTypeIcon(e.key),
+                  count: e.value,
+                  label: _typePlural(e.key, e.value),
+                ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  String _typePlural(ClientType type, int count) {
+    final one = count == 1;
+    switch (type) {
+      case ClientType.buyer:
+        return one ? 'comprador' : 'compradores';
+      case ClientType.seller:
+        return one ? 'vendedor' : 'vendedores';
+      case ClientType.renter:
+        return one ? 'locatário' : 'locatários';
+      case ClientType.lessor:
+        return one ? 'locador' : 'locadores';
+      case ClientType.investor:
+        return one ? 'investidor' : 'investidores';
+      case ClientType.general:
+        return one ? 'geral' : 'gerais';
+    }
+  }
+
+  Widget _buildSearchField(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final accent = _accentColor(context);
+    final idle = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(14),
+      borderSide: BorderSide(color: ThemeHelpers.borderColor(context)),
+    );
+
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: _searchController,
+      builder: (context, value, _) {
+        return TextField(
+          controller: _searchController,
+          focusNode: _searchFocus,
+          textInputAction: TextInputAction.search,
+          onChanged: _onSearchChanged,
+          onSubmitted: _handleSearch,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: ThemeHelpers.textColor(context),
+            fontWeight: FontWeight.w600,
+          ),
+          decoration: InputDecoration(
+            filled: true,
+            isDense: true,
+            hintText: 'Nome, telefone ou CPF',
+            hintMaxLines: 1,
+            hintStyle: theme.textTheme.bodyMedium?.copyWith(
+              color: muted,
+              fontWeight: FontWeight.w500,
+            ),
+            prefixIcon: Icon(Icons.search_rounded, color: muted, size: 22),
+            suffixIcon: value.text.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: 'Limpar busca',
+                    icon: Icon(Icons.close_rounded, color: muted, size: 20),
+                    onPressed: _clearSearch,
+                  ),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
+            border: idle,
+            enabledBorder: idle,
+            focusedBorder: idle.copyWith(
+              borderSide: BorderSide(color: accent, width: 1.6),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Com 1–2 letras a busca não dispara (regra do back) — em vez de parecer
+  /// travada, a tela diz o porquê.
+  Widget _buildSearchHint(BuildContext context) {
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: _searchController,
+      builder: (context, value, _) {
+        final len = value.text.trim().length;
+        if (len == 0 || len >= 3) return const SizedBox.shrink();
+        final muted = ThemeHelpers.textSecondaryColor(context);
+        return Padding(
+          padding: const EdgeInsets.only(top: 8, left: 4),
+          child: Row(
+            children: [
+              Icon(Icons.info_outline_rounded, size: 15, color: muted),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Digite ao menos 3 caracteres para buscar.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: muted,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Botão de filtros colado na busca — com a contagem de filtros ativos.
+  Widget _buildFilterButton(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accent = _accentColor(context);
+    final count = _activeFilterCount();
+    final active = count > 0;
+    final radius = BorderRadius.circular(14);
+
+    return Tooltip(
+      message: active
+          ? 'Filtros ($count ${count == 1 ? 'ativo' : 'ativos'})'
+          : 'Filtros',
+      child: Material(
+        // Mesmo preenchimento do campo de busca (fill do tema).
+        color: active
+            ? accent.withValues(alpha: isDark ? 0.16 : 0.08)
+            : (isDark
+                ? AppColors.background.backgroundSecondaryDarkMode
+                : AppColors.background.backgroundTertiary),
+        shape: RoundedRectangleBorder(
+          borderRadius: radius,
+          side: BorderSide(
+            color: active
+                ? accent.withValues(alpha: 0.55)
+                : ThemeHelpers.borderColor(context),
+            width: active ? 1.4 : 1,
+          ),
+        ),
+        child: InkWell(
+          onTap: () => _openFilters(context),
+          customBorder: RoundedRectangleBorder(borderRadius: radius),
+          child: SizedBox(
+            width: 52,
+            height: 52,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Center(
+                  child: Icon(
+                    Icons.tune_rounded,
+                    size: 22,
+                    color: active
+                        ? accent
+                        : ThemeHelpers.textSecondaryColor(context),
+                  ),
+                ),
+                if (active)
+                  Positioned(
+                    top: 5,
+                    right: 5,
+                    child: _CountBadge(count: count, tone: accent),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Cadastro (CTA da marca) + planilhas. Em tela estreita o CTA ocupa a
+  /// linha e as planilhas dividem a de baixo; em tela larga, uma linha só.
+  Widget _buildHeaderActions(BuildContext context) {
+    final canCreate = _can(_kPermClientCreate);
+    final canExport = _can(_kPermClientExport);
+
+    final create = _buildCreateCta(context);
+    final importButton = _buildSecondaryAction(
+      context,
+      icon: Icons.upload_file_rounded,
+      label: 'Importar planilha',
+      locked: !canCreate,
+      onTap: _showImportModal,
+    );
+    final exportButton = _buildSecondaryAction(
+      context,
+      icon: Icons.file_download_outlined,
+      label: _exporting ? 'Exportando…' : 'Exportar planilha',
+      locked: !canExport,
+      busy: _exporting,
+      onTap: _exportClients,
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= 480) {
+          return Row(
+            children: [
+              Expanded(flex: 5, child: create),
+              const SizedBox(width: 8),
+              Expanded(flex: 4, child: importButton),
+              const SizedBox(width: 8),
+              Expanded(flex: 4, child: exportButton),
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            create,
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(child: importButton),
+                const SizedBox(width: 8),
+                Expanded(child: exportButton),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// CTA de criação — vermelho da marca; sem permissão, travado com cadeado
+  /// (o toque explica o motivo em vez de sumir com o botão).
+  Widget _buildCreateCta(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final canCreate = _can(_kPermClientCreate);
+    final fg = canCreate
+        ? Colors.white
+        : ThemeHelpers.textSecondaryColor(context);
+    final radius = BorderRadius.circular(14);
+
+    return Material(
+      color: canCreate
+          ? _accentColor(context)
+          : (isDark
+              ? AppColors.background.backgroundTertiaryDarkMode
+              : AppColors.background.backgroundTertiary),
+      borderRadius: radius,
+      child: InkWell(
+        onTap: _navigateToCreate,
+        borderRadius: radius,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      canCreate
+                          ? Icons.person_add_alt_1
+                          : Icons.lock_outline_rounded,
+                      size: 19,
+                      color: fg,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Novo cliente',
+                      maxLines: 1,
+                      softWrap: false,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14.5,
+                        letterSpacing: -0.1,
+                        color: fg,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Ação secundária neutra (planilhas). Travada: cadeado + texto apagado.
+  Widget _buildSecondaryAction(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required bool locked,
+    required VoidCallback onTap,
+    bool busy = false,
+  }) {
+    final theme = Theme.of(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final fg = locked
+        ? muted.withValues(alpha: 0.75)
+        : ThemeHelpers.textColor(context);
+    final radius = BorderRadius.circular(14);
+
+    return Material(
+      color: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: radius,
+        side: BorderSide(color: ThemeHelpers.borderColor(context)),
+      ),
+      child: InkWell(
+        onTap: busy ? null : onTap,
+        customBorder: RoundedRectangleBorder(borderRadius: radius),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 46),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (busy)
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: muted,
+                        ),
+                      )
+                    else
+                      Icon(
+                        locked ? Icons.lock_outline_rounded : icon,
+                        size: 18,
+                        color: locked ? muted : _accentColor(context),
+                      ),
+                    const SizedBox(width: 8),
+                    Text(
+                      label,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13.5,
+                        color: fg,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Faixa com o que está filtrado, em palavras — e o atalho para limpar.
+  Widget _buildFilterStrip(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = _accentColor(context);
+    final labels = _activeFilterLabels();
+    final text = labels.isEmpty ? 'Filtros aplicados' : labels.join(' · ');
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: isDark ? 0.12 : 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: accent.withValues(alpha: 0.24)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.filter_alt_outlined, size: 17, color: accent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Text(
+                text,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  height: 1.3,
+                  color: ThemeHelpers.textColor(context),
+                ),
+              ),
+            ),
+          ),
+          // Limpar não é destrutivo: neutro (o tema pintaria de vermelho).
+          TextButton(
+            onPressed: _clearFilters,
+            style: TextButton.styleFrom(
+              foregroundColor: ThemeHelpers.textColor(context),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              minimumSize: const Size(0, 36),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              textStyle: const TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
+              ),
+            ),
+            child: const Text('Limpar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ───────────────────────── Lista ─────────────────────────
+
+  /// Linha acima da lista: em que ordem os clientes estão e quantos já
+  /// apareceram do total.
+  Widget _buildListHeader(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+      child: Row(
+        children: [
+          Icon(Icons.swap_vert_rounded, size: 16, color: muted),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              _sortLabel(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: muted,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${_compactIntFormatter.format(_clients.length)} de '
+            '${_compactIntFormatter.format(_total)}',
+            style: theme.textTheme.labelMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: ThemeHelpers.textColor(context),
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openDetails(Client client) {
+    Navigator.pushNamed(context, AppRoutes.clientDetails(client.id))
+        .then((_) {
+      if (!mounted) return;
+      _loadClients(refresh: true);
+    });
+  }
+
+  /// Linha flush do cliente: quem é, situação e tipo, telefone e cidade,
+  /// quem atende e há quanto tempo mexeram — e os atalhos para falar com
+  /// ele sem abrir a ficha.
+  Widget _buildClientRow(
+    BuildContext context,
+    Client client, {
+    required bool isLast,
+  }) {
+    final theme = Theme.of(context);
+    final textColor = ThemeHelpers.textColor(context);
+
+    final phone = client.phone.trim();
+    final whatsapp = (client.whatsapp ?? '').trim();
+    final email = client.email.trim();
+    final secondary = (client.secondaryPhone ?? '').trim();
+    final mainPhone = phone.isNotEmpty
+        ? phone
+        : (whatsapp.isNotEmpty ? whatsapp : secondary);
+    final place = [client.city.trim(), client.state.trim()]
+        .where((s) => s.isNotEmpty)
+        .join('/');
+
+    final contactParts = <String>[
+      if (mainPhone.isNotEmpty)
+        ClientPhoneRules.maskAuto(mainPhone)
+      else if (email.isNotEmpty)
+        email,
+      if (place.isNotEmpty) place,
+    ];
+    final contactIcon = mainPhone.isNotEmpty
+        ? Icons.phone_outlined
+        : (email.isNotEmpty
+            ? Icons.alternate_email_rounded
+            : Icons.place_outlined);
+
+    final responsible = client.responsibleUser?.name.trim() ?? '';
+    final captor = client.capturedBy?.name.trim() ?? '';
+    final showCaptor =
+        captor.isNotEmpty && client.capturedById != client.responsibleUserId;
+    final updated = _updatedLabel(client);
+    final peopleParts = <String>[
+      if (responsible.isNotEmpty) 'Atendido por $responsible',
+      if (showCaptor) 'captado por $captor',
+      if (updated != null) updated,
+    ];
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _openDetails(client),
+        onLongPress: () => _showClientActions(context, client),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 6, 14),
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _heroLeadingIcon(context),
+                  _ClientInitialsAvatar(initials: _initialsFor(client.name)),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        mainTitles,
-                        const SizedBox(height: 6),
-                        dateLineWidget,
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              pillRow(),
-              const SizedBox(height: 10),
-              insightBlock(),
-              const SizedBox(height: 10),
-              Align(alignment: Alignment.centerRight, child: actionsBar()),
-            ],
-          );
-        } else {
-          heroTop = Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _heroLeadingIcon(context),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(flex: 52, child: mainTitles),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          flex: 48,
-                          child: Align(
-                            alignment: Alignment.topRight,
-                            child: dateLineWidget,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (actionsTop) ...[
-                    const SizedBox(width: 12),
-                    actionsBar(),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (pillsBesideInsight)
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(flex: 42, child: pillRow()),
-                    const SizedBox(width: 12),
-                    Expanded(flex: 58, child: insightBlock()),
-                  ],
-                )
-              else ...[
-                pillRow(),
-                const SizedBox(height: 10),
-                insightBlock(),
-              ],
-              if (!actionsTop) ...[
-                const SizedBox(height: 10),
-                Align(alignment: Alignment.centerRight, child: actionsBar()),
-              ],
-            ],
-          );
-        }
-
-        return Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDark
-                  ? [
-                      AppColors.background.backgroundDarkMode,
-                      AppColors.background.backgroundSecondaryDarkMode,
-                    ]
-                  : const [Colors.transparent, Colors.transparent],
-            ),
-            border: Border(
-              bottom: BorderSide(
-                color: ThemeHelpers.borderColor(context).withValues(alpha: 0.65),
-              ),
-            ),
-          ),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              ..._heroAmbientGlows(context),
-              Padding(
-                padding: EdgeInsets.fromLTRB(padH, _kHeaderPadVTop, padH, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    heroTop,
-                    SizedBox(height: compact ? 8 : 10),
-                    _buildHeroKpiStripe(
-                      _heroKpiTiles(context, th: statH, gatedGlobal: gatedGlobal),
-                      statSep,
-                      kpiCols,
-                    ),
-                    if (hasFilters || hasSearch) ...[
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          if (hasSearch)
-                            _buildActiveContextChip(
-                              context,
-                              Icons.search_rounded,
-                              _searchQuery,
-                              onClear: () {
-                                _searchController.clear();
-                                _handleSearch('');
-                              },
-                            ),
-                          if (hasFilters)
-                            _buildActiveContextChip(
-                              context,
-                              Icons.tune_rounded,
-                              'Filtros aplicados',
-                              onClear: () {
-                                setState(() => _filters = null);
-                                _persistState();
-                                _loadClients(refresh: true);
-                                _loadStatistics();
-                              },
-                            ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  List<Widget> _heroAmbientGlows(BuildContext context) {
-    final accent = _accentColor(context);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cool = isDark ? const Color(0xFF6366F1) : const Color(0xFF818CF8);
-    return [
-      Positioned(
-        top: -56,
-        right: -40,
-        child: IgnorePointer(
-          child: Container(
-            width: 220,
-            height: 220,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: [
-                  accent.withValues(alpha: isDark ? 0.24 : 0.14),
-                  accent.withValues(alpha: 0),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-      Positioned(
-        top: 120,
-        left: -90,
-        child: IgnorePointer(
-          child: Container(
-            width: 240,
-            height: 240,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: [
-                  cool.withValues(alpha: isDark ? 0.16 : 0.09),
-                  cool.withValues(alpha: 0),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    ];
-  }
-
-  Widget _heroLeadingIcon(BuildContext context) {
-    final accent = _accentColor(context);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      width: 40,
-      height: 40,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        gradient: LinearGradient(colors: [accent, const Color(0xFF7C3AED)]),
-        boxShadow: [
-          BoxShadow(
-            color: isDark
-                ? accent.withValues(alpha: 0.35)
-                : Colors.black.withValues(alpha: 0.14),
-            blurRadius: isDark ? 14 : 10,
-            offset: Offset(0, isDark ? 8 : 5),
-          ),
-        ],
-      ),
-      child: const Icon(Icons.diversity_3_outlined, color: Colors.white, size: 22),
-    );
-  }
-
-  Widget _buildQuickActionButton(
-    BuildContext context, {
-    required IconData icon,
-    required String label,
-    required VoidCallback onPressed,
-    bool isPrimary = false,
-    bool highlight = false,
-  }) {
-    final accent = _accentColor(context);
-    final theme = Theme.of(context);
-    final style = theme.textTheme.labelLarge?.copyWith(
-      fontWeight: FontWeight.w800,
-      fontSize: 12.75,
-      height: 1.15,
-      letterSpacing: -0.1,
-      color: isPrimary
-          ? Colors.white
-          : highlight
-              ? accent
-              : ThemeHelpers.textColor(context),
-    );
-
-    return InkWell(
-      onTap: onPressed,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: isPrimary
-              ? accent
-              : ShellVisualTokens.dashboardGlassFill(context),
-          border: Border.all(
-            color: isPrimary
-                ? accent
-                : highlight
-                    ? accent.withValues(alpha: 0.55)
-                    : ShellVisualTokens.dashboardGlassBorder(context),
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 18, color: isPrimary ? Colors.white : accent),
-            const SizedBox(width: 8),
-            Text(label, style: style),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHeroPill(BuildContext context, IconData icon, String label) {
-    final accent = _accentColor(context);
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final borderCol = ThemeHelpers.borderColor(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: isDark
-            ? accent.withValues(alpha: 0.07)
-            : ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: isDark
-              ? accent.withValues(alpha: 0.14)
-              : borderCol.withValues(alpha: 0.55),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: accent),
-          const SizedBox(width: 7),
-          Text(
-            label,
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: ThemeHelpers.textColor(context),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  List<Widget> _heroContextPills(
-    BuildContext context, {
-    required bool gatedGlobal,
-    required bool compact,
-  }) {
-    final pageChip = _totalPages > 1
-        ? 'Pág. $_currentPage · $_totalPages'
-        : '${_compactIntFormatter.format(_clients.length)} neste painel';
-    return [
-      _buildHeroPill(
-        context,
-        gatedGlobal ? Icons.diversity_2_outlined : Icons.filter_alt_outlined,
-        gatedGlobal ? 'Carteira CRM' : 'Contexto filtrado',
-      ),
-      _buildHeroPill(
-        context,
-        Icons.visibility_outlined,
-        compact && pageChip.length > 18 ? '${_clients.length} itens' : pageChip,
-      ),
-    ];
-  }
-
-  Widget _buildHeroInsight(
-    BuildContext context, {
-    required bool gatedGlobal,
-    required bool hasSearch,
-    required bool hasFilters,
-  }) {
-    final theme = Theme.of(context);
-    final stats = _statistics;
-    final m = _listedMetrics();
-
-    late final IconData insightIcon;
-    late final Color iconBg;
-    late final Color iconFg;
-    late final String body;
-
-    if (hasSearch) {
-      insightIcon = Icons.manage_search_rounded;
-      iconBg = ThemeHelpers.borderColor(context).withValues(alpha: 0.20);
-      iconFg = ThemeHelpers.textSecondaryColor(context);
-      body =
-          'Busca textual combinada com os filtros atuais — confira os KPIs para validar o perfil dos resultados.';
-    } else if (hasFilters) {
-      insightIcon = Icons.tune_rounded;
-      iconBg = _accentColor(context).withValues(alpha: 0.14);
-      iconFg = _accentColor(context);
-      body =
-          'Métricas espelham o filtro granular. Limpe o chip de contexto para voltar à carteira completa.';
-    } else if (stats != null && gatedGlobal) {
-      insightIcon = Icons.auto_graph_rounded;
-      iconFg = AppColors.status.success;
-      iconBg = AppColors.status.success.withValues(alpha: 0.14);
-      body =
-          '${_compactIntFormatter.format(stats.totalClients)} clientes no CRM · '
-          '${_compactIntFormatter.format(stats.activeClients)} ativos · '
-          '${stats.buyers} compradores · ${stats.sellers} vendedores.';
-    } else {
-      insightIcon = Icons.layers_outlined;
-      iconFg = ThemeHelpers.textSecondaryColor(context);
-      iconBg = ThemeHelpers.borderColor(context).withValues(alpha: 0.18);
-      body = '$_total registros · ${m.active} ativos · '
-          '${m.withWhatsapp} com WhatsApp · ${m.withSpouse} com cônjuge.';
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(11),
-            decoration: BoxDecoration(shape: BoxShape.circle, color: iconBg),
-            child: Icon(insightIcon, color: iconFg, size: 22),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'INSIGHT CARTEIRA',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.65,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  body,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: ThemeHelpers.textColor(context),
-                    fontWeight: FontWeight.w700,
-                    height: 1.32,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ───────────────────────── KPI Stripe ─────────────────────────
-
-  Widget _buildHeroKpiStripe(List<Widget> tiles, double gap, int columns) {
-    assert(tiles.length == 4);
-    Widget row2(Widget a, Widget b) => Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(child: a),
-            SizedBox(width: gap),
-            Expanded(child: b),
-          ],
-        );
-    if (columns >= 4) {
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(child: tiles[0]),
-          SizedBox(width: gap),
-          Expanded(child: tiles[1]),
-          SizedBox(width: gap),
-          Expanded(child: tiles[2]),
-          SizedBox(width: gap),
-          Expanded(child: tiles[3]),
-        ],
-      );
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        row2(tiles[0], tiles[1]),
-        SizedBox(height: gap),
-        row2(tiles[2], tiles[3]),
-      ],
-    );
-  }
-
-  List<Widget> _heroKpiTiles(
-    BuildContext context, {
-    required double th,
-    required bool gatedGlobal,
-  }) {
-    final accent = _accentColor(context);
-    final stats = _statistics;
-    final m = _listedMetrics();
-
-    if (stats != null && gatedGlobal) {
-      return [
-        _buildKpiTile(
-          context,
-          value: _compactIntFormatter.format(stats.totalClients),
-          label: 'Total CRM',
-          icon: Icons.diversity_2_outlined,
-          accent: accent,
-          tileHeight: th,
-        ),
-        _buildKpiTile(
-          context,
-          value: _compactIntFormatter.format(stats.activeClients),
-          label: 'Ativos',
-          icon: Icons.verified_user_outlined,
-          accent: AppColors.status.success,
-          tileHeight: th,
-        ),
-        _buildKpiTile(
-          context,
-          value: _compactIntFormatter.format(stats.buyers),
-          label: 'Compradores',
-          icon: Icons.shopping_bag_outlined,
-          accent: const Color(0xFF3B82F6),
-          tileHeight: th,
-        ),
-        _buildKpiTile(
-          context,
-          value: _compactIntFormatter.format(stats.sellers),
-          label: 'Vendedores',
-          icon: Icons.sell_outlined,
-          accent: const Color(0xFFF59E0B),
-          tileHeight: th,
-        ),
-      ];
-    }
-
-    return [
-      _buildKpiTile(
-        context,
-        value: _compactIntFormatter.format(_total),
-        label: 'Filtro',
-        icon: Icons.filter_alt_outlined,
-        accent: const Color(0xFF6366F1),
-        tileHeight: th,
-      ),
-      _buildKpiTile(
-        context,
-        value: '${_clients.length}',
-        label: 'Nesta página',
-        icon: Icons.view_list_rounded,
-        accent: accent,
-        tileHeight: th,
-      ),
-      _buildKpiTile(
-        context,
-        value: '${m.active}',
-        label: 'Ativos',
-        icon: Icons.verified_user_outlined,
-        accent: AppColors.status.success,
-        tileHeight: th,
-      ),
-      _buildKpiTile(
-        context,
-        value: '${m.buyers + m.renters}',
-        label: 'Demanda',
-        icon: Icons.trending_up_rounded,
-        accent: const Color(0xFF14B8A6),
-        tileHeight: th,
-      ),
-    ];
-  }
-
-  Widget _buildKpiTile(
-    BuildContext context, {
-    required String value,
-    required String label,
-    required IconData icon,
-    required Color accent,
-    required double tileHeight,
-  }) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final borderCol = ThemeHelpers.borderColor(context);
-
-    return SizedBox(
-      width: double.infinity,
-      height: tileHeight,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: isDark
-              ? accent.withValues(alpha: 0.065)
-              : ShellVisualTokens.dashboardGlassFill(context),
-          border: Border.all(
-            color: isDark
-                ? accent.withValues(alpha: 0.14)
-                : borderCol.withValues(alpha: 0.52),
-          ),
-          boxShadow: isDark
-              ? null
-              : [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 12,
-                    offset: const Offset(0, 3),
-                    spreadRadius: -2,
-                  ),
-                ],
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: accent.withValues(alpha: isDark ? 0.14 : 0.10),
-                border: Border.all(
-                  color: accent.withValues(alpha: isDark ? 0.26 : 0.24),
-                ),
-              ),
-              child: Icon(icon, size: 18, color: accent),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      value,
-                      maxLines: 1,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.35,
-                        height: 1.05,
-                        color: ThemeHelpers.textColor(context),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.2,
-                      fontSize: 10,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildActiveContextChip(
-    BuildContext context,
-    IconData icon,
-    String label, {
-    VoidCallback? onClear,
-  }) {
-    final accent = _accentColor(context);
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        color: accent.withValues(alpha: isDark ? 0.16 : 0.10),
-        border: Border.all(color: accent.withValues(alpha: 0.32)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: accent),
-          const SizedBox(width: 6),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 220),
-            child: Text(
-              label,
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w800,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          if (onClear != null) ...[
-            const SizedBox(width: 4),
-            InkWell(
-              onTap: onClear,
-              borderRadius: BorderRadius.circular(999),
-              child: Padding(
-                padding: const EdgeInsets.all(2),
-                child: Icon(Icons.close_rounded, size: 14, color: accent),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  // ───────────────────────── Métricas listagem ─────────────────────────
-
-  _ListedClientMetrics _listedMetrics() {
-    int active = 0,
-        inactive = 0,
-        contacted = 0,
-        interested = 0,
-        closed = 0,
-        buyers = 0,
-        sellers = 0,
-        renters = 0,
-        lessors = 0,
-        investors = 0,
-        general = 0,
-        withSpouse = 0,
-        withWhatsapp = 0,
-        mcmv = 0;
-
-    for (final c in _clients) {
-      if (c.isActive) {
-        active++;
-      } else {
-        inactive++;
-      }
-      switch (c.status) {
-        case ClientStatus.active:
-          break;
-        case ClientStatus.inactive:
-          break;
-        case ClientStatus.contacted:
-          contacted++;
-          break;
-        case ClientStatus.interested:
-          interested++;
-          break;
-        case ClientStatus.closed:
-          closed++;
-          break;
-      }
-      switch (c.type) {
-        case ClientType.buyer:
-          buyers++;
-          break;
-        case ClientType.seller:
-          sellers++;
-          break;
-        case ClientType.renter:
-          renters++;
-          break;
-        case ClientType.lessor:
-          lessors++;
-          break;
-        case ClientType.investor:
-          investors++;
-          break;
-        case ClientType.general:
-          general++;
-          break;
-      }
-      if (c.spouse != null) withSpouse++;
-      if ((c.whatsapp ?? '').trim().isNotEmpty) withWhatsapp++;
-      if (c.mcmvInterested == true) mcmv++;
-    }
-
-    return _ListedClientMetrics(
-      active: active,
-      inactive: inactive,
-      contacted: contacted,
-      interested: interested,
-      closed: closed,
-      buyers: buyers,
-      sellers: sellers,
-      renters: renters,
-      lessors: lessors,
-      investors: investors,
-      general: general,
-      withSpouse: withSpouse,
-      withWhatsapp: withWhatsapp,
-      mcmv: mcmv,
-    );
-  }
-
-  // ───────────────────────── Viewport / Lista ─────────────────────────
-
-  Widget _buildScrollableViewport(BuildContext context) {
-    return RefreshIndicator(
-      onRefresh: () async {
-        await Future.wait([
-          _loadClients(refresh: true),
-          _loadStatistics(),
-        ]);
-      },
-      color: AppColors.primary.primary,
-      child: CustomScrollView(
-        controller: _scrollController,
-        physics: const BouncingScrollPhysics(
-          parent: AlwaysScrollableScrollPhysics(),
-        ),
-        slivers: [
-          SliverToBoxAdapter(child: _buildClientsHeader(context)),
-          SliverToBoxAdapter(child: _buildSearchBar(context)),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-            sliver: SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  if (index >= _clients.length) {
-                    return const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 18),
-                      child: Center(
-                        child: SizedBox(
-                          width: 28,
-                          height: 28,
-                          child: CircularProgressIndicator(strokeWidth: 2.5),
-                        ),
-                      ),
-                    );
-                  }
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: _buildClientCard(context, _clients[index]),
-                  );
-                },
-                childCount: _clients.length + (_isLoadingMore ? 1 : 0),
-              ),
-            ),
-          ),
-          if (_totalPages > 1)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.only(top: 4, bottom: 4),
-                child: _buildPagination(context),
-              ),
-            ),
-          const SliverToBoxAdapter(child: SizedBox(height: 12)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSearchBar(BuildContext context) {
-    final theme = Theme.of(context);
-    final accent = _accentColor(context);
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-      child: Container(
-        decoration: BoxDecoration(
-          color: ThemeHelpers.cardBackgroundColor(context),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: ThemeHelpers.borderLightColor(context),
-            width: 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 6, 0),
-              child: Icon(
-                Icons.search_rounded,
-                color: accent.withValues(alpha: 0.85),
-              ),
-            ),
-            Expanded(
-              child: TextField(
-                controller: _searchController,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: ThemeHelpers.textColor(context),
-                  fontWeight: FontWeight.w500,
-                ),
-                decoration: InputDecoration(
-                  hintText: 'Buscar nome, email, telefone, CPF…',
-                  hintStyle: theme.textTheme.bodyMedium?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    fontWeight: FontWeight.w500,
-                  ),
-                  border: InputBorder.none,
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 14),
-                ),
-                onChanged: _onSearchChanged,
-                textInputAction: TextInputAction.search,
-                onSubmitted: _handleSearch,
-              ),
-            ),
-            if (_searchQuery.isNotEmpty)
-              IconButton(
-                tooltip: 'Limpar busca',
-                icon: Icon(
-                  Icons.close_rounded,
-                  color: ThemeHelpers.textSecondaryColor(context),
-                ),
-                onPressed: () {
-                  _searchController.clear();
-                  _handleSearch('');
-                },
-              )
-            else
-              IconButton(
-                tooltip: 'Filtros',
-                icon: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Icon(
-                      Icons.tune_rounded,
-                      color: ThemeHelpers.textSecondaryColor(context),
-                    ),
-                    if (_hasActiveFilters())
-                      Positioned(
-                        right: -2,
-                        top: -2,
-                        child: Container(
-                          width: 8,
-                          height: 8,
-                          decoration: const BoxDecoration(
-                            color: Colors.red,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                onPressed: () => _openFilters(context),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ───────────────────────── Card de Cliente ─────────────────────────
-
-  Widget _buildClientCard(BuildContext context, Client client) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final typeColor = _typeColor(client.type, context);
-    final statusColor = _statusColor(client.status);
-    final initials = _initialsFor(client.name);
-    final muted = ThemeHelpers.textSecondaryColor(context);
-
-    final phone = client.phone.trim();
-    final whatsapp = (client.whatsapp ?? '').trim();
-    final email = client.email.trim();
-    final hasCity = client.city.trim().isNotEmpty;
-    final hasContacts =
-        phone.isNotEmpty || whatsapp.isNotEmpty || email.isNotEmpty;
-
-    final summaryParts = <String>[];
-    if (email.isNotEmpty) summaryParts.add(email);
-    if (whatsapp.isNotEmpty) {
-      summaryParts.add(Masks.phone(whatsapp));
-    } else if (phone.isNotEmpty) {
-      summaryParts.add(Masks.phone(phone));
-    }
-    if (hasCity) {
-      summaryParts.add(
-        client.state.trim().isNotEmpty
-            ? '${client.city} · ${client.state}'
-            : client.city,
-      );
-    }
-
-    return Material(
-      color: Colors.transparent,
-      child: Ink(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: isDark
-                ? [
-                    typeColor.withValues(alpha: 0.12),
-                    typeColor.withValues(alpha: 0.03),
-                  ]
-                : [
-                    Colors.white,
-                    typeColor.withValues(alpha: 0.06),
-                  ],
-          ),
-          border: Border.all(
-            color: typeColor.withValues(alpha: isDark ? 0.30 : 0.22),
-          ),
-          boxShadow: isDark
-              ? null
-              : [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.06),
-                    blurRadius: 16,
-                    offset: const Offset(0, 5),
-                    spreadRadius: -3,
-                  ),
-                ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: InkWell(
-            onTap: () => Navigator.pushNamed(
-              context,
-              AppRoutes.clientDetails(client.id),
-            ).then((_) => _loadClients(refresh: true)),
-            onLongPress: () => _showClientActions(context, client),
-            child: IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Faixa lateral colorida — indicador visual de tipo
-                  Container(
-                    width: 5,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          typeColor.withValues(alpha: 0.9),
-                          typeColor.withValues(alpha: 0.45),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Linha principal: avatar + nome + matches + menu
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              _buildAvatar(
-                                context,
-                                initials: initials,
-                                typeColor: typeColor,
-                                typeIcon: _iconForType(client.type),
-                                statusColor: statusColor,
-                                isActive: client.isActive,
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      client.name,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.titleMedium
-                                          ?.copyWith(
-                                        fontWeight: FontWeight.w900,
-                                        color:
-                                            ThemeHelpers.textColor(context),
-                                        height: 1.05,
-                                        letterSpacing: -0.35,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 5),
-                                    Wrap(
-                                      spacing: 6,
-                                      runSpacing: 4,
-                                      crossAxisAlignment:
-                                          WrapCrossAlignment.center,
-                                      children: [
-                                        _typePill(
-                                          context,
-                                          label: client.type.label,
-                                          color: typeColor,
-                                          icon: _iconForType(client.type),
-                                        ),
-                                        _statusDot(
-                                          context,
-                                          color: statusColor,
-                                          label: client.status.label,
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              // Matches oculto no app: pill fora do card.
-                              if (FeatureVisibility.matchesEnabled)
-                                _MatchesPill(
-                                  clientId: client.id,
-                                  accent: typeColor,
-                                  onTap: () => Navigator.pushNamed(
-                                    context,
-                                    AppRoutes.matchesByClient(client.id),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.only(top: 3),
+                                child: Text(
+                                  client.name.trim().isEmpty
+                                      ? 'Cliente sem nome'
+                                      : client.name,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 15.5,
+                                    height: 1.2,
+                                    letterSpacing: -0.2,
+                                    color: textColor,
                                   ),
                                 ),
-                              _buildCardOverflowMenu(context, client),
-                            ],
+                              ),
+                            ),
+                            // Matches oculto no app: pill fora da linha.
+                            if (FeatureVisibility.matchesEnabled)
+                              _MatchesPill(
+                                clientId: client.id,
+                                accent: _accentColor(context),
+                                onTap: () => Navigator.pushNamed(
+                                  context,
+                                  AppRoutes.matchesByClient(client.id),
+                                ),
+                              ),
+                            _buildCardOverflowMenu(context, client),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 6,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            _StatusPill(
+                              label: client.status.label,
+                              tone: _statusTone(context, client.status),
+                            ),
+                            _MetaTag(
+                              icon: _clientTypeIcon(client.type),
+                              label: client.type.label,
+                            ),
+                            if (!client.isActive &&
+                                client.status != ClientStatus.inactive)
+                              const _MetaTag(
+                                icon: Icons.block_rounded,
+                                label: 'Desativado',
+                              ),
+                          ],
+                        ),
+                        if (contactParts.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          _InfoLine(
+                            icon: contactIcon,
+                            text: contactParts.join(' · '),
+                            strong: true,
                           ),
-                          if (summaryParts.isNotEmpty) ...[
-                            const SizedBox(height: 10),
-                            _buildSummaryLine(
-                              context,
-                              parts: summaryParts,
-                              muted: muted,
-                            ),
-                          ],
-                          if (hasContacts ||
-                              client.responsibleUser != null) ...[
-                            const SizedBox(height: 10),
-                            _buildActionsAndFooter(
-                              context,
-                              client: client,
-                              phone: phone,
-                              whatsapp: whatsapp,
-                              email: email,
-                              accent: typeColor,
-                            ),
-                          ],
                         ],
-                      ),
+                        if (peopleParts.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          _InfoLine(
+                            icon: Icons.support_agent,
+                            text: peopleParts.join(' · '),
+                            maxLines: 2,
+                          ),
+                        ],
+                        const SizedBox(height: 10),
+                        _buildRowContactActions(
+                          context,
+                          phone: phone,
+                          whatsapp: whatsapp,
+                          email: email,
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAvatar(
-    BuildContext context, {
-    required String initials,
-    required Color typeColor,
-    required IconData typeIcon,
-    required Color statusColor,
-    required bool isActive,
-  }) {
-    final theme = Theme.of(context);
-    return SizedBox(
-      width: 54,
-      height: 54,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Container(
-            width: 54,
-            height: 54,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  typeColor.withValues(alpha: 0.95),
-                  typeColor.withValues(alpha: 0.55),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: typeColor.withValues(alpha: 0.32),
-                  blurRadius: 12,
-                  offset: const Offset(0, 5),
-                ),
-              ],
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              initials,
-              style: theme.textTheme.titleLarge?.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.w900,
-                letterSpacing: -0.5,
-                height: 1.0,
-              ),
-            ),
-          ),
-          // Mini ícone de tipo flutuante
-          Positioned(
-            right: -2,
-            top: -2,
-            child: Container(
-              width: 22,
-              height: 22,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: ThemeHelpers.cardBackgroundColor(context),
-                border: Border.all(
-                  color: typeColor.withValues(alpha: 0.6),
-                  width: 1.4,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.10),
-                    blurRadius: 4,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
-              ),
-              child: Icon(typeIcon, size: 12, color: typeColor),
-            ),
-          ),
-          // Status dot inferior
-          Positioned(
-            right: -2,
-            bottom: -2,
-            child: Container(
-              width: 16,
-              height: 16,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: isActive ? statusColor : AppColors.status.error,
-                border: Border.all(
-                  color: ThemeHelpers.cardBackgroundColor(context),
-                  width: 2.2,
+            if (!isLast)
+              Padding(
+                padding: const EdgeInsets.only(left: 72),
+                child: Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: ThemeHelpers.borderLightColor(context),
                 ),
               ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  Widget _typePill(
+  /// Atalhos de contato no próprio item — só aparecem os canais que o
+  /// cadastro tem; sem nenhum, a linha diz o que falta.
+  Widget _buildRowContactActions(
     BuildContext context, {
-    required String label,
-    required Color color,
-    required IconData icon,
-  }) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.32)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 11, color: color),
-          const SizedBox(width: 4),
-          Flexible(
-            child: Text(
-              label.toUpperCase(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: color,
-                fontWeight: FontWeight.w900,
-                fontSize: 9.5,
-                letterSpacing: 0.55,
-                height: 1.1,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _statusDot(
-    BuildContext context, {
-    required Color color,
-    required String label,
-  }) {
-    final theme = Theme.of(context);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: color,
-            boxShadow: [
-              BoxShadow(
-                color: color.withValues(alpha: 0.5),
-                blurRadius: 4,
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 4),
-        Flexible(
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-              fontWeight: FontWeight.w700,
-              fontSize: 10,
-              height: 1.1,
-              letterSpacing: 0.2,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSummaryLine(
-    BuildContext context, {
-    required List<String> parts,
-    required Color muted,
-  }) {
-    final theme = Theme.of(context);
-    final spans = <InlineSpan>[];
-    for (var i = 0; i < parts.length; i++) {
-      if (i > 0) {
-        spans.add(
-          TextSpan(
-            text: '  ·  ',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: muted.withValues(alpha: 0.45),
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        );
-      }
-      spans.add(
-        TextSpan(
-          text: parts[i],
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: muted,
-            fontWeight: FontWeight.w600,
-            fontSize: 12.5,
-          ),
-        ),
-      );
-    }
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Container(
-          width: 3,
-          height: 14,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(2),
-            color: muted.withValues(alpha: 0.22),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text.rich(
-            TextSpan(children: spans),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildActionsAndFooter(
-    BuildContext context, {
-    required Client client,
     required String phone,
     required String whatsapp,
     required String email,
-    required Color accent,
   }) {
-    final theme = Theme.of(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final muted = ThemeHelpers.textSecondaryColor(context);
-    final hasResponsible = client.responsibleUser != null;
-    final responsibleName = client.responsibleUser?.name ?? '';
 
-    final actions = <Widget>[];
-    if (whatsapp.isNotEmpty) {
-      actions.add(_quickContact(
-        context,
-        icon: Icons.chat_outlined,
-        label: 'WhatsApp',
-        color: const Color(0xFF25D366),
-        onTap: () => _launchUri('https://wa.me/${_onlyDigits(whatsapp)}'),
-      ));
-    }
-    if (phone.isNotEmpty) {
-      actions.add(_quickContact(
-        context,
-        icon: Icons.call_rounded,
-        label: 'Ligar',
-        color: const Color(0xFF3B82F6),
-        onTap: () => _launchUri('tel:${_onlyDigits(phone)}'),
-      ));
-    }
-    if (email.isNotEmpty) {
-      actions.add(_quickContact(
-        context,
-        icon: Icons.alternate_email_rounded,
-        label: 'Email',
-        color: const Color(0xFFF59E0B),
-        onTap: () => _launchUri('mailto:$email'),
-      ));
+    if (phone.isEmpty && whatsapp.isEmpty && email.isEmpty) {
+      return Text(
+        'Sem telefone ou e-mail cadastrado.',
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: muted,
+          fontWeight: FontWeight.w600,
+        ),
+      );
     }
 
-    if (actions.isEmpty && !hasResponsible) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(8, 6, 10, 6),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        color: accent.withValues(alpha: 0.06),
-        border: Border.all(color: accent.withValues(alpha: 0.16)),
-      ),
-      child: Row(
-        children: [
-          if (actions.isNotEmpty) ...[
-            for (var i = 0; i < actions.length; i++) ...[
-              if (i > 0)
-                Container(
-                  width: 1,
-                  height: 18,
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                  color: accent.withValues(alpha: 0.16),
-                ),
-              actions[i],
-            ],
-            if (hasResponsible) const SizedBox(width: 6),
-          ],
-          if (hasResponsible)
-            Expanded(
-              child: Row(
-                mainAxisAlignment: actions.isEmpty
-                    ? MainAxisAlignment.start
-                    : MainAxisAlignment.end,
-                children: [
-                  Icon(
-                    Icons.assignment_ind_outlined,
-                    size: 13,
-                    color: muted,
-                  ),
-                  const SizedBox(width: 4),
-                  Flexible(
-                    child: Text(
-                      responsibleName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: muted,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 10.5,
-                        letterSpacing: 0.2,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+    final onlyEmail = phone.isEmpty && whatsapp.isEmpty;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        if (whatsapp.isNotEmpty)
+          _ContactChipButton(
+            icon: Icons.chat_outlined,
+            label: 'WhatsApp',
+            tone: isDark ? _kWhatsappGreen : _kWhatsappGreenDeep,
+            onTap: () => _launchUri(
+              'https://wa.me/${BrokerContactActions.whatsappDigits(whatsapp)}',
             ),
-        ],
-      ),
+          ),
+        if (phone.isNotEmpty)
+          _ContactChipButton(
+            icon: Icons.call_rounded,
+            label: 'Ligar',
+            tone: isDark
+                ? AppColors.status.infoDarkMode
+                : AppColors.message.infoText,
+            onTap: () => _launchUri('tel:${_onlyDigits(phone)}'),
+          ),
+        if (email.isNotEmpty)
+          _ContactChipButton(
+            icon: Icons.mail_outline_rounded,
+            label: onlyEmail ? 'E-mail' : null,
+            tooltip: 'Enviar e-mail',
+            tone: muted,
+            onTap: () => _launchUri('mailto:$email'),
+          ),
+      ],
     );
   }
 
-  Widget _quickContact(
-    BuildContext context, {
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Tooltip(
-        message: label,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          child: Icon(icon, size: 17, color: color),
+  /// Fim da lista: quanto já apareceu e, se houver mais, o mesmo carregar
+  /// mais do scroll (a paginação por setas somava páginas repetidas).
+  Widget _buildListFooter(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+
+    // Falha ao buscar a próxima página: a lista continua visível e o erro
+    // aparece aqui, com a causa e o "Tentar de novo".
+    if (_errorMessage != null && _clients.isNotEmpty) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        child: AppErrorState.fromApi(
+          message: _errorMessage,
+          statusCode: _errorStatus,
+          error: _errorRaw,
+          onRetry: () => _loadClients(),
+          dense: true,
         ),
+      );
+    }
+
+    if (_isLoadingMore) return const SizedBox.shrink();
+
+    final hasMore = _currentPage < _totalPages;
+    if (hasMore) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
+        child: Column(
+          children: [
+            Text(
+              'Mostrando ${_compactIntFormatter.format(_clients.length)} de '
+              '${_compactIntFormatter.format(_total)} clientes',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: muted,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: _loadMoreClients,
+              icon: const Icon(Icons.expand_more_rounded, size: 18),
+              label: const Text(
+                'Carregar mais',
+                maxLines: 1,
+                softWrap: false,
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: ThemeHelpers.textColor(context),
+                side: BorderSide(color: ThemeHelpers.borderColor(context)),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                textStyle: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13.5,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.check_circle_outline_rounded, size: 16, color: muted),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              _total == 1
+                  ? 'Fim da lista · 1 cliente'
+                  : 'Fim da lista · ${_compactIntFormatter.format(_total)} clientes',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: muted,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildCardOverflowMenu(BuildContext context, Client client) {
-    return PopupMenuButton<String>(
-      icon: Icon(
-        Icons.more_horiz_rounded,
-        color: ThemeHelpers.textSecondaryColor(context),
-      ),
-      tooltip: 'Ações',
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-      ),
-      padding: EdgeInsets.zero,
-      iconSize: 22,
-      splashRadius: 22,
-      onSelected: (value) async {
-        switch (value) {
-          case 'view':
-            await Navigator.pushNamed(
-              context,
-              AppRoutes.clientDetails(client.id),
-            );
-            _loadClients(refresh: true);
-            break;
-          case 'edit':
-            if (!_guard(_kPermClientUpdate)) break;
-            await Navigator.pushNamed(
-              context,
-              AppRoutes.clientEdit(client.id),
-            );
-            _loadClients(refresh: true);
-            _loadStatistics();
-            break;
-          case 'matches':
-            Navigator.pushNamed(
-              context,
-              AppRoutes.matchesByClient(client.id),
-            );
-            break;
-          case 'transfer':
-            if (!_guard(_kPermClientTransfer)) break;
-            if (mounted) await _showTransferModal(context, client);
-            break;
-          case 'delete':
-            if (!_guard(_kPermClientDelete)) break;
-            if (mounted) await _showDeleteConfirmation(context, client);
-            break;
-        }
-      },
-      itemBuilder: (_) => [
-        const PopupMenuItem(
-          value: 'view',
-          child: Row(children: [
-            Icon(Icons.open_in_new_rounded, size: 18),
-            SizedBox(width: 10),
-            Text('Abrir'),
-          ]),
+    final pm = AppTheme.styledPopupMenuOf(context);
+    return SizedBox(
+      width: 36,
+      height: 36,
+      child: PopupMenuButton<String>(
+        tooltip: 'Ações do cliente',
+        padding: EdgeInsets.zero,
+        iconSize: 20,
+        icon: Icon(
+          Icons.more_vert_rounded,
+          color: ThemeHelpers.textSecondaryColor(context),
         ),
-        _lockableMenuItem(
-          value: 'edit',
-          icon: Icons.edit_outlined,
-          label: 'Editar',
-          permission: _kPermClientUpdate,
-        ),
-        // Matches oculto no app: item fora do menu.
-        if (FeatureVisibility.matchesEnabled)
-          const PopupMenuItem(
-            value: 'matches',
-            child: Row(children: [
-              Icon(Icons.handshake_outlined, size: 18),
-              SizedBox(width: 10),
-              Text('Ver matches'),
-            ]),
+        color: pm.color,
+        surfaceTintColor: pm.surfaceTintColor,
+        elevation: pm.elevation,
+        shadowColor: pm.shadowColor,
+        shape: pm.shape,
+        position: PopupMenuPosition.under,
+        onSelected: (value) async {
+          switch (value) {
+            case 'view':
+              await Navigator.pushNamed(
+                context,
+                AppRoutes.clientDetails(client.id),
+              );
+              _loadClients(refresh: true);
+              break;
+            case 'edit':
+              if (!_guard(_kPermClientUpdate)) break;
+              await Navigator.pushNamed(
+                context,
+                AppRoutes.clientEdit(client.id),
+              );
+              _loadClients(refresh: true);
+              _loadStatistics();
+              break;
+            case 'matches':
+              Navigator.pushNamed(
+                context,
+                AppRoutes.matchesByClient(client.id),
+              );
+              break;
+            case 'transfer':
+              if (!_guard(_kPermClientTransfer)) break;
+              if (mounted) await _showTransferModal(context, client);
+              break;
+            case 'delete':
+              if (!_guard(_kPermClientDelete)) break;
+              if (mounted) await _showDeleteConfirmation(context, client);
+              break;
+          }
+        },
+        itemBuilder: (_) => [
+          _plainMenuItem(
+            value: 'view',
+            icon: Icons.open_in_new_rounded,
+            label: 'Abrir',
           ),
-        _lockableMenuItem(
-          value: 'transfer',
-          icon: Icons.swap_horiz_rounded,
-          label: 'Transferir',
-          permission: _kPermClientTransfer,
+          _lockableMenuItem(
+            value: 'edit',
+            icon: Icons.edit_outlined,
+            label: 'Editar',
+            permission: _kPermClientUpdate,
+          ),
+          // Matches oculto no app: item fora do menu.
+          if (FeatureVisibility.matchesEnabled)
+            _plainMenuItem(
+              value: 'matches',
+              icon: Icons.handshake_outlined,
+              label: 'Ver matches',
+            ),
+          _lockableMenuItem(
+            value: 'transfer',
+            icon: Icons.swap_horiz_rounded,
+            label: 'Transferir',
+            permission: _kPermClientTransfer,
+          ),
+          const PopupMenuDivider(),
+          _lockableMenuItem(
+            value: 'delete',
+            icon: Icons.delete_outline,
+            label: 'Excluir',
+            permission: _kPermClientDelete,
+            destructive: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  PopupMenuItem<String> _plainMenuItem({
+    required String value,
+    required IconData icon,
+    required String label,
+  }) {
+    return PopupMenuItem<String>(
+      value: value,
+      child: Row(children: [
+        Icon(icon, size: 18),
+        const SizedBox(width: 10),
+        Flexible(
+          child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
-        const PopupMenuDivider(),
-        _lockableMenuItem(
-          value: 'delete',
-          icon: Icons.delete_outline,
-          label: 'Excluir',
-          permission: _kPermClientDelete,
-          destructive: true,
-        ),
-      ],
+      ]),
     );
   }
 
@@ -2253,389 +1655,196 @@ class _ClientsPageState extends State<ClientsPage> {
     return (parts.first.substring(0, 1) + parts.last.substring(0, 1)).toUpperCase();
   }
 
-  Color _typeColor(ClientType type, BuildContext context) {
-    switch (type) {
-      case ClientType.buyer:
-        return const Color(0xFF3B82F6);
-      case ClientType.seller:
-        return const Color(0xFFF59E0B);
-      case ClientType.renter:
-        return const Color(0xFF10B981);
-      case ClientType.lessor:
-        return const Color(0xFF06B6D4);
-      case ClientType.investor:
-        return const Color(0xFF8B5CF6);
-      case ClientType.general:
+  /// Cor de SIGNIFICADO do status (tokens de status). No selo ela pinta só
+  /// o ponto, o fundo e a borda — o texto fica na cor do texto, legível nos
+  /// dois temas mesmo no amarelo.
+  Color _statusTone(BuildContext context, ClientStatus status) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    switch (status) {
+      case ClientStatus.active:
+        return dark ? AppColors.status.successDarkMode : AppColors.status.success;
+      case ClientStatus.contacted:
+        return dark ? AppColors.status.infoDarkMode : AppColors.status.info;
+      case ClientStatus.interested:
+        return dark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+      case ClientStatus.closed:
+        return dark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
+      case ClientStatus.inactive:
         return ThemeHelpers.textSecondaryColor(context);
     }
   }
 
-  IconData _iconForType(ClientType type) {
-    switch (type) {
-      case ClientType.buyer:
-        return Icons.shopping_bag_outlined;
-      case ClientType.seller:
-        return Icons.sell_outlined;
-      case ClientType.renter:
-        return Icons.home_outlined;
-      case ClientType.lessor:
-        return Icons.business_outlined;
-      case ClientType.investor:
-        return Icons.trending_up_outlined;
-      case ClientType.general:
-        return Icons.person_outline;
+  /// "atualizado hoje / ontem / há 3 dias / em 12/03/25" — a última mexida
+  /// no cadastro (a listagem não traz a data do último contato).
+  String? _updatedLabel(Client client) {
+    final raw = client.updatedAt.trim().isNotEmpty
+        ? client.updatedAt.trim()
+        : client.createdAt.trim();
+    final parsed = DateTime.tryParse(raw);
+    if (parsed == null) return null;
+    final date = parsed.toLocal();
+    final now = DateTime.now();
+    final days = DateTime(now.year, now.month, now.day)
+        .difference(DateTime(date.year, date.month, date.day))
+        .inDays;
+    if (days <= 0) return 'atualizado hoje';
+    if (days == 1) return 'atualizado ontem';
+    if (days < 7) return 'atualizado há $days dias';
+    return 'atualizado em ${DateFormat('dd/MM/yy', 'pt_BR').format(date)}';
+  }
+
+  /// Ordem real da lista. Sem ordenação escolhida (ou sem direção), o back
+  /// usa data de cadastro e decrescente.
+  String _sortLabel() {
+    final f = _filters;
+    final by = (f?.sortBy ?? '').trim();
+    final asc = (f?.sortOrder ?? 'DESC').toUpperCase() == 'ASC';
+    switch (by) {
+      case 'name':
+        return asc ? 'Ordem: nome, de A a Z' : 'Ordem: nome, de Z a A';
+      case 'city':
+        return asc ? 'Ordem: cidade, de A a Z' : 'Ordem: cidade, de Z a A';
+      case 'status':
+        return asc ? 'Ordem: status, crescente' : 'Ordem: status, decrescente';
+      case 'type':
+        return asc ? 'Ordem: tipo, crescente' : 'Ordem: tipo, decrescente';
+      default:
+        return asc
+            ? 'Cadastros mais antigos primeiro'
+            : 'Cadastros mais recentes primeiro';
     }
   }
 
-  Color _statusColor(ClientStatus status) {
-    switch (status) {
-      case ClientStatus.active:
-        return AppColors.status.success;
-      case ClientStatus.inactive:
-        return AppColors.status.error;
-      case ClientStatus.contacted:
-        return AppColors.status.info;
-      case ClientStatus.interested:
-        return AppColors.status.warning;
-      case ClientStatus.closed:
-        return Colors.grey;
-    }
-  }
-
-  // ───────────────────────── Pagination ─────────────────────────
-
-  Widget _buildPagination(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final narrow = MediaQuery.sizeOf(context).width < 360;
-
-    return Container(
-      padding: EdgeInsets.fromLTRB(narrow ? 10 : 14, 4, narrow ? 10 : 14, 8),
-      child: Container(
-        padding: EdgeInsets.symmetric(horizontal: narrow ? 8 : 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: isDark
-              ? AppColors.background.backgroundSecondaryDarkMode
-              : AppColors.background.backgroundSecondary,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.76),
-          ),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Página $_currentPage de $_totalPages',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: ThemeHelpers.textColor(context),
-                      fontWeight: FontWeight.w900,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '$_total clientes encontrados',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                      fontWeight: FontWeight.w600,
-                    ),
-                    maxLines: narrow ? 2 : 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            IconButton.filledTonal(
-              constraints: narrow
-                  ? const BoxConstraints(minWidth: 38, minHeight: 38)
-                  : BoxConstraints.loose(const Size.square(48)),
-              padding: narrow ? EdgeInsets.zero : null,
-              icon: const Icon(Icons.chevron_left_rounded),
-              onPressed: _currentPage > 1
-                  ? () {
-                      setState(() => _currentPage--);
-                      _loadClients();
-                    }
-                  : null,
-            ),
-            const SizedBox(width: 8),
-            IconButton.filledTonal(
-              constraints: narrow
-                  ? const BoxConstraints(minWidth: 38, minHeight: 38)
-                  : BoxConstraints.loose(const Size.square(48)),
-              padding: narrow ? EdgeInsets.zero : null,
-              icon: const Icon(Icons.chevron_right_rounded),
-              onPressed: _currentPage < _totalPages
-                  ? () {
-                      setState(() => _currentPage++);
-                      _loadClients();
-                    }
-                  : null,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ───────────────────────── Skeleton / Empty / Error ─────────────────────────
-
-  Widget _buildSkeleton(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const SkeletonBox(width: double.infinity, height: 56, borderRadius: 16),
-          const SizedBox(height: 16),
-          ...List.generate(
-            6,
-            (index) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: SkeletonBox(
-                width: double.infinity,
-                height: 132,
-                borderRadius: 20,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  // ───────────────────────── Vazio / Erro ─────────────────────────
 
   Widget _buildErrorState(BuildContext context) {
-    return AppErrorState.fromApi(
-      message: _errorMessage,
-      statusCode: _errorStatus,
-      error: _errorRaw,
-      onRetry: () async {
-        await _loadClients(refresh: true);
-        await _loadStatistics();
-      },
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: AppErrorState.fromApi(
+        message: _errorMessage,
+        statusCode: _errorStatus,
+        error: _errorRaw,
+        onRetry: () async {
+          await _loadClients(refresh: true);
+          await _loadStatistics();
+        },
+        dense: true,
+      ),
     );
   }
 
+  /// Vazio que ensina: o que aparece aqui, por que não apareceu e como
+  /// chegar lá (os botões de cadastro e planilha estão logo acima).
   Widget _buildEmptyState(BuildContext context) {
     final theme = Theme.of(context);
-    final accent = _accentColor(context);
     final isDark = theme.brightness == Brightness.dark;
-    final borderCol = ThemeHelpers.borderColor(context);
     final muted = ThemeHelpers.textSecondaryColor(context);
-    final bg = isDark
-        ? AppColors.background.backgroundSecondaryDarkMode
-        : AppColors.background.backgroundSecondary;
-    final obstructed = _searchQuery.trim().isNotEmpty || _hasActiveFilters();
+    final hasSearch = _searchQuery.trim().isNotEmpty;
+    final hasFilters = _hasActiveFilters();
+    final obstructed = hasSearch || hasFilters;
 
-    final eyebrow = obstructed ? 'Resultados' : 'Carteira';
-    final title = obstructed
-        ? 'Nenhum cliente encontrado'
-        : 'Nenhum cliente cadastrado';
-    final subtitle = obstructed
-        ? 'Amplie os critérios ou volte ao panorama completo da carteira.'
-        : 'Comece adicionando o primeiro lead — ele aparecerá aqui em segundos.';
+    final String title;
+    final String body;
+    if (hasSearch) {
+      final q = _searchQuery.trim();
+      title = 'Nenhum cliente para “${q.length > 32 ? '${q.substring(0, 32)}…' : q}”';
+      body = 'A busca procura no nome, no telefone, no e-mail e no CPF. '
+          'Confira a grafia ou tente só o sobrenome ou os últimos dígitos '
+          'do telefone.'
+          '${hasFilters ? ' Os filtros ativos também restringem o resultado.' : ''}';
+    } else if (hasFilters) {
+      title = 'Nenhum cliente com esses filtros';
+      body = 'Ninguém da carteira atende a todos os critérios escolhidos. '
+          'Tire algum critério nos filtros ou limpe tudo para ver a carteira '
+          'inteira.';
+    } else {
+      title = 'Sua carteira ainda está vazia';
+      body = 'Aqui aparecem os seus clientes, com situação, telefone, quem '
+          'atende e atalhos para ligar ou chamar no WhatsApp. Toque em '
+          '“Novo cliente” para cadastrar um, ou em “Importar planilha” para '
+          'trazer vários de uma vez.';
+    }
 
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(
-        parent: AlwaysScrollableScrollPhysics(),
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 460),
-          child: DecoratedBox(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 28, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 52,
+            height: 52,
             decoration: BoxDecoration(
-              color: bg,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(
-                color: borderCol.withValues(alpha: isDark ? 0.48 : 0.62),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: isDark ? 0.26 : 0.075),
-                  blurRadius: 22,
-                  offset: const Offset(0, 8),
-                  spreadRadius: -6,
-                ),
-              ],
+              borderRadius: BorderRadius.circular(16),
+              color: isDark
+                  ? AppColors.background.backgroundTertiaryDarkMode
+                  : AppColors.background.backgroundTertiary,
+              border: Border.all(color: ThemeHelpers.borderColor(context)),
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(21),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Container(
-                    height: 3,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          accent.withValues(alpha: 0.9),
-                          accent.withValues(alpha: 0.22),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(14),
-                                color: accent.withValues(alpha: isDark ? 0.12 : 0.10),
-                                border: Border.all(
-                                  color: accent.withValues(alpha: 0.22),
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: accent.withValues(alpha: 0.14),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 4),
-                                  ),
-                                ],
-                              ),
-                              child: Icon(
-                                obstructed
-                                    ? Icons.manage_search_rounded
-                                    : Icons.diversity_3_outlined,
-                                size: 22,
-                                color: accent,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    eyebrow.toUpperCase(),
-                                    style: theme.textTheme.labelSmall?.copyWith(
-                                      letterSpacing: 0.9,
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 10,
-                                      color: muted.withValues(alpha: 0.95),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    title,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style:
-                                        theme.textTheme.titleMedium?.copyWith(
-                                      fontWeight: FontWeight.w900,
-                                      letterSpacing: -0.3,
-                                      height: 1.15,
-                                      color: ThemeHelpers.textColor(context),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Divider(
-                          height: 1,
-                          thickness: 1,
-                          indent: 4,
-                          endIndent: 4,
-                          color: borderCol.withValues(alpha: 0.42),
-                        ),
-                        const SizedBox(height: 11),
-                        Text(
-                          subtitle,
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: muted,
-                            height: 1.4,
-                            fontSize: 12.5,
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed: _navigateToCreate,
-                            icon: const Icon(Icons.person_add_alt_1, size: 18),
-                            label: Text(
-                              obstructed
-                                  ? 'Cadastrar cliente'
-                                  : 'Criar primeiro cliente',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.1,
-                              ),
-                            ),
-                            style: FilledButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              elevation: 0,
-                            ),
-                          ),
-                        ),
-                        if (obstructed) ...[
-                          const SizedBox(height: 8),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              onPressed: () {
-                                _searchController.clear();
-                                setState(() {
-                                  _searchQuery = '';
-                                  _filters = null;
-                                });
-                                _persistState();
-                                _loadClients(refresh: true);
-                                _loadStatistics();
-                              },
-                              icon: Icon(
-                                Icons.filter_alt_off_outlined,
-                                size: 17,
-                                color: accent.withValues(alpha: 0.94),
-                              ),
-                              label: const Text(
-                                'Limpar busca e filtros',
-                                style:
-                                    TextStyle(fontWeight: FontWeight.w800),
-                              ),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: accent,
-                                padding: const EdgeInsets.symmetric(
-                                    vertical: 11),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                side: BorderSide(
-                                  color: accent.withValues(alpha: 0.38),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+            child: Icon(
+              obstructed
+                  ? Icons.manage_search_rounded
+                  : Icons.people_outline_rounded,
+              size: 26,
+              color: muted,
             ),
           ),
-        ),
+          const SizedBox(height: 14),
+          Text(
+            title,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.3,
+              height: 1.2,
+              color: ThemeHelpers.textColor(context),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            body,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: muted,
+              height: 1.45,
+            ),
+          ),
+          if (obstructed) ...[
+            const SizedBox(height: 18),
+            OutlinedButton.icon(
+              onPressed: () {
+                _searchController.clear();
+                setState(() {
+                  _searchQuery = '';
+                  _filters = null;
+                });
+                _persistState();
+                _loadClients(refresh: true);
+                _loadStatistics();
+              },
+              icon: const Icon(Icons.filter_alt_off_outlined, size: 18),
+              label: Text(
+                hasSearch && hasFilters
+                    ? 'Limpar busca e filtros'
+                    : (hasSearch ? 'Limpar busca' : 'Limpar filtros'),
+                maxLines: 1,
+                softWrap: false,
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: ThemeHelpers.textColor(context),
+                side: BorderSide(color: ThemeHelpers.borderColor(context)),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                textStyle: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13.5,
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -2676,94 +1885,8 @@ class _ClientsPageState extends State<ClientsPage> {
     );
   }
 
-  Future<void> _showSearchSheet(BuildContext context) async {
-    final controller =
-        TextEditingController(text: _searchController.text);
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(ctx).viewInsets.bottom,
-          ),
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
-            decoration: BoxDecoration(
-              color: ThemeHelpers.cardBackgroundColor(ctx),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-              border: Border.all(
-                color: ThemeHelpers.borderColor(ctx).withValues(alpha: 0.4),
-              ),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Center(
-                  child: Container(
-                    width: 42,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 12),
-                    decoration: BoxDecoration(
-                      color: ThemeHelpers.borderColor(ctx).withValues(alpha: 0.55),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                ),
-                Text(
-                  'Buscar clientes',
-                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
-                      ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: controller,
-                  autofocus: true,
-                  textInputAction: TextInputAction.search,
-                  decoration: InputDecoration(
-                    hintText: 'Nome, email, CPF, telefone…',
-                    prefixIcon: const Icon(Icons.search_rounded),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                  onSubmitted: (value) {
-                    Navigator.pop(ctx);
-                    _searchController.text = value;
-                    _handleSearch(value);
-                  },
-                ),
-                const SizedBox(height: 14),
-                FilledButton.icon(
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    _searchController.text = controller.text;
-                    _handleSearch(controller.text);
-                  },
-                  icon: const Icon(Icons.check_rounded),
-                  label: const Text('Aplicar busca'),
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   Future<void> _showClientActions(BuildContext context, Client client) async {
     final theme = Theme.of(context);
-    final typeColor = _typeColor(client.type, context);
     final navigator = Navigator.of(context);
 
     final action = await showModalBottomSheet<String>(
@@ -2771,128 +1894,141 @@ class _ClientsPageState extends State<ClientsPage> {
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-        decoration: BoxDecoration(
-          color: ThemeHelpers.cardBackgroundColor(ctx),
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Center(
-                child: Container(
-                  width: 42,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: ThemeHelpers.borderColor(ctx).withValues(alpha: 0.55),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 14),
-              Row(
+      builder: (ctx) {
+        final muted = ThemeHelpers.textSecondaryColor(ctx);
+        return ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(ctx).size.height * 0.88,
+          ),
+          child: Container(
+            decoration: BoxDecoration(
+              color: ThemeHelpers.cardBackgroundColor(ctx),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          typeColor.withValues(alpha: 0.85),
-                          typeColor.withValues(alpha: 0.55),
-                        ],
-                      ),
-                      shape: BoxShape.circle,
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      _initialsFor(client.name),
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
+                  Center(
+                    child: Container(
+                      width: 42,
+                      height: 4,
+                      margin: const EdgeInsets.only(top: 10, bottom: 10),
+                      decoration: BoxDecoration(
+                        color: ThemeHelpers.borderColor(ctx)
+                            .withValues(alpha: 0.9),
+                        borderRadius: BorderRadius.circular(999),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 8, 10),
+                    child: Row(
                       children: [
-                        Text(
-                          client.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w900,
+                        _ClientInitialsAvatar(
+                          initials: _initialsFor(client.name),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                client.name,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                  height: 1.2,
+                                  color: ThemeHelpers.textColor(ctx),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${client.type.label} · ${client.status.label}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: muted,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '${client.type.label} · ${client.status.label}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: ThemeHelpers.textSecondaryColor(ctx),
-                          ),
+                        IconButton(
+                          tooltip: 'Fechar',
+                          icon: Icon(Icons.close_rounded, color: muted),
+                          onPressed: () => Navigator.pop(ctx),
                         ),
                       ],
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded),
-                    onPressed: () => Navigator.pop(ctx),
+                  Divider(
+                    height: 1,
+                    thickness: 1,
+                    color: ThemeHelpers.borderLightColor(ctx),
+                  ),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(8, 6, 8, 12),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _actionRow(
+                            ctx,
+                            Icons.open_in_new_rounded,
+                            'Abrir cliente',
+                            'Ver dados completos e a linha do tempo',
+                            () => Navigator.pop(ctx, 'view'),
+                          ),
+                          _actionRow(
+                            ctx,
+                            Icons.edit_outlined,
+                            'Editar dados',
+                            'Atualizar o cadastro do cliente',
+                            () => Navigator.pop(ctx, 'edit'),
+                            locked: !_can(_kPermClientUpdate),
+                          ),
+                          // Matches oculto no app: linha fora do sheet de ações.
+                          if (FeatureVisibility.matchesEnabled)
+                            _actionRow(
+                              ctx,
+                              Icons.handshake_outlined,
+                              'Ver matches',
+                              'Imóveis compatíveis com o perfil',
+                              () => Navigator.pop(ctx, 'matches'),
+                            ),
+                          _actionRow(
+                            ctx,
+                            Icons.swap_horiz_rounded,
+                            'Transferir',
+                            'Passar o cliente para outro responsável',
+                            () => Navigator.pop(ctx, 'transfer'),
+                            locked: !_can(_kPermClientTransfer),
+                          ),
+                          _actionRow(
+                            ctx,
+                            Icons.delete_outline,
+                            'Excluir cliente',
+                            'Remove o cadastro de vez',
+                            () => Navigator.pop(ctx, 'delete'),
+                            destructive: true,
+                            locked: !_can(_kPermClientDelete),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              _actionRow(
-                ctx,
-                Icons.open_in_new_rounded,
-                'Abrir cliente',
-                'Ver detalhes completos e interações',
-                () => Navigator.pop(ctx, 'view'),
-              ),
-              _actionRow(
-                ctx,
-                Icons.edit_outlined,
-                'Editar dados',
-                'Atualizar informações cadastrais',
-                () => Navigator.pop(ctx, 'edit'),
-                locked: !_can(_kPermClientUpdate),
-              ),
-              // Matches oculto no app: linha fora do sheet de ações.
-              if (FeatureVisibility.matchesEnabled)
-                _actionRow(
-                  ctx,
-                  Icons.handshake_outlined,
-                  'Ver matches',
-                  'Imóveis compatíveis com o perfil',
-                  () => Navigator.pop(ctx, 'matches'),
-                ),
-              _actionRow(
-                ctx,
-                Icons.swap_horiz_rounded,
-                'Transferir',
-                'Atribuir a outro responsável',
-                () => Navigator.pop(ctx, 'transfer'),
-                locked: !_can(_kPermClientTransfer),
-              ),
-              _actionRow(
-                ctx,
-                Icons.delete_outline,
-                'Excluir cliente',
-                'Remoção permanente do registro',
-                () => Navigator.pop(ctx, 'delete'),
-                destructive: true,
-                locked: !_can(_kPermClientDelete),
-              ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
 
     if (action == null || !mounted) return;
@@ -2949,7 +2085,7 @@ class _ClientsPageState extends State<ClientsPage> {
       onTap: locked ? null : onTap,
       borderRadius: BorderRadius.circular(14),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
         child: Row(
           children: [
             Container(
@@ -2969,6 +2105,8 @@ class _ClientsPageState extends State<ClientsPage> {
                 children: [
                   Text(
                     title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w800,
                       color: fg,
@@ -2977,6 +2115,8 @@ class _ClientsPageState extends State<ClientsPage> {
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: destructive
                           ? AppColors.status.error.withValues(alpha: 0.78)
@@ -3055,14 +2195,19 @@ class _ClientsPageState extends State<ClientsPage> {
           style: theme.textTheme.bodyMedium,
         ),
         actions: [
+          // Cancelar é neutro: o tema pinta TextButton de vermelho.
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
+            style: TextButton.styleFrom(
+              foregroundColor: ThemeHelpers.textSecondaryColor(ctx),
+            ),
             child: const Text('Cancelar'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.status.error,
+              foregroundColor: Colors.white,
             ),
             child: const Text('Excluir'),
           ),
@@ -3101,6 +2246,8 @@ class _ClientsPageState extends State<ClientsPage> {
       isScrollControlled: true,
       useSafeArea: true,
       barrierColor: Colors.black54,
+      // O modal pinta a própria superfície (com o mesmo raio de 24).
+      backgroundColor: Colors.transparent,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -3252,6 +2399,507 @@ class _ClientsPageState extends State<ClientsPage> {
         f.createdTo != null ||
         f.sortBy != null;
   }
+
+  /// O que está filtrado, em palavras (a faixa do topo mostra isso).
+  List<String> _activeFilterLabels() {
+    final f = _filters;
+    if (f == null) return const [];
+    String? v(String? raw) {
+      final s = raw?.trim() ?? '';
+      return s.isEmpty ? null : s;
+    }
+
+    final labels = <String>[];
+    final name = v(f.name);
+    final email = v(f.email);
+    final phone = v(f.phone);
+    final document = v(f.document);
+    final city = v(f.city);
+    final neighborhood = v(f.neighborhood);
+    final uf = v(f.state);
+    if (name != null) labels.add('Nome: $name');
+    if (email != null) labels.add('E-mail: $email');
+    if (phone != null) labels.add('Telefone: $phone');
+    if (document != null) labels.add('CPF: $document');
+    if (city != null) labels.add('Cidade: $city');
+    if (neighborhood != null) labels.add('Bairro: $neighborhood');
+    if (uf != null) labels.add('UF: $uf');
+    if (f.type != null) labels.add(f.type!.label);
+    if (f.status != null) labels.add(f.status!.label);
+    if (f.isActive != null) {
+      labels.add(f.isActive! ? 'Só ativos' : 'Só desativados');
+    }
+    if (f.onlyMyData == true) labels.add('Só os meus clientes');
+    final period = _periodLabel(f.createdFrom, f.createdTo);
+    if (period != null) labels.add(period);
+    if (v(f.sortBy) != null) labels.add(_sortLabel());
+    return labels;
+  }
+
+  int _activeFilterCount() {
+    if (!_hasActiveFilters()) return 0;
+    final count = _activeFilterLabels().length;
+    return count == 0 ? 1 : count;
+  }
+
+  String? _periodLabel(String? from, String? to) {
+    String? fmt(String? raw) {
+      final s = raw?.trim() ?? '';
+      if (s.isEmpty) return null;
+      final d = DateTime.tryParse(s);
+      return d == null ? s : DateFormat('dd/MM/yy', 'pt_BR').format(d);
+    }
+
+    final a = fmt(from);
+    final b = fmt(to);
+    if (a != null && b != null) return 'Cadastro de $a a $b';
+    if (a != null) return 'Cadastro desde $a';
+    if (b != null) return 'Cadastro até $b';
+    return null;
+  }
+}
+
+// ───────────────────────── Peças da lista ─────────────────────────
+
+/// Avatar de iniciais neutro — a cor da linha fica para o significado
+/// (status e atalhos), não para enfeite.
+class _ClientInitialsAvatar extends StatelessWidget {
+  const _ClientInitialsAvatar({required this.initials});
+
+  final String initials;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      width: 44,
+      height: 44,
+      padding: const EdgeInsets.all(6),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: isDark
+            ? AppColors.background.backgroundTertiaryDarkMode
+            : AppColors.background.backgroundTertiary,
+        border: Border.all(color: ThemeHelpers.borderColor(context)),
+      ),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          initials,
+          maxLines: 1,
+          style: TextStyle(
+            fontSize: 15.5,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.3,
+            height: 1.0,
+            color: ThemeHelpers.textColor(context),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Selo de status: ponto e fundo na cor do significado, texto legível.
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.label, required this.tone});
+
+  final String label;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: isDark ? 0.18 : 0.11),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: tone.withValues(alpha: isDark ? 0.45 : 0.36)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: tone, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                fontSize: 11,
+                height: 1.2,
+                color: ThemeHelpers.textColor(context),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Etiqueta neutra de ícone + texto (tipo do cliente, "Desativado").
+class _MetaTag extends StatelessWidget {
+  const _MetaTag({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: muted),
+        const SizedBox(width: 4),
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
+              height: 1.2,
+              color: muted,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Linha de informação da lista (ícone + texto com reticências).
+class _InfoLine extends StatelessWidget {
+  const _InfoLine({
+    required this.icon,
+    required this.text,
+    this.maxLines = 1,
+    this.strong = false,
+  });
+
+  final IconData icon;
+  final String text;
+  final int maxLines;
+  final bool strong;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: Icon(icon, size: 14, color: muted),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            text,
+            maxLines: maxLines,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontSize: 12.5,
+              height: 1.3,
+              fontWeight: strong ? FontWeight.w700 : FontWeight.w600,
+              color: strong
+                  ? ThemeHelpers.textColor(context).withValues(alpha: 0.9)
+                  : muted,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Atalho de contato da linha (WhatsApp, Ligar, E-mail) — alvo de toque de
+/// 36px, cor do canal só no ícone, no texto e num tom leve de fundo.
+class _ContactChipButton extends StatelessWidget {
+  const _ContactChipButton({
+    required this.icon,
+    required this.tone,
+    required this.onTap,
+    this.label,
+    this.tooltip,
+  });
+
+  final IconData icon;
+  final Color tone;
+  final VoidCallback onTap;
+  final String? label;
+  final String? tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final radius = BorderRadius.circular(10);
+    final button = Material(
+      color: tone.withValues(alpha: isDark ? 0.16 : 0.09),
+      shape: RoundedRectangleBorder(
+        borderRadius: radius,
+        side: BorderSide(color: tone.withValues(alpha: isDark ? 0.42 : 0.30)),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        customBorder: RoundedRectangleBorder(borderRadius: radius),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 36, minWidth: 40),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: label == null ? 10 : 12,
+              vertical: 7,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 17, color: tone),
+                if (label != null) ...[
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      label!,
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        height: 1.1,
+                        color: tone,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    final message = tooltip ?? label;
+    if (message == null) return button;
+    return Tooltip(message: message, child: button);
+  }
+}
+
+/// Número pequeno (filtros ativos) no botão de filtros e no menu.
+class _CountBadge extends StatelessWidget {
+  const _CountBadge({required this.count, required this.tone});
+
+  final int count;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 17, minHeight: 17),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: tone,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        count > 9 ? '9+' : '$count',
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.w900,
+          height: 1.1,
+        ),
+      ),
+    );
+  }
+}
+
+/// Contagem por tipo no resumo da carteira ("312 compradores").
+class _TypeCount extends StatelessWidget {
+  const _TypeCount({
+    required this.icon,
+    required this.count,
+    required this.label,
+  });
+
+  final IconData icon;
+  final int count;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 15, color: muted),
+        const SizedBox(width: 5),
+        Flexible(
+          child: Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: _compactIntFormatter.format(count),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    color: ThemeHelpers.textColor(context),
+                  ),
+                ),
+                TextSpan(
+                  text: ' $label',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: muted,
+                  ),
+                ),
+              ],
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontSize: 12.5,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Esqueleto do resumo da carteira (número + rótulo + tipos).
+class _SummarySkeleton extends StatelessWidget {
+  const _SummarySkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            SkeletonBox(width: 92, height: 34, borderRadius: 8),
+            SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(flex: 7, child: SkeletonText(height: 13)),
+                      Spacer(flex: 3),
+                    ],
+                  ),
+                  SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(flex: 5, child: SkeletonText(height: 11)),
+                      Spacer(flex: 5),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(flex: 8, child: SkeletonText(height: 12)),
+            Spacer(flex: 2),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Esqueleto FIEL à linha do cliente: avatar, nome, selo + tipo, duas
+/// linhas de informação e os atalhos de contato.
+class _ClientRowSkeleton extends StatelessWidget {
+  const _ClientRowSkeleton({required this.isLast});
+
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 14, 16, 14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonBox(width: 44, height: 44, borderRadius: 22),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(flex: 6, child: SkeletonText(height: 15)),
+                        Spacer(flex: 4),
+                      ],
+                    ),
+                    SizedBox(height: 9),
+                    Row(
+                      children: [
+                        SkeletonBox(width: 80, height: 20, borderRadius: 999),
+                        SizedBox(width: 10),
+                        SkeletonBox(width: 64, height: 12, borderRadius: 4),
+                      ],
+                    ),
+                    SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(flex: 8, child: SkeletonText(height: 11)),
+                        Spacer(flex: 2),
+                      ],
+                    ),
+                    SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(flex: 6, child: SkeletonText(height: 11)),
+                        Spacer(flex: 4),
+                      ],
+                    ),
+                    SizedBox(height: 12),
+                    Row(
+                      children: [
+                        SkeletonBox(width: 100, height: 34, borderRadius: 10),
+                        SizedBox(width: 8),
+                        SkeletonBox(width: 72, height: 34, borderRadius: 10),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (!isLast)
+          Padding(
+            padding: const EdgeInsets.only(left: 72),
+            child: Divider(
+              height: 1,
+              thickness: 1,
+              color: ThemeHelpers.borderLightColor(context),
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 /// Pill compacta que mostra a contagem de matches pendentes do cliente.
@@ -3307,7 +2955,7 @@ class _MatchesPillState extends State<_MatchesPill> {
     final theme = Theme.of(context);
     final color = widget.accent;
     return Padding(
-      padding: const EdgeInsets.only(left: 4),
+      padding: const EdgeInsets.only(left: 4, top: 4),
       child: InkWell(
         onTap: widget.onTap,
         borderRadius: BorderRadius.circular(999),
@@ -3315,30 +2963,18 @@ class _MatchesPillState extends State<_MatchesPill> {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(999),
-            gradient: LinearGradient(
-              colors: [color, color.withValues(alpha: 0.78)],
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: color.withValues(alpha: 0.34),
-                blurRadius: 8,
-                offset: const Offset(0, 3),
-              ),
-            ],
+            color: color.withValues(alpha: 0.12),
+            border: Border.all(color: color.withValues(alpha: 0.35)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
-                Icons.local_fire_department_rounded,
-                size: 12,
-                color: Colors.white,
-              ),
+              Icon(Icons.handshake_outlined, size: 12, color: color),
               const SizedBox(width: 4),
               Text(
                 _count > 99 ? '99+' : '$_count',
                 style: theme.textTheme.labelSmall?.copyWith(
-                  color: Colors.white,
+                  color: color,
                   fontWeight: FontWeight.w900,
                   fontSize: 11,
                   height: 1.0,

@@ -1,4 +1,7 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -6,6 +9,7 @@ import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/purchase_proposals_service.dart';
 import '../../../core/routes/app_routes.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../sale_forms/widgets/fichas_filters_kit.dart';
 import '../widgets/proposal_card.dart';
@@ -18,6 +22,9 @@ import 'create_proposal_page.dart';
 const double _kPadH = 16;
 const double _kFabBottom = 96;
 
+/// Coluna de leitura em tela larga (tablet/paisagem).
+const double _kMaxW = 720;
+
 Color _accent(BuildContext context) {
   return Theme.of(context).brightness == Brightness.dark
       ? AppColors.primary.primaryDarkMode
@@ -26,6 +33,10 @@ Color _accent(BuildContext context) {
 
 /// Listagem de fichas de proposta — espelha `PurchaseProposalsPage.tsx` do
 /// imobx-front (mobile view).
+///
+/// Superfície do dia a dia: a contagem responde "quantas", a frase de
+/// recorte responde "quais e em que ordem", os filtros ativos viram
+/// etiquetas que se tiram com um toque, e cada card traz a ação da etapa.
 class ProposalsPage extends StatefulWidget {
   const ProposalsPage({super.key});
 
@@ -43,6 +54,7 @@ class _ProposalsPageState extends State<ProposalsPage> {
   bool _loading = true;
   bool _loadingMore = false;
   String? _error;
+  int _errorStatus = 0;
   bool _showDeletedOnly = false;
 
   @override
@@ -93,8 +105,10 @@ class _ProposalsPageState extends State<ProposalsPage> {
       if (res.success && res.data != null) {
         _data = res.data;
         _error = null;
+        _errorStatus = 0;
       } else {
         _error = res.message ?? 'Não foi possível carregar as propostas.';
+        _errorStatus = res.statusCode;
       }
       if (statsRes.success && statsRes.data != null) {
         _stats = statsRes.data;
@@ -140,6 +154,126 @@ class _ProposalsPageState extends State<ProposalsPage> {
     });
     _load();
   }
+
+  // ─── Recorte ativo (etiquetas removíveis) ────────────────────────────────
+
+  /// Busca APLICADA (a do último carregamento), não o que está sendo
+  /// digitado — a frase de recorte não pode mentir sobre a lista.
+  String get _appliedSearch => (_filters.search ?? '').trim();
+
+  bool get _hasAnyFilter =>
+      _filters.drawerFilterCount > 0 ||
+      _showDeletedOnly ||
+      _appliedSearch.isNotEmpty;
+
+  void _patch(ProposalFilters next) {
+    setState(() => _filters = next);
+    _load();
+  }
+
+  void _clearSearch() {
+    _search.clear();
+    _load();
+  }
+
+  /// "Limpar tudo": o mesmo recorte do "Limpar filtros" do modal (que
+  /// também desliga "Apenas excluídas") + a busca.
+  void _clearAll() {
+    _search.clear();
+    setState(() {
+      _filters = _filters.withoutListFilters();
+      _showDeletedOnly = false;
+    });
+    _load();
+  }
+
+  static final DateFormat _dmy = DateFormat('dd/MM/yy');
+
+  String _periodLabel(DateTime? from, DateTime? to) {
+    if (from != null && to != null) {
+      return 'Criadas de ${_dmy.format(from)} a ${_dmy.format(to)}';
+    }
+    if (from != null) return 'Criadas desde ${_dmy.format(from)}';
+    return 'Criadas até ${_dmy.format(to!)}';
+  }
+
+  /// Filtros do modal que não aparecem na grade de status (o status já está
+  /// à vista ali) — cada um vira etiqueta com "x".
+  List<_ActiveFilter> _activeFilters() {
+    final f = _filters;
+    final out = <_ActiveFilter>[];
+    final q = _appliedSearch;
+    if (q.isNotEmpty) {
+      out.add(
+        _ActiveFilter(
+          icon: LucideIcons.search,
+          label: '"$q"',
+          onRemove: _clearSearch,
+        ),
+      );
+    }
+    final etapa = f.etapa;
+    if (etapa != null) {
+      out.add(
+        _ActiveFilter(
+          icon: LucideIcons.penLine,
+          label: 'Etapa ${etapa.number} · ${etapa.label}',
+          onRemove: () => _patch(f.copyWith(etapa: null)),
+        ),
+      );
+    }
+    final unit = f.saleUnit?.trim();
+    if (unit != null && unit.isNotEmpty) {
+      out.add(
+        _ActiveFilter(
+          icon: LucideIcons.building2,
+          label: unit,
+          onRemove: () => _patch(f.copyWith(saleUnit: null)),
+        ),
+      );
+    }
+    if (f.dateFrom != null || f.dateTo != null) {
+      out.add(
+        _ActiveFilter(
+          icon: LucideIcons.calendarRange,
+          label: _periodLabel(f.dateFrom, f.dateTo),
+          onRemove: () => _patch(f.copyWith(dateFrom: null, dateTo: null)),
+        ),
+      );
+    }
+    if ((f.userId ?? '').isNotEmpty) {
+      out.add(
+        _ActiveFilter(
+          icon: LucideIcons.userRound,
+          label: 'Autor escolhido',
+          onRemove: () => _patch(f.copyWith(userId: null)),
+        ),
+      );
+    }
+    return out;
+  }
+
+  String _orderLabel(ProposalFilters f) {
+    final desc = f.sortOrder.toUpperCase() != 'ASC';
+    switch (f.sortBy) {
+      case 'proposalNumber':
+        return desc ? 'maior número primeiro' : 'menor número primeiro';
+      case 'status':
+        return 'ordenadas por status';
+      case 'proponentName':
+        return desc ? 'comprador de Z a A' : 'comprador de A a Z';
+      case 'proposedPrice':
+        return desc ? 'maior valor primeiro' : 'menor valor primeiro';
+      case 'validityDays':
+        return desc ? 'maior validade primeiro' : 'menor validade primeiro';
+      case 'creatorName':
+        return desc ? 'autor de Z a A' : 'autor de A a Z';
+      default:
+        return desc ? 'mais recentes primeiro' : 'mais antigas primeiro';
+    }
+  }
+
+  // ─── Navegação ───────────────────────────────────────────────────────────
 
   Future<void> _openCreate() async {
     final created = await Navigator.of(
@@ -235,16 +369,11 @@ class _ProposalsPageState extends State<ProposalsPage> {
           'proposal:view',
         );
         if (!canView) {
-          return AppScaffold(
+          return const AppScaffold(
             title: 'Fichas de proposta',
             currentBottomNavIndex: -1,
             showBottomNavigation: false,
-            body: Center(
-              child: Text(
-                'Sem permissão para fichas de proposta.',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-            ),
+            body: _LockedState(),
           );
         }
         return _buildBody(context);
@@ -260,6 +389,16 @@ class _ProposalsPageState extends State<ProposalsPage> {
     final canViewAll = ModuleAccessService.instance.hasPermission(
       'proposal:view_all',
     );
+    // Tela larga: coluna centrada de até 720 (sem LayoutBuilder entre o
+    // RefreshIndicator e a lista — isso quebra o pull-to-refresh).
+    final width = MediaQuery.sizeOf(context).width;
+    final padH = math.max(_kPadH, (width - _kMaxW) / 2);
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final active = _activeFilters();
+    final showClearAll =
+        active.length > 1 ||
+        (active.isNotEmpty &&
+            (_filters.status != null || _showDeletedOnly));
 
     return AppScaffold(
       title: 'Fichas de proposta',
@@ -282,25 +421,23 @@ class _ProposalsPageState extends State<ProposalsPage> {
             onRefresh: _load,
             child: CustomScrollView(
               controller: _scroll,
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               physics: const AlwaysScrollableScrollPhysics(
                 parent: BouncingScrollPhysics(),
               ),
               slivers: [
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(_kPadH, 8, _kPadH, 0),
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(padH, 14, padH, 0),
+                  sliver: SliverToBoxAdapter(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _ProposalsHero(
-                          accent: accent,
-                          stats: _stats,
-                          filteredCount: _data?.total,
-                          hasFilter:
-                              _filters.drawerFilterCount > 0 ||
-                              _showDeletedOnly ||
-                              (_search.text.trim().isNotEmpty),
-                          showingDeletedOnly: _showDeletedOnly,
+                        _ListHeader(
+                          total: _stats?.total,
+                          result: _data?.total,
+                          filtered: _hasAnyFilter,
+                          deletedOnly: _showDeletedOnly,
+                          orderLabel: _orderLabel(_filters),
                         ),
                         const SizedBox(height: 16),
                         Row(
@@ -310,6 +447,7 @@ class _ProposalsPageState extends State<ProposalsPage> {
                                 controller: _search,
                                 accent: accent,
                                 onSubmitted: _load,
+                                onClear: _clearSearch,
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -341,19 +479,21 @@ class _ProposalsPageState extends State<ProposalsPage> {
                             },
                           ),
                         ],
-                        const SizedBox(height: 12),
+                        if (active.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          _ActiveFiltersRow(
+                            filters: active,
+                            onClearAll: showClearAll ? _clearAll : null,
+                          ),
+                        ],
+                        const SizedBox(height: 14),
                       ],
                     ),
                   ),
                 ),
                 if (_loading)
                   SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(
-                      _kPadH,
-                      0,
-                      _kPadH,
-                      _kFabBottom,
-                    ),
+                    padding: EdgeInsets.fromLTRB(padH, 0, padH, _kFabBottom),
                     sliver: SliverList.separated(
                       itemCount: 6,
                       separatorBuilder: (_, _) => const SizedBox(height: 12),
@@ -361,39 +501,37 @@ class _ProposalsPageState extends State<ProposalsPage> {
                     ),
                   )
                 else if (_error != null)
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: _kPadH),
-                      child: Text(
-                        _error!,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                        ),
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(padH, 8, padH, _kFabBottom),
+                    sliver: SliverToBoxAdapter(
+                      child: AppErrorState.fromApi(
+                        message: _error,
+                        statusCode: _errorStatus,
+                        onRetry: _load,
+                        dense: true,
                       ),
                     ),
                   )
                 else if (_data == null || _data!.items.isEmpty)
-                  const SliverFillRemaining(
+                  SliverFillRemaining(
                     hasScrollBody: false,
-                    child: _EmptyState(),
+                    child: _EmptyState(
+                      filtered: _hasAnyFilter,
+                      deletedOnly: _showDeletedOnly,
+                      canCreate: canCreate,
+                      onClear: _clearAll,
+                    ),
                   )
                 else
                   SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(
-                      _kPadH,
-                      0,
-                      _kPadH,
-                      _kFabBottom,
-                    ),
+                    padding: EdgeInsets.fromLTRB(padH, 0, padH, _kFabBottom),
                     sliver: SliverList.separated(
                       itemCount: _data!.items.length + (_loadingMore ? 1 : 0),
                       separatorBuilder: (_, _) => const SizedBox(height: 12),
                       itemBuilder: (_, i) {
+                        // Próxima página: esqueleto do card, não spinner.
                         if (i >= _data!.items.length) {
-                          return const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 18),
-                            child: Center(child: CircularProgressIndicator()),
-                          );
+                          return const ProposalCardSkeleton();
                         }
                         final p = _data!.items[i];
                         return ProposalCard(
@@ -411,9 +549,11 @@ class _ProposalsPageState extends State<ProposalsPage> {
               ],
             ),
           ),
-          if (canCreate)
+          // Com o teclado aberto (busca), o botão sairia flutuando sobre a
+          // lista — some até o teclado fechar.
+          if (canCreate && !keyboardOpen)
             Positioned(
-              right: _kPadH,
+              right: padH,
               bottom: 22,
               child: SafeArea(
                 child: _CreateFab(accent: accent, onTap: _openCreate),
@@ -425,118 +565,106 @@ class _ProposalsPageState extends State<ProposalsPage> {
   }
 }
 
-/// Hero **editorial flush** (sem banner/card) — mesmo DNA das telas de
-/// Usuários e Aprovações: eyebrow com dot semântico, número grande + rótulo,
-/// subtítulo contextual e faixa de KPIs.
-class _ProposalsHero extends StatelessWidget {
-  const _ProposalsHero({
-    required this.accent,
-    this.stats,
-    this.filteredCount,
-    this.hasFilter = false,
-    this.showingDeletedOnly = false,
+/// Cabeçalho da lista: a contagem responde "quantas", a frase ao lado
+/// responde "quais e em que ordem". Sem eyebrow, sem ponto luminoso, sem
+/// faixa de KPI — a lista é a estrela.
+class _ListHeader extends StatelessWidget {
+  const _ListHeader({
+    required this.total,
+    required this.result,
+    required this.filtered,
+    required this.deletedOnly,
+    required this.orderLabel,
   });
 
-  final Color accent;
-  final ProposalStats? stats;
-  final int? filteredCount;
-  final bool hasFilter;
-  final bool showingDeletedOnly;
+  /// Base inteira (`/stats`).
+  final int? total;
+
+  /// Resultado do recorte atual (`total` da listagem).
+  final int? result;
+  final bool filtered;
+  final bool deletedOnly;
+  final String orderLabel;
+
+  static final NumberFormat _int = NumberFormat.decimalPattern('pt_BR');
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final emerald = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
-    final danger = isDark
-        ? AppColors.status.errorDarkMode
-        : AppColors.status.error;
+    final shown = filtered ? result : (total ?? result);
+    final n = shown ?? 0;
+    final noun = deletedOnly
+        ? (n == 1 ? 'proposta excluída' : 'propostas excluídas')
+        : (n == 1 ? 'proposta' : 'propostas');
+    final String scope;
+    if (deletedOnly) {
+      scope = 'Em auditoria, fora da lista normal · $orderLabel';
+    } else if (filtered) {
+      scope = total != null
+          ? 'No recorte, de ${_int.format(total)} no total · $orderLabel'
+          : 'No recorte · $orderLabel';
+    } else {
+      scope = 'Todas as fichas · $orderLabel';
+    }
 
-    final total = stats?.total ?? 0;
-    final dotColor = showingDeletedOnly
-        ? danger
-        : (hasFilter ? accent : emerald);
-    final subtitle = showingDeletedOnly
-        ? 'Mostrando apenas fichas excluídas — em auditoria.'
-        : hasFilter
-        ? 'Filtro aplicado · ${filteredCount ?? '—'} no resultado.'
-        : 'Crie, edite, acompanhe etapas e envie para assinatura.';
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: dotColor,
-                  boxShadow: [
-                    BoxShadow(
-                      color: dotColor.withValues(alpha: 0.55),
-                      blurRadius: 8,
-                      spreadRadius: 1,
-                    ),
-                  ],
-                ),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 150),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              shown == null ? '—' : _int.format(n),
+              maxLines: 1,
+              softWrap: false,
+              style: theme.textTheme.displaySmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                color: textColor,
+                height: 1.0,
+                letterSpacing: -1.0,
               ),
-              const SizedBox(width: 9),
-              Text(
-                'FICHAS DE PROPOSTA',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: accent,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.2,
-                  fontSize: 11,
-                ),
-              ),
-            ],
+            ),
           ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '$total',
-                style: theme.textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: textColor,
-                  height: 1.0,
-                  letterSpacing: -1.0,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: Text(
-                  total == 1 ? 'proposta' : 'propostas',
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  noun,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleMedium?.copyWith(
-                    color: secondary,
+                    color: textColor,
                     fontWeight: FontWeight.w800,
-                    height: 1.0,
+                    height: 1.1,
                     letterSpacing: -0.2,
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            subtitle,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: secondary,
-              fontWeight: FontWeight.w600,
-              height: 1.4,
+                const SizedBox(height: 3),
+                Text(
+                  scope,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: secondary,
+                    fontWeight: FontWeight.w600,
+                    height: 1.3,
+                  ),
+                ),
+              ],
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -546,48 +674,71 @@ class _SearchBar extends StatelessWidget {
     required this.controller,
     required this.accent,
     required this.onSubmitted,
+    required this.onClear,
   });
 
   final TextEditingController controller;
   final Color accent;
   final VoidCallback onSubmitted;
+  final VoidCallback onClear;
 
   @override
   Widget build(BuildContext context) {
-    final border = ThemeHelpers.borderColor(context);
-    return TextField(
-      controller: controller,
-      style: Theme.of(
-        context,
-      ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
-      decoration: InputDecoration(
-        hintText: 'Buscar número, proponente, ficha…',
-        isDense: true,
-        prefixIcon: Icon(Icons.search_rounded, color: accent, size: 22),
-        suffixIcon: IconButton(
-          icon: const Icon(Icons.refresh_rounded),
-          onPressed: onSubmitted,
-          tooltip: 'Atualizar',
-        ),
-        filled: true,
-        fillColor: Theme.of(
-          context,
-        ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
-        contentPadding: const EdgeInsets.symmetric(vertical: 12),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: border.withValues(alpha: 0.4)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: border.withValues(alpha: 0.35)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: accent.withValues(alpha: 0.65)),
-        ),
-      ),
-      onSubmitted: (_) => onSubmitted(),
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final hairline = ThemeHelpers.borderLightColor(context);
+    final fill = isDark
+        ? AppColors.background.backgroundTertiaryDarkMode
+        : AppColors.background.backgroundTertiary;
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: controller,
+      builder: (context, value, _) {
+        return TextField(
+          controller: controller,
+          textInputAction: TextInputAction.search,
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+          onSubmitted: (_) {
+            FocusScope.of(context).unfocus();
+            onSubmitted();
+          },
+          decoration: InputDecoration(
+            hintText: 'Buscar nº, comprador, ficha…',
+            hintStyle: TextStyle(
+              color: secondary.withValues(alpha: 0.9),
+              fontWeight: FontWeight.w500,
+            ),
+            isDense: true,
+            prefixIcon: Icon(Icons.search_rounded, color: accent, size: 22),
+            suffixIcon: value.text.isEmpty
+                ? null
+                : IconButton(
+                    icon: Icon(Icons.close_rounded, size: 19, color: secondary),
+                    onPressed: onClear,
+                    tooltip: 'Limpar busca',
+                  ),
+            filled: true,
+            fillColor: fill,
+            contentPadding: const EdgeInsets.symmetric(vertical: 13),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: hairline),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: hairline),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: accent.withValues(alpha: 0.65),
+                width: 1.4,
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -669,51 +820,56 @@ class _StatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: selected ? tone.withValues(alpha: 0.13) : Colors.transparent,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: Material(
+        color: selected ? tone.withValues(alpha: 0.13) : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: selected
-                  ? tone.withValues(alpha: 0.55)
-                  : tone.withValues(alpha: 0.3),
-              width: 1.4,
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: selected ? tone : tone.withValues(alpha: 0.6),
-                ),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 42),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: selected
+                    ? tone.withValues(alpha: 0.55)
+                    : tone.withValues(alpha: 0.3),
+                width: 1.4,
               ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: selected
-                        ? tone
-                        : ThemeHelpers.textSecondaryColor(context),
-                    letterSpacing: 0.1,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: selected ? tone : tone.withValues(alpha: 0.6),
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: selected
+                          ? tone
+                          : ThemeHelpers.textSecondaryColor(context),
+                      letterSpacing: 0.1,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -734,73 +890,311 @@ class _DeletedToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () => onChanged(!value),
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: value
-                ? accent.withValues(alpha: 0.55)
-                : ThemeHelpers.borderColor(context),
-          ),
-          color: value ? accent.withValues(alpha: 0.06) : null,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              value ? Icons.toggle_on_rounded : Icons.toggle_off_outlined,
-              size: 22,
-              color: value ? accent : ThemeHelpers.textSecondaryColor(context),
+    return Semantics(
+      toggled: value,
+      button: true,
+      child: InkWell(
+        onTap: () => onChanged(!value),
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 42),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: value
+                  ? accent.withValues(alpha: 0.55)
+                  : ThemeHelpers.borderColor(context),
             ),
-            const SizedBox(width: 8),
-            Text(
-              'Apenas excluídas',
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w800,
+            color: value ? accent.withValues(alpha: 0.06) : null,
+          ),
+          child: Row(
+            children: [
+              Icon(
+                value ? Icons.toggle_on_rounded : Icons.toggle_off_outlined,
+                size: 22,
                 color: value
                     ? accent
                     : ThemeHelpers.textSecondaryColor(context),
               ),
-            ),
-          ],
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  'Apenas excluídas',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: value
+                        ? accent
+                        : ThemeHelpers.textSecondaryColor(context),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _EmptyState extends StatelessWidget {
-  const _EmptyState();
+/// Um recorte ativo que vira etiqueta removível.
+class _ActiveFilter {
+  final IconData icon;
+  final String label;
+  final VoidCallback onRemove;
+
+  const _ActiveFilter({
+    required this.icon,
+    required this.label,
+    required this.onRemove,
+  });
+}
+
+/// Etiquetas do recorte: o que está filtrando a lista, à vista, cada uma
+/// com "x" — sem precisar abrir o modal para descobrir.
+class _ActiveFiltersRow extends StatelessWidget {
+  const _ActiveFiltersRow({required this.filters, this.onClearAll});
+
+  final List<_ActiveFilter> filters;
+  final VoidCallback? onClearAll;
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final text = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final fill = isDark
+        ? AppColors.background.backgroundTertiaryDarkMode
+        : AppColors.background.backgroundTertiary;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (final f in filters)
+          Semantics(
+            button: true,
+            label: 'Remover filtro ${f.label}',
+            child: Material(
+              color: fill,
+              borderRadius: BorderRadius.circular(10),
+              child: InkWell(
+                onTap: f.onRemove,
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  constraints: const BoxConstraints(minHeight: 36),
+                  padding: const EdgeInsets.fromLTRB(10, 6, 8, 6),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: ThemeHelpers.borderLightColor(context),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(f.icon, size: 14, color: secondary),
+                      const SizedBox(width: 6),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 210),
+                        child: Text(
+                          f.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            color: text,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Icon(Icons.close_rounded, size: 15, color: secondary),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        if (onClearAll != null)
+          TextButton(
+            onPressed: onClearAll,
+            style: TextButton.styleFrom(
+              // Nunca vermelho: limpar não é destrutivo.
+              foregroundColor: secondary,
+              minimumSize: const Size(48, 36),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              textStyle: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            child: const Text('Limpar tudo'),
+          ),
+      ],
+    );
+  }
+}
+
+/// Vazio que ENSINA: o que aparece aqui e como chegar lá.
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({
+    required this.filtered,
+    required this.deletedOnly,
+    required this.canCreate,
+    required this.onClear,
+  });
+
+  final bool filtered;
+  final bool deletedOnly;
+  final bool canCreate;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final muted = ThemeHelpers.textSecondaryColor(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.request_page_outlined, size: 56, color: muted),
-          const SizedBox(height: 12),
-          Text(
-            'Nenhuma proposta encontrada',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+    final accent = _accent(context);
+    final String title;
+    final String body;
+    final IconData icon;
+    if (deletedOnly) {
+      icon = LucideIcons.archive;
+      title = 'Nenhuma proposta excluída';
+      body = 'Propostas excluídas saem da lista normal e ficam aqui para '
+          'auditoria, com o motivo registrado.';
+    } else if (filtered) {
+      icon = LucideIcons.searchX;
+      title = 'Nenhuma proposta neste recorte';
+      body = 'Tire uma etiqueta acima ou limpe tudo para voltar a ver as '
+          'outras propostas.';
+    } else {
+      icon = LucideIcons.fileSignature;
+      title = 'Nenhuma proposta ainda';
+      body = canCreate
+          ? 'Aqui ficam as fichas de proposta de compra. Registre a primeira '
+              'em "Nova proposta": o comprador assina primeiro, depois o '
+              'proprietário e, por fim, o corretor.'
+          : 'Aqui ficam as fichas de proposta de compra que você pode ver. '
+              'Quando alguém registrar uma proposta com você, ela aparece '
+              'nesta lista.';
+    }
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 112),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: isDark ? 0.16 : 0.08),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: accent.withValues(alpha: 0.22)),
+                ),
+                child: Icon(icon, size: 24, color: accent),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                body,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: muted,
+                  height: 1.45,
+                ),
+              ),
+              if (filtered || deletedOnly) ...[
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: onClear,
+                  icon: const Icon(LucideIcons.filterX, size: 16),
+                  label: const Text('Limpar filtros'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: muted,
+                    side: BorderSide(color: ThemeHelpers.borderColor(context)),
+                    minimumSize: const Size(48, 44),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
+            ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            'Toque em "Nova proposta" para registrar a primeira.',
-            textAlign: TextAlign.center,
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: muted),
+        ),
+      ),
+    );
+  }
+}
+
+/// Sem `proposal:view`: a tela diz o motivo e quem resolve (não some).
+class _LockedState extends StatelessWidget {
+  const _LockedState();
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final text = ThemeHelpers.textColor(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 58,
+                height: 58,
+                decoration: BoxDecoration(
+                  color: muted.withValues(alpha: isDark ? 0.16 : 0.08),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: muted.withValues(alpha: 0.25)),
+                ),
+                child: Icon(LucideIcons.lock, size: 25, color: muted),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Sem acesso às fichas de proposta',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.2,
+                  color: text,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Sua conta não tem a permissão de ver propostas. Peça ao '
+                'administrador da empresa para liberar o acesso.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  height: 1.45,
+                  fontWeight: FontWeight.w500,
+                  color: muted,
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -817,8 +1211,9 @@ class _CreateFab extends StatelessWidget {
     return Material(
       color: accent,
       shape: const StadiumBorder(),
-      elevation: 6,
-      shadowColor: accent.withValues(alpha: 0.4),
+      elevation: 4,
+      // Sombra neutra: a cor da marca na sombra vira mancha no claro.
+      shadowColor: Colors.black.withValues(alpha: 0.35),
       child: InkWell(
         customBorder: const StadiumBorder(),
         onTap: onTap,
@@ -831,6 +1226,8 @@ class _CreateFab extends StatelessWidget {
               SizedBox(width: 8),
               Text(
                 'Nova proposta',
+                maxLines: 1,
+                softWrap: false,
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w900,

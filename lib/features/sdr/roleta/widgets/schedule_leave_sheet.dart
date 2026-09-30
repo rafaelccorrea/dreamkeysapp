@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../../../core/theme/theme_helpers.dart';
 import '../models/sdr_availability.dart';
 import '../models/sdr_roulette_rules.dart';
 import '../services/sdr_roulette_service.dart';
@@ -16,9 +17,18 @@ enum SdrLeaveSheetResult { scheduled, canceled }
 final DateFormat _diaDoCampo = DateFormat('EEE, dd/MM/yyyy', 'pt_BR');
 final DateFormat _horaDoCampo = DateFormat('HH:mm', 'pt_BR');
 
+/// "12/10, 18:00" — o mesmo formato curto do cartão.
+final DateFormat _dataCurta = DateFormat('dd/MM, HH:mm', 'pt_BR');
+
 /// Folha "Agendar folga" (o modal do web): atalhos de duração e de motivo,
 /// duração calculada ao vivo, validação fim > início, Agendar em verde com
-/// Voltar empilhado abaixo e, havendo folga já marcada, o cancelar em rosa.
+/// Voltar (neutro) empilhado abaixo. Havendo folga já marcada, ela aparece
+/// no alto do corpo, escrita por extenso, com o "Cancelar esta folga" em
+/// vermelho ao lado do que ele apaga — não mais um link perdido no rodapé.
+///
+/// Teto de altura (88% do que sobra acima do teclado), corpo em
+/// Flexible > SingleChildScrollView e o viewInsets do teclado no padding:
+/// nada estoura em paisagem nem com o teclado aberto no motivo.
 Future<SdrLeaveSheetResult?> showScheduleLeaveSheet(
   BuildContext context, {
   required SdrAvailability sdr,
@@ -223,10 +233,9 @@ class _ScheduleLeaveSheetState extends State<_ScheduleLeaveSheet> {
     final secundario = RoletaTinta.textoSecundario(ctx);
     final esquema = base.colorScheme.copyWith(
       primary: ambar,
-      onPrimary: escuro ? const Color(0xFF1F1300) : Colors.white,
+      onPrimary: ThemeHelpers.onPrimaryColor(ctx),
       primaryContainer: ambar.withValues(alpha: escuro ? 0.22 : 0.14),
-      onPrimaryContainer:
-          escuro ? const Color(0xFFFCD9A0) : const Color(0xFF7C3A04),
+      onPrimaryContainer: RoletaTinta.texto(ctx),
       surface: painel,
       surfaceContainerHigh: painel,
       surfaceContainerHighest: RoletaTinta.chapa(ctx),
@@ -412,6 +421,14 @@ class _ScheduleLeaveSheetState extends State<_ScheduleLeaveSheet> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _QuemFolga(sdr: sdr, situacao: situacao),
+          if (_temFolgaMarcada) ...[
+            const SizedBox(height: 12),
+            _FolgaJaMarcada(
+              sdr: sdr,
+              cancelando: _cancelando,
+              onCancelar: _ocupado ? null : _cancelarFolga,
+            ),
+          ],
           const SizedBox(height: 18),
           const _Rotulo('Duração rápida'),
           const SizedBox(height: 8),
@@ -427,20 +444,52 @@ class _ScheduleLeaveSheetState extends State<_ScheduleLeaveSheet> {
             ],
           ),
           const SizedBox(height: 18),
-          const _Rotulo('Sai da roleta'),
-          const SizedBox(height: 8),
-          _CampoDeData(
-            valor: inicio,
-            invalido: false,
-            onTap: () => _escolher(inicio: true),
-          ),
-          const SizedBox(height: 14),
-          const _Rotulo('Volta para a roleta'),
-          const SizedBox(height: 8),
-          _CampoDeData(
-            valor: fim,
-            invalido: fimAntes,
-            onTap: () => _escolher(inicio: false),
+          LayoutBuilder(
+            builder: (context, caixa) {
+              final saida = Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const _Rotulo('Sai da roleta'),
+                  const SizedBox(height: 8),
+                  _CampoDeData(
+                    valor: inicio,
+                    invalido: false,
+                    onTap: () => _escolher(inicio: true),
+                  ),
+                ],
+              );
+              final volta = Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const _Rotulo('Volta para a roleta'),
+                  const SizedBox(height: 8),
+                  _CampoDeData(
+                    valor: fim,
+                    invalido: fimAntes,
+                    onTap: () => _escolher(inicio: false),
+                  ),
+                ],
+              );
+              // Lado a lado só com folga de largura (paisagem, tablet); no
+              // celular em pé, um embaixo do outro.
+              if (caixa.maxWidth >= 520) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: saida),
+                    const SizedBox(width: 12),
+                    Expanded(child: volta),
+                  ],
+                );
+              }
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [saida, const SizedBox(height: 14), volta],
+              );
+            },
           ),
           if (fimAntes || duracao != null) ...[
             const SizedBox(height: 8),
@@ -450,7 +499,7 @@ class _ScheduleLeaveSheetState extends State<_ScheduleLeaveSheet> {
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: RoletaTinta.rosa(context),
+                      color: RoletaTinta.vermelho(context),
                     ),
                   )
                 : Text.rich(
@@ -542,14 +591,15 @@ class _ScheduleLeaveSheetState extends State<_ScheduleLeaveSheet> {
     );
   }
 
-  /// Agendar no verde da ação principal, Voltar empilhado abaixo; o
-  /// cancelar da folga já marcada é o único rosa.
+  /// Agendar no verde da ação principal, Voltar (neutro) empilhado abaixo.
+  /// O erro de qualquer ação (inclusive do cancelar lá do alto) aparece
+  /// aqui, junto dos botões.
   Widget _rodape(BuildContext context) {
     final verde = RoletaTinta.verde(context);
     final tinta = RoletaTinta.tintaSobreVerde(context);
-    final rosa = RoletaTinta.rosa(context);
     final erro = _erro;
-    final corDoErro = _erroEhAviso ? RoletaTinta.ambar(context) : rosa;
+    final corDoErro =
+        _erroEhAviso ? RoletaTinta.ambar(context) : RoletaTinta.vermelho(context);
     final seguro = MediaQuery.paddingOf(context).bottom;
 
     return Container(
@@ -662,28 +712,6 @@ class _ScheduleLeaveSheetState extends State<_ScheduleLeaveSheet> {
               ),
             ),
           ),
-          if (_temFolgaMarcada) ...[
-            const SizedBox(height: 6),
-            TextButton(
-              onPressed: _ocupado ? null : _cancelarFolga,
-              style: TextButton.styleFrom(
-                foregroundColor: rosa,
-                disabledForegroundColor: rosa.withValues(alpha: 0.5),
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                minimumSize: const Size(0, 36),
-              ),
-              child: Text(
-                _cancelando ? 'Cancelando…' : 'Cancelar a folga já marcada',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  decoration: TextDecoration.underline,
-                  decorationColor: rosa,
-                ),
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -755,6 +783,132 @@ class _QuemFolga extends StatelessWidget {
   }
 }
 
+/// A folga que JÁ está marcada, por extenso (quando sai, quando volta, por
+/// quê), com o cancelar vermelho logo abaixo do que ele apaga. Informativo
+/// flush: sem caixa, só o traço âmbar de 2px da folga (o mesmo da nota do
+/// cartão). Os campos da folha já vêm preenchidos com ela.
+class _FolgaJaMarcada extends StatelessWidget {
+  final SdrAvailability sdr;
+  final bool cancelando;
+
+  /// `null` enquanto a folha está ocupada (agendando ou cancelando).
+  final VoidCallback? onCancelar;
+
+  const _FolgaJaMarcada({
+    required this.sdr,
+    required this.cancelando,
+    required this.onCancelar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ambar = RoletaTinta.ambar(context);
+    final vermelho = RoletaTinta.vermelho(context);
+    final inicio = sdr.scheduledPauseStart;
+    final fim = sdr.scheduledPauseEnd;
+    final motivo = sdr.leaveReason;
+    final forte = TextStyle(
+      fontWeight: FontWeight.w700,
+      color: RoletaTinta.texto(context),
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+
+    return Container(
+      padding: const EdgeInsets.only(left: 10),
+      decoration: BoxDecoration(
+        border: Border(left: BorderSide(color: ambar, width: 2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 1.5),
+                child: Icon(LucideIcons.calendarClock, size: 14, color: ambar),
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: 'Folga já marcada',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: ambar,
+                        ),
+                      ),
+                      const TextSpan(text: '\nSai '),
+                      TextSpan(
+                        text: inicio == null ? '—' : _dataCurta.format(inicio),
+                        style: forte,
+                      ),
+                      const TextSpan(text: ' · volta '),
+                      TextSpan(
+                        text: fim == null ? '—' : _dataCurta.format(fim),
+                        style: forte,
+                      ),
+                      if (motivo != null && motivo.trim().isNotEmpty)
+                        TextSpan(text: ' · $motivo'),
+                    ],
+                  ),
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.45,
+                    color: RoletaTinta.textoSecundario(context),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // Destrutivo: vermelho com texto branco, do tamanho do rótulo.
+          ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 38),
+            child: FilledButton.icon(
+              onPressed: onCancelar,
+              icon: cancelando
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : const Icon(LucideIcons.calendarX2, size: 15),
+              label: Text(
+                cancelando ? 'Cancelando…' : 'Cancelar esta folga',
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.ellipsis,
+              ),
+              style: FilledButton.styleFrom(
+                backgroundColor: vermelho,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: vermelho.withValues(alpha: 0.45),
+                disabledForegroundColor: Colors.white.withValues(alpha: 0.85),
+                elevation: 0,
+                minimumSize: const Size(0, 38),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                textStyle: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _Rotulo extends StatelessWidget {
   final String texto;
 
@@ -793,7 +947,9 @@ class _Ficha extends StatelessWidget {
       button: true,
       selected: ativa,
       child: Material(
-        color: ativa ? RoletaTinta.banda(context) : Colors.transparent,
+        color: ativa
+            ? ambar.withValues(alpha: RoletaTinta.escuro(context) ? 0.16 : 0.10)
+            : Colors.transparent,
         shape: forma,
         child: InkWell(
           onTap: onTap,
@@ -853,7 +1009,7 @@ class _CampoDeData extends StatelessWidget {
             borderRadius: raio,
             border: Border.all(
               color: invalido
-                  ? RoletaTinta.rosa(context)
+                  ? RoletaTinta.vermelho(context)
                   : RoletaTinta.fioForte(context),
             ),
           ),
@@ -873,7 +1029,12 @@ class _CampoDeData extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(fontSize: 13.5, color: secundario),
                           )
-                        : Text.rich(
+                        // Encolhe em vez de cortar: com fonte grande em
+                        // 320dp as reticências comeriam a hora.
+                        : FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text.rich(
                             TextSpan(
                               children: [
                                 TextSpan(text: _diaDoCampo.format(v)),
@@ -888,7 +1049,7 @@ class _CampoDeData extends StatelessWidget {
                               ],
                             ),
                             maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                            softWrap: false,
                             style: TextStyle(
                               fontSize: 13.5,
                               fontWeight: FontWeight.w700,
@@ -898,6 +1059,7 @@ class _CampoDeData extends StatelessWidget {
                               ],
                             ),
                           ),
+                        ),
                   ),
                   const SizedBox(width: 6),
                   Icon(LucideIcons.chevronDown, size: 16, color: secundario),

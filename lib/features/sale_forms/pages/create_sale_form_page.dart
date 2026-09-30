@@ -14,7 +14,9 @@ import '../../../shared/services/cep_service.dart';
 import '../../../shared/services/purchase_proposals_service.dart'
     show PurchaseProposal;
 import '../../../shared/services/sale_forms_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
+import '../../../shared/widgets/skeleton_box.dart';
 import '../sale_form_rules.dart';
 import '../services/sale_form_lookup_service.dart';
 import '../services/sale_form_proposal_link_service.dart';
@@ -54,6 +56,115 @@ const List<String> _kUfs = [
 /// Valor fixo (R$) da comissão SDR por venda — igual ao web
 /// (`VALOR_FIXO_COMISSAO_SDR_REAIS`): definido pela empresa, não editável.
 const double _kSdrValorFixo = 300;
+
+/// Rótulo do botão/opção que marca o campo como "Não aplicável". Só a tela
+/// fala "Não se aplica": o valor gravado continua sendo [kSaleFormNa].
+const String _kNaAcao = 'Não se aplica';
+
+/// Nome curto de cada campo (chave do web) para o "falta X" do cabeçalho e
+/// do resumo final. Pessoas usam o sufixo da chave (`buyerRg` → `Rg`).
+const Map<String, String> _kRotulosCampo = {
+  'teamId': 'Equipe',
+  'saleDate': 'Data da venda',
+  'secretaryPresent': 'Secretária presente',
+  'managerName': 'Gerente',
+  'mediaSource': 'Mídia de origem',
+  'saleUnit': 'Unidade',
+  'description': 'Descrição',
+  'incorporadora': 'Incorporadora',
+  'empreendimento': 'Empreendimento',
+  'unidade': 'Unidade',
+  'dataEntrada': 'Data da entrada',
+  'valorEntrada': 'Valor da entrada',
+  'formaPagamento': 'Forma de pagamento',
+  'propertyCode': 'Código do imóvel',
+  'propertyZipCode': 'CEP',
+  'propertyAddress': 'Endereço',
+  'propertyNumber': 'Número',
+  'propertyNeighborhood': 'Bairro',
+  'propertyCity': 'Cidade',
+  'propertyState': 'UF',
+  'commissionPaymentModelDescription': 'Descrição do pagamento',
+  'saleValue': 'Valor da venda',
+  'totalCommission': 'Comissão total',
+  'goalValue': 'Valor da meta',
+  'commissionInstallmentsCount': 'Quantidade de parcelas',
+  'commissionInstallmentValues': 'Valores das parcelas',
+  'debtConfession': 'Confissão de dívida',
+  'debtConfessionValue': 'Valor da confissão',
+  'fullFinancing': 'Financiamento 100%',
+  'preAtendimento': 'Pré-atendimento',
+  'centralCaptacao': 'Central de captação',
+};
+
+const Map<String, String> _kRotulosPessoa = {
+  'Name': 'Nome',
+  'Cpf': 'CPF/CNPJ',
+  'Rg': 'RG',
+  'BirthDate': 'Nascimento',
+  'Profession': 'Profissão',
+  'Email': 'E-mail',
+  'Phone': 'Celular',
+  'ZipCode': 'CEP',
+  'Street': 'Rua',
+  'Number': 'Número',
+  'Neighborhood': 'Bairro',
+  'City': 'Cidade',
+  'State': 'UF',
+};
+
+String _rotuloCampo(String key) {
+  final direto = _kRotulosCampo[key];
+  if (direto != null) return direto;
+  // Cônjuge antes do titular: `buyerSpouseName` também começa com `buyer`.
+  for (final p in const ['buyerSpouse', 'sellerSpouse', 'buyer', 'seller']) {
+    if (!key.startsWith(p)) continue;
+    final sufixo = key.substring(p.length);
+    if (sufixo == 'Cpf' && p.endsWith('Spouse')) return 'CPF';
+    return _kRotulosPessoa[sufixo] ?? sufixo;
+  }
+  return key;
+}
+
+/// "RG, Nascimento e E-mail" · "RG, CEP, Rua e mais 2".
+String _juntarRotulos(List<String> rotulos) {
+  final r = <String>[];
+  for (final x in rotulos) {
+    if (!r.contains(x)) r.add(x);
+  }
+  if (r.isEmpty) return '';
+  if (r.length == 1) return r.first;
+  if (r.length <= 4) {
+    return '${r.sublist(0, r.length - 1).join(', ')} e ${r.last}';
+  }
+  return '${r.take(3).join(', ')} e mais ${r.length - 3}';
+}
+
+/// Estado de um passo — cabeçalho ("Faltam 3") e resumo final.
+enum _EstadoPasso { pendente, completo, revisar, opcional }
+
+class _StatusPasso {
+  const _StatusPasso(this.estado, [this.faltam = const []]);
+  final _EstadoPasso estado;
+
+  /// Campos que ainda faltam (nomes curtos), em [_EstadoPasso.pendente].
+  final List<String> faltam;
+}
+
+/// Quanto de altura sobra para o formulário. Com teclado aberto ou em
+/// paisagem o cabeçalho encolhe, para o campo em edição continuar à vista.
+enum _Densidade { normal, compacta, minima }
+
+/// O chip "Não se aplica" só mostra o texto quando sobra espaço ao lado do
+/// rótulo do campo (duas colunas, tela pequena ou texto ampliado viram só o
+/// ícone — tooltip e legenda no topo do passo). Estimativa pela largura
+/// média do rótulo (13,5, peso 600): o rótulo nunca é cortado pelo chip.
+bool _chipCompacto(BuildContext context, double largura, String rotulo) {
+  final escala =
+      MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 1.6).toDouble();
+  final larguraRotulo = rotulo.length * 7.4 * escala;
+  return largura - 28 - larguraRotulo < 130 * escala;
+}
 
 /// Diretor e Gestor SDR são da família da gerência (viajam em
 /// `commissionsData.gerencias` com `papel`), como na web; aparecem só quando
@@ -317,7 +428,8 @@ class _Pessoa {
 
 /// Formulário de criação/edição de ficha de venda — mesmas abas, campos e
 /// regras do web (`CreateSaleFormPage.tsx`). Quase tudo é "obrigatório ou
-/// Não aplicável" (chip N/A no campo; opção "― Não aplicável ―" nos selects).
+/// Não aplicável": na tela o botão diz "Não se aplica" (chip no campo, opção
+/// "― Não se aplica ―" nos selects); o valor gravado segue "Não aplicável".
 /// Criar: abra via [showSaleFormTypeModal] e passe [choice].
 /// Editar: passe [saleFormId] (tipo/equipe vêm da ficha carregada).
 /// Criar a partir de uma proposta: passe também [prefillProposalId] (o
@@ -350,6 +462,11 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
 
   bool get _isEdit => widget.saleFormId != null;
   bool _loadingExisting = false;
+
+  /// Edição: a ficha não carregou. A tela mostra a causa e "Tentar de novo"
+  /// em vez de abrir o formulário vazio (salvar por cima apagaria dados).
+  String? _loadErro;
+  int _loadErroStatus = 0;
 
   // Dados gerais
   final _saleDate = _DateSlot();
@@ -482,9 +599,11 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
   ThemeData _formTheme(BuildContext context) {
     final base = Theme.of(context);
     final isDark = base.brightness == Brightness.dark;
+    // Fill sólido por token (reforma do modo claro): preto a 2,5% sobre o
+    // fundo branco sumia — o campo não se via antes de tocar.
     final fill = isDark
-        ? Colors.white.withValues(alpha: 0.045)
-        : Colors.black.withValues(alpha: 0.025);
+        ? AppColors.background.backgroundTertiaryDarkMode
+        : AppColors.background.backgroundTertiary;
     final muted = ThemeHelpers.textSecondaryColor(context);
     final error = AppColors.status.error;
     OutlineInputBorder b(Color c, double w) => OutlineInputBorder(
@@ -580,6 +699,7 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     setState(() {
       _loadingExisting = true;
       _sharedUnitsReady = false;
+      _loadErro = null;
     });
     final res = await SaleFormsService.instance.getById(widget.saleFormId!);
     if (!mounted) return;
@@ -587,6 +707,9 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
       _loadingExisting = false;
       if (res.success && res.data != null) {
         _prefill(res.data!);
+      } else {
+        _loadErro = res.message ?? 'Não foi possível carregar a ficha.';
+        _loadErroStatus = res.statusCode;
       }
     });
     final shared = await SaleFormLookupService.instance
@@ -1062,6 +1185,18 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     return double.tryParse(normalized);
   }
 
+  /// Percentual: "." OU "," valem como decimal ("2.5" e "2,5" = 2,5%).
+  /// Percentual nunca tem milhar — com `_money` o "." era lido como
+  /// milhar e "2.5" virava 25% (bug de 30/09/2026).
+  static double? _pct(String s) {
+    final t = s.trim();
+    if (t.isEmpty || isSaleFormNa(t)) return null;
+    final cleaned =
+        t.replaceAll(RegExp(r'[^\d,.-]'), '').replaceAll(',', '.');
+    if ('.'.allMatches(cleaned).length > 1) return null;
+    return double.tryParse(cleaned);
+  }
+
   static String _brl(double v) => 'R\$ ${CurrencyInputFormatter.format(v)}';
 
   void _clearErr(String key) {
@@ -1152,12 +1287,12 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
       if (p.funcao == _Funcao.sdr) {
         if ((_money(p.valorFixo.text) ?? _kSdrValorFixo) > 0) return true;
       } else if (p.funcao == _Funcao.diretor) {
-        if ((_rules.diretorPercent ?? _money(p.percent.text) ?? 0) > 0) {
+        if ((_rules.diretorPercent ?? _pct(p.percent.text) ?? 0) > 0) {
           return true;
         }
       } else if (p.funcao.escolheModo && p.fixo) {
         if ((_money(p.valorFixo.text) ?? 0) > 0) return true;
-      } else if ((_money(p.percent.text) ?? 0) > 0) {
+      } else if ((_pct(p.percent.text) ?? 0) > 0) {
         return true;
       }
     }
@@ -1196,7 +1331,7 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     const tol = 0.001;
     double corretores = 0, gerencia = 0, gestorSdr = 0;
     for (final p in _participants) {
-      final v = p.fixo ? 0.0 : (_money(p.percent.text) ?? 0);
+      final v = p.fixo ? 0.0 : (_pct(p.percent.text) ?? 0);
       switch (p.funcao) {
         case _Funcao.corretor:
         case _Funcao.captador:
@@ -1345,8 +1480,8 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     for (final p in _participants) {
       if (p.funcao.ehGerencia) {
         final pct = p.funcao == _Funcao.diretor
-            ? (_rules.diretorPercent ?? _money(p.percent.text) ?? 0)
-            : (_money(p.percent.text) ?? 0);
+            ? (_rules.diretorPercent ?? _pct(p.percent.text) ?? 0)
+            : (_pct(p.percent.text) ?? 0);
         if (pct <= 0) continue;
         nivel++;
         gerencias.add({
@@ -1372,7 +1507,7 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
           final vf = _money(p.valorFixo.text) ?? 0;
           if (vf > 0) m['valorFixo'] = vf;
         } else {
-          m['porcentagem'] = _money(p.percent.text) ?? 0;
+          m['porcentagem'] = _pct(p.percent.text) ?? 0;
         }
         corretores.add(m);
       }
@@ -1551,100 +1686,212 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
       return AppScaffold(
         title: 'Editar ficha de venda',
         showBottomNavigation: false,
-        body: const Center(child: CircularProgressIndicator()),
+        body: const _FichaSkeleton(),
+      );
+    }
+    if (_loadErro != null) {
+      return AppScaffold(
+        title: 'Editar ficha de venda',
+        showBottomNavigation: false,
+        body: AppErrorState.fromApi(
+          message: _loadErro,
+          statusCode: _loadErroStatus,
+          onRetry: _loadExisting,
+        ),
       );
     }
     final ids = _tabIds;
     if (_step >= ids.length) _step = ids.length - 1;
     final meta = _tabMeta(ids[_step]);
+    // Margens: 16 nas bordas + área segura (entalhe em paisagem) e, em tela
+    // larga, uma coluna de leitura de até 720 centralizada.
+    final largura = MediaQuery.sizeOf(context).width;
+    final seguro = MediaQuery.paddingOf(context);
+    final lado = largura > 752 ? (largura - 720) / 2 : 16.0;
+    final margem =
+        EdgeInsets.only(left: lado + seguro.left, right: lado + seguro.right);
+    // Montadas uma vez por build: a altura mudando (teclado abrindo)
+    // reconstrói só o cabeçalho e a barra, nunca os campos.
+    final paginas = Theme(
+      data: _formTheme(context),
+      child: PageView(
+        controller: _pageCtrl,
+        physics: const NeverScrollableScrollPhysics(),
+        onPageChanged: (i) => setState(() => _step = i),
+        children: [
+          for (final tid in ids)
+            ListView(
+              keyboardDismissBehavior:
+                  ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: margem.copyWith(top: 18, bottom: 24),
+              children: _tabContent(tid),
+            ),
+        ],
+      ),
+    );
+    // O "Faltam N" do cabeçalho acompanha a digitação.
+    final ouvidos = Listenable.merge(_camposOuvidos());
     return AppScaffold(
       title: _isEdit ? 'Editar ficha de venda' : 'Nova ficha de venda',
       showBottomNavigation: false,
-      body: Column(
-        children: [
-          _StepHeader(
-            index: _step,
-            total: ids.length,
-            title: meta.title,
-            subtitle: meta.subtitle,
-            icon: meta.icon,
-            color: _accent,
-            typeLabel: _type.label,
-            teamName: _teamName,
-          ),
-          Expanded(
-            child: Theme(
-              data: _formTheme(context),
-              child: PageView(
-                controller: _pageCtrl,
-                physics: const NeverScrollableScrollPhysics(),
-                onPageChanged: (i) => setState(() => _step = i),
-                children: [
-                  for (final tid in ids)
-                    ListView(
-                      keyboardDismissBehavior:
-                          ScrollViewKeyboardDismissBehavior.onDrag,
-                      padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
-                      children: _tabContent(tid),
-                    ),
-                ],
+      body: LayoutBuilder(
+        builder: (context, c) {
+          final altura = c.maxHeight;
+          // O corpo já chega sem a altura do teclado; o inset real é da view.
+          final teclado = View.of(context).viewInsets.bottom > 0;
+          final densidade = altura < 240
+              ? _Densidade.minima
+              : altura < 480
+                  ? _Densidade.compacta
+                  : _Densidade.normal;
+          // Paisagem + teclado: a barra sai para o campo caber; volta ao
+          // fechar o teclado.
+          final mostraNav = altura >= 90 && !(teclado && altura < 220);
+          return Column(
+            children: [
+              AnimatedSize(
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topCenter,
+                child: ListenableBuilder(
+                  listenable: ouvidos,
+                  builder: (context, _) => _StepHeader(
+                    index: _step,
+                    total: ids.length,
+                    title: meta.title,
+                    need: meta.subtitle,
+                    icon: meta.icon,
+                    color: _accent,
+                    typeLabel: _type.label,
+                    teamName: _teamName,
+                    status: _statusDoPasso(ids[_step]),
+                    densidade: densidade,
+                    margem: margem,
+                    onStatus: _mostrarPendencias,
+                  ),
+                ),
               ),
-            ),
-          ),
-          _navBar(ids.length),
-        ],
+              Expanded(child: paginas),
+              if (mostraNav)
+                _navBar(
+                  ids.length,
+                  compacta: densidade != _Densidade.normal,
+                  margem: margem,
+                ),
+            ],
+          );
+        },
       ),
     );
   }
 
-  /// Rótulos das abas do web (TABS).
+  /// Tudo o que, digitado, muda o "Faltam N" do cabeçalho.
+  List<Listenable> _camposOuvidos() => [
+        _saleUnit, _externalBrokerName, _description, _notes,
+        _propCode, _propZip, _propAddress, _propNumber, _propComplement,
+        _propNeighborhood, _propCity,
+        _empIncorporadora, _empNome, _empUnidade, _empValorEntrada,
+        _empFormaPagamento,
+        _saleValue, _totalCommission, _goalValue, _debtConfessionValue,
+        _commissionDesc, _parcelasQtd,
+        ..._parcelas,
+        for (final pe in [_buyer, _buyerSpouse, _seller, _sellerSpouse])
+          ...pe._ctrls,
+        for (final p in _participants) ...[p.percent, p.valorFixo],
+      ];
+
+  /// Quanto falta em um passo — a MESMA checagem do "Próximo" (as regras
+  /// do web), só lida para mostrar; nada aqui bloqueia ou grava.
+  _StatusPasso _statusDoPasso(int tid) {
+    if (tid == 6 || tid == 8) return const _StatusPasso(_EstadoPasso.opcional);
+    if ((tid == 2 && !_hasBuyerSpouse) || (tid == 4 && !_hasSellerSpouse)) {
+      return const _StatusPasso(_EstadoPasso.opcional);
+    }
+    if (tid == 7) {
+      return _commissionError() == null
+          ? const _StatusPasso(_EstadoPasso.completo)
+          : const _StatusPasso(_EstadoPasso.revisar);
+    }
+    final errs = computeSaleFormErrorsForTab(tid, _rulesInput());
+    if (errs.isEmpty) return const _StatusPasso(_EstadoPasso.completo);
+    return _StatusPasso(
+      _EstadoPasso.pendente,
+      [for (final k in errs.keys) _rotuloCampo(k)],
+    );
+  }
+
+  /// Toque no "Faltam N": marca nos campos o que falta (igual ao "Próximo",
+  /// sem avançar) e diz quais são.
+  void _mostrarPendencias() {
+    final tid = _tabIds[_step];
+    if (tid == 7) {
+      final ce = _commissionError();
+      if (ce != null) _toast(ce, error: true);
+      return;
+    }
+    final errs = computeSaleFormErrorsForTab(tid, _rulesInput());
+    setState(() {
+      _errors.removeWhere(
+          (k, _) => (kSaleFormTabFieldKeys[tid] ?? const []).contains(k));
+      _errors.addAll(errs);
+    });
+    if (errs.isEmpty) return;
+    final nomes = _juntarRotulos([for (final k in errs.keys) _rotuloCampo(k)]);
+    _toast('Falta preencher: $nomes.', error: true);
+  }
+
+  /// Abas do web (TABS): título + o que o passo pede, em uma frase.
   ({String title, String subtitle, IconData icon}) _tabMeta(int tid) =>
       switch (tid) {
         0 => (
             title: 'Dados gerais',
-            subtitle: 'Venda, unidade e mídia',
+            subtitle: 'Data, unidade, gerente, mídia e descrição',
             icon: LucideIcons.fileText,
           ),
         1 => (
             title: 'Comprador',
-            subtitle: 'Dados pessoais e endereço',
+            subtitle: 'Quem compra: documento, contato e endereço',
             icon: LucideIcons.user,
           ),
         2 => (
             title: 'Cônjuge do comprador',
-            subtitle: 'Cônjuge ou sócio',
+            subtitle: 'Só se houver cônjuge ou sócio na compra',
             icon: LucideIcons.users,
           ),
         3 => (
             title: 'Vendedor',
-            subtitle: 'Dados pessoais e endereço',
+            subtitle: 'Quem vende: documento, contato e endereço',
             icon: LucideIcons.user,
           ),
         4 => (
             title: 'Cônjuge do vendedor',
-            subtitle: 'Cônjuge ou sócio',
+            subtitle: 'Só se houver cônjuge ou sócio na venda',
             icon: LucideIcons.users,
           ),
         5 => (
             title: _isEmpreendimento
-                ? 'Empreendimento / financeiro'
-                : 'Imóvel / financeiro',
-            subtitle: 'Valores, comissão e colaboradores',
+                ? 'Empreendimento e financeiro'
+                : 'Imóvel e financeiro',
+            subtitle: _isEmpreendimento
+                ? 'Unidade, valores, comissão e colaboradores'
+                : 'Endereço, valores, comissão e colaboradores',
             icon: _isEmpreendimento ? LucideIcons.building2 : LucideIcons.house,
           ),
         6 => (
             title: 'Vincular usuários',
-            subtitle: 'Quem pode ver a ficha',
+            subtitle: 'Opcional: quem mais pode ver a ficha',
             icon: LucideIcons.userPlus,
           ),
         7 => (
             title: 'Comissões',
-            subtitle: 'Participantes e valores',
+            subtitle: 'Quem recebe e quanto recebe',
             icon: LucideIcons.dollarSign,
           ),
         _ => (
-            title: 'Observações',
-            subtitle: _isEdit ? 'Revisar e salvar' : 'Revisar e criar',
+            title: 'Observações e revisão',
+            subtitle: _isEdit
+                ? 'Confira o resumo e salve'
+                : 'Confira o resumo e crie a ficha',
             icon: LucideIcons.notebookPen,
           ),
       };
@@ -1653,13 +1900,11 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         0 => _sectionGeral(),
         1 => _sectionPessoa(
             _buyer,
-            band: 'COMPRADOR',
             docLabel: 'CPF/CNPJ',
             docMask: SaleFormMask.cpfOuCnpj,
           ),
         2 => _sectionConjuge(
             _buyerSpouse,
-            band: 'CÔNJUGE DO COMPRADOR',
             pergunta: 'Há cônjuge ou sócio do comprador nesta venda?',
             has: _hasBuyerSpouse,
             onToggle: (v) => setState(() {
@@ -1673,13 +1918,11 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
           ),
         3 => _sectionPessoa(
             _seller,
-            band: 'VENDEDOR',
             docLabel: 'CPF/CNPJ',
             docMask: SaleFormMask.cpfOuCnpj,
           ),
         4 => _sectionConjuge(
             _sellerSpouse,
-            band: 'CÔNJUGE DO VENDEDOR',
             pergunta: 'Há cônjuge ou sócio do vendedor nesta venda?',
             has: _hasSellerSpouse,
             onToggle: (v) => setState(() {
@@ -1692,6 +1935,7 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
             }),
           ),
         5 => [
+            const _LegendaNa(),
             ...(_isEmpreendimento
                 ? _sectionEmpreendimento()
                 : _sectionImovel()),
@@ -1743,8 +1987,14 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     );
   }
 
-  Widget _navBar(int total) {
+  Widget _navBar(
+    int total, {
+    required bool compacta,
+    required EdgeInsets margem,
+  }) {
     final last = _step == total - 1;
+    final vBarra = compacta ? 8.0 : 12.0;
+    final vBotao = compacta ? 11.0 : 14.0;
     return Container(
       decoration: BoxDecoration(
         color: ThemeHelpers.cardBackgroundColor(context),
@@ -1752,60 +2002,86 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
           top: BorderSide(color: ThemeHelpers.borderLightColor(context)),
         ),
       ),
-      padding: EdgeInsets.fromLTRB(
-          16, 12, 16, 12 + MediaQuery.paddingOf(context).bottom),
-      child: Row(
-        children: [
-          if (_step > 0) ...[
-            OutlinedButton.icon(
-              onPressed: _saving ? null : _back,
-              style: OutlinedButton.styleFrom(
-                // Neutro — voltar não é ação de marca; coerência de cor.
-                foregroundColor: ThemeHelpers.textSecondaryColor(context),
-                side: BorderSide(color: ThemeHelpers.borderColor(context)),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
+      padding: margem.copyWith(
+        top: vBarra,
+        bottom: vBarra + MediaQuery.paddingOf(context).bottom,
+      ),
+      child: LayoutBuilder(
+        builder: (context, c) => Row(
+          children: [
+            if (_step > 0) ...[
+              // Voltar nunca rouba a largura do botão principal.
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: c.maxWidth * 0.4),
+                child: OutlinedButton.icon(
+                  onPressed: _saving ? null : _back,
+                  style: OutlinedButton.styleFrom(
+                    // Neutro — voltar não é ação de marca; coerência de cor.
+                    foregroundColor: ThemeHelpers.textSecondaryColor(context),
+                    side: BorderSide(color: ThemeHelpers.borderColor(context)),
+                    padding:
+                        EdgeInsets.symmetric(horizontal: 14, vertical: vBotao),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  icon: const Icon(LucideIcons.arrowLeft, size: 16),
+                  label: const FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      'Voltar',
+                      maxLines: 1,
+                      softWrap: false,
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
               ),
-              icon: const Icon(LucideIcons.arrowLeft, size: 16),
-              label: const Text('Voltar',
-                  style: TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(width: 10),
+            ],
+            Expanded(
+              child: FilledButton.icon(
+                onPressed:
+                    _saving ? null : (last ? _submit : () => _next(total)),
+                style: FilledButton.styleFrom(
+                  backgroundColor: _brand,
+                  // Branco explícito: no escuro o onPrimary do tema é escuro.
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: _brand.withValues(alpha: 0.55),
+                  disabledForegroundColor: Colors.white.withValues(alpha: 0.9),
+                  padding:
+                      EdgeInsets.symmetric(horizontal: 12, vertical: vBotao),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                ),
+                icon: _saving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : Icon(last ? LucideIcons.check : LucideIcons.arrowRight,
+                        size: 18),
+                label: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    _saving
+                        ? 'Salvando…'
+                        : last
+                            ? (_isEdit
+                                ? 'Salvar alterações'
+                                : 'Criar ficha de venda')
+                            : 'Próximo',
+                    maxLines: 1,
+                    softWrap: false,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w900, fontSize: 15),
+                  ),
+                ),
+              ),
             ),
-            const SizedBox(width: 12),
           ],
-          Expanded(
-            child: FilledButton.icon(
-              onPressed:
-                  _saving ? null : (last ? _submit : () => _next(total)),
-              style: FilledButton.styleFrom(
-                backgroundColor: _brand,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
-              ),
-              icon: _saving
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
-                    )
-                  : Icon(last ? LucideIcons.check : LucideIcons.arrowRight,
-                      size: 18),
-              label: Text(
-                _saving
-                    ? 'Salvando…'
-                    : last
-                        ? (_isEdit ? 'Salvar alterações' : 'Criar ficha de venda')
-                        : 'Próximo',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style:
-                    const TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -1897,12 +2173,15 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
   }) {
     final err = errorKey == null ? null : _errors[errorKey];
     return [
-      _MiniLabel(required ? '$label *' : label),
+      _QuestionLabel(label, required: required),
       Row(
         children: [
           for (var i = 0; i < opcoes.length; i++) ...[
             if (i > 0) const SizedBox(width: 10),
             Expanded(
+              // Resposta longa ("Não se aplica") ganha mais largura que
+              // "Sim"/"Não": nada cortado em 320dp.
+              flex: opcoes[i].$2.length > 6 ? 3 : 2,
               child: _Choice(
                 label: opcoes[i].$2,
                 selected: value == opcoes[i].$1,
@@ -1974,8 +2253,11 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
           onEscolher: _escolherProposta,
           onRemover: _removerProposta,
         ),
-      _Band('DADOS GERAIS', LucideIcons.fileText),
+      if (!_isEdit) const SizedBox(height: 8),
+      const _LegendaNa(),
+      _Band('VENDA', LucideIcons.fileText),
       _Row2(
+        minRight: 150,
         left: _dateField('saleDate', 'Data da venda', _saleDate,
             first: DateTime(2000)),
         right: _unidadeField(),
@@ -1985,7 +2267,10 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
           label: 'Compartilhar com outras unidades',
           value: nomesCompartilhados.isEmpty
               ? null
-              : nomesCompartilhados.join(', '),
+              : nomesCompartilhados.length <= 2
+                  ? nomesCompartilhados.join(', ')
+                  : '${nomesCompartilhados.take(2).join(', ')} e mais '
+                      '${nomesCompartilhados.length - 2}',
           placeholder: 'Nenhuma — só a unidade responsável',
           onTap: () => _pickSharedUnits(compartilhaveis),
         ),
@@ -2008,12 +2293,18 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         }),
       ),
       ..._pergunta(
-        'Secretária presente',
-        opcoes: const [('Sim', 'Sim'), ('Não', 'Não'), (kSaleFormNa, 'N/A')],
+        'A secretária estava presente?',
+        // O valor gravado segue "Não aplicável"; a tela diz "Não se aplica".
+        opcoes: const [
+          ('Sim', 'Sim'),
+          ('Não', 'Não'),
+          (kSaleFormNa, _kNaAcao),
+        ],
         value: _secretaryPresent,
         errorKey: 'secretaryPresent',
         onChanged: (v) => setState(() => _secretaryPresent = v),
       ),
+      _Band('DESCRIÇÃO', LucideIcons.alignLeft),
       ..._pergunta(
         'Grupo geral (unidade compartilhada)',
         required: false,
@@ -2041,8 +2332,10 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
       {required String docLabel, required SaleFormMask docMask}) {
     String k(String s) => '${pe.p}$s';
     return [
+      _Band('IDENTIFICAÇÃO', LucideIcons.idCard),
       _tf(k('Name'), 'Nome completo', pe.name, keyboard: TextInputType.name),
       _Row2(
+        minRight: 120,
         left: _tf(k('Cpf'), docLabel, pe.cpf,
             mask: docMask, keyboard: TextInputType.number),
         right: _tf(k('Rg'), 'RG', pe.rg),
@@ -2051,15 +2344,21 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         left: _dateField(k('BirthDate'), 'Nascimento', pe.birth),
         right: _tf(k('Profession'), 'Profissão', pe.profession),
       ),
+      _Band('CONTATO', LucideIcons.phone),
       _Row2(
+        // E-mail é longo: em tela estreita ganha a linha inteira.
+        minLeft: 170,
         left: _tf(k('Email'), 'E-mail', pe.email,
             mask: SaleFormMask.email, keyboard: TextInputType.emailAddress),
         right: _tf(k('Phone'), 'Celular', pe.phone,
             mask: SaleFormMask.phone, keyboard: TextInputType.phone),
       ),
-      const SizedBox(height: 2),
-      _MiniLabel('Endereço'),
+      _Band('ENDEREÇO', LucideIcons.mapPin),
       _Row2(
+        leftFlex: 2,
+        rightFlex: 3,
+        minLeft: 90,
+        minRight: 120,
         left: _tf(k('ZipCode'), 'CEP', pe.zip,
             mask: SaleFormMask.cep,
             keyboard: TextInputType.number,
@@ -2070,12 +2369,16 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
       _Row2(
         leftFlex: 2,
         rightFlex: 3,
+        minLeft: 90,
+        minRight: 120,
         left: _tf(k('Number'), 'Número', pe.number),
         right: _tf('', 'Complemento', pe.complement, req: false, na: false),
       ),
       _Row2(
         leftFlex: 3,
         rightFlex: 2,
+        minLeft: 120,
+        minRight: 76,
         left: _tf(k('City'), 'Cidade', pe.city),
         right: _ufField(k('State'), pe.state, (v) => pe.state = v),
       ),
@@ -2083,41 +2386,53 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     ];
   }
 
+  /// O título do passo já diz de quem é: a seção começa direto nos dados.
   List<Widget> _sectionPessoa(
     _Pessoa pe, {
-    required String band,
     required String docLabel,
     required SaleFormMask docMask,
   }) =>
       [
-        _Band(band, LucideIcons.user),
+        const _LegendaNa(),
         ..._camposPessoa(pe, docLabel: docLabel, docMask: docMask),
       ];
 
   List<Widget> _sectionConjuge(
     _Pessoa pe, {
-    required String band,
     required String pergunta,
     required bool has,
     required ValueChanged<bool> onToggle,
   }) =>
       [
-        _Band(band, LucideIcons.users),
         _SwitchRow(
           title: pergunta,
           hint: has
-              ? 'Ligado — os campos abaixo são obrigatórios.'
-              : 'Desligado — avance; nada aqui é obrigatório.',
+              ? 'Sim — preencha os dados abaixo (use “$_kNaAcao” no que '
+                  'não houver).'
+              : 'Não — pode avançar; nada aqui é obrigatório.',
           value: has,
           onChanged: onToggle,
         ),
-        const SizedBox(height: 12),
-        if (has) ..._camposPessoa(pe, docLabel: 'CPF', docMask: SaleFormMask.cpf),
+        const SizedBox(height: 14),
+        if (has) ...[
+          const _LegendaNa(),
+          ..._camposPessoa(pe, docLabel: 'CPF', docMask: SaleFormMask.cpf),
+        ] else
+          const _Vazio(
+            icon: LucideIcons.users,
+            titulo: 'Sem cônjuge ou sócio nesta venda',
+            texto: 'Se houver, ligue a opção acima para informar nome, '
+                'documento, contato e endereço.',
+          ),
       ];
 
   List<Widget> _sectionImovel() => [
         _Band('IMÓVEL', LucideIcons.house),
         _Row2(
+          leftFlex: 3,
+          rightFlex: 2,
+          minLeft: 120,
+          minRight: 90,
           left: _tf('propertyCode', 'Código do imóvel', _propCode),
           right: _tf('propertyZipCode', 'CEP', _propZip,
               mask: SaleFormMask.cep,
@@ -2139,6 +2454,8 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         _Row2(
           leftFlex: 2,
           rightFlex: 3,
+          minLeft: 90,
+          minRight: 120,
           left: _tf('propertyNumber', 'Número', _propNumber),
           right: _tf('', 'Complemento', _propComplement, req: false, na: false),
         ),
@@ -2146,6 +2463,8 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         _Row2(
           leftFlex: 3,
           rightFlex: 2,
+          minLeft: 120,
+          minRight: 76,
           left: _tf('propertyCity', 'Cidade', _propCity),
           right: _ufField('propertyState', _propState, (v) => _propState = v),
         ),
@@ -2164,7 +2483,9 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
           right: _dateField('dataEntrada', 'Data da entrada', _empDataEntrada),
         ),
         _Row2(
-          left: _tf('valorEntrada', 'Valor entrada', _empValorEntrada,
+          minLeft: 150,
+          minRight: 150,
+          left: _tf('valorEntrada', 'Valor da entrada', _empValorEntrada,
               money: true),
           right: _tf('formaPagamento', 'Forma de pagamento', _empFormaPagamento),
         ),
@@ -2174,12 +2495,44 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
   List<Widget> _sectionFinanceiro() {
     final naoAplicavel = _commissionModel == CommissionPaymentModel.naoAplicavel;
     return [
-      _Band('VALORES FINANCEIROS', LucideIcons.dollarSign),
+      // Valores da venda primeiro; a comissão fica junto do parcelamento
+      // (a soma das parcelas é conferida contra a comissão total).
+      _Band('VALORES DA VENDA', LucideIcons.dollarSign),
+      _tf('saleValue', 'Valor da venda', _saleValue, money: true),
+      ..._pergunta(
+        'A imobiliária paga a confissão de dívida?',
+        opcoes: const [('sim', 'Sim'), ('nao', 'Não')],
+        value: _debtConfession == null ? null : (_debtConfession! ? 'sim' : 'nao'),
+        errorKey: 'debtConfession',
+        onChanged: (v) => setState(() {
+          _debtConfession = v == 'sim';
+          if (v != 'sim') {
+            _debtConfessionValue.clear();
+            _errors.remove('debtConfessionValue');
+          }
+        }),
+      ),
+      if (_debtConfession == true)
+        _tf('debtConfessionValue', 'Valor da confissão de dívida',
+            _debtConfessionValue,
+            na: false, money: true),
+      ..._pergunta(
+        'O financiamento é 100%?',
+        opcoes: const [('sim', 'Sim'), ('nao', 'Não')],
+        value: _fullFinancing == null ? null : (_fullFinancing! ? 'sim' : 'nao'),
+        errorKey: 'fullFinancing',
+        onChanged: (v) => setState(() => _fullFinancing = v == 'sim'),
+      ),
+      _Band('COMISSÃO', LucideIcons.handCoins),
       ..._pergunta(
         'Modelo de pagamento da comissão',
         required: !naoAplicavel,
-        opcoes: const [('obrigatorio', 'Obrigatório'), ('nao', 'Não aplicável')],
+        opcoes: const [('obrigatorio', 'Obrigatório'), ('nao', _kNaAcao)],
         value: naoAplicavel ? 'nao' : 'obrigatorio',
+        helper: naoAplicavel
+            ? 'Sem modelo de pagamento: descrição e parcelamento saem; '
+                'comissão total e meta ficam opcionais.'
+            : 'Descreva abaixo como a comissão será paga.',
         onChanged: (v) => setState(() {
           _commissionModel = v == 'nao'
               ? CommissionPaymentModel.naoAplicavel
@@ -2211,39 +2564,15 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
           maxLines: 3,
           hint: 'Parcelamento, regras acordadas com incorporadora, etc.',
         ),
-      _tf('saleValue', 'Valor da venda', _saleValue, money: true),
       _Row2(
+        minLeft: 150,
+        minRight: 150,
         left: _tf('totalCommission', 'Comissão total', _totalCommission,
             req: !naoAplicavel,
             money: true,
             onChanged: (_) => setState(() {})),
         right: _tf('goalValue', 'Valor da meta', _goalValue,
             req: !naoAplicavel, money: true),
-      ),
-      const SizedBox(height: 4),
-      ..._pergunta(
-        'A imobiliária paga a confissão de dívida?',
-        opcoes: const [('sim', 'Sim'), ('nao', 'Não')],
-        value: _debtConfession == null ? null : (_debtConfession! ? 'sim' : 'nao'),
-        errorKey: 'debtConfession',
-        onChanged: (v) => setState(() {
-          _debtConfession = v == 'sim';
-          if (v != 'sim') {
-            _debtConfessionValue.clear();
-            _errors.remove('debtConfessionValue');
-          }
-        }),
-      ),
-      if (_debtConfession == true)
-        _tf('debtConfessionValue', 'Valor da confissão de dívida',
-            _debtConfessionValue,
-            na: false, money: true),
-      ..._pergunta(
-        'Financiamento é 100%?',
-        opcoes: const [('sim', 'Sim'), ('nao', 'Não')],
-        value: _fullFinancing == null ? null : (_fullFinancing! ? 'sim' : 'nao'),
-        errorKey: 'fullFinancing',
-        onChanged: (v) => setState(() => _fullFinancing = v == 'sim'),
       ),
       if (!naoAplicavel) ..._secaoParcelamento(),
       const SizedBox(height: 6),
@@ -2341,6 +2670,8 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
   List<Widget> _sectionColaboradores() => [
         _Band('COLABORADORES', LucideIcons.users),
         _Row2(
+          minLeft: 150,
+          minRight: 150,
           left: _PickerField(
             label: 'Pré-atendimento',
             required: true,
@@ -2361,46 +2692,86 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         const SizedBox(height: 6),
       ];
 
-  List<Widget> _sectionVincular() => [
-        _Band('VINCULAR USUÁRIOS', LucideIcons.userPlus),
-        _Helper(
-            'Selecione os usuários que terão acesso a esta ficha. Você (criador) já está vinculado automaticamente.'),
-        const SizedBox(height: 12),
-        if (_linkedUsers.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final u in _linkedUsers)
-                  _UserChip(
-                    name: u.name,
-                    accent: _accent,
-                    onRemove: () => setState(
-                        () => _linkedUsers.removeWhere((x) => x.id == u.id)),
-                  ),
-              ],
-            ),
-          ),
-        _AddButton(
-          label: 'Adicionar usuário',
-          accent: _accent,
-          onTap: _pickLinkedUser,
+  List<Widget> _sectionVincular() {
+    final n = _linkedUsers.length;
+    final cheio = n >= _kMaxVinculados;
+    return [
+      _Contador(
+        numero: '$n',
+        rotulo: 'de $_kMaxVinculados usuários vinculados',
+      ),
+      _Helper('Você (criador) já tem acesso. Quem entrar nas comissões '
+          'também passa a ver a ficha ao salvar.'),
+      const SizedBox(height: 14),
+      if (n == 0)
+        const _Vazio(
+          icon: LucideIcons.userPlus,
+          titulo: 'Ninguém vinculado além de você',
+          texto: 'Vincule quem precisa acompanhar a ficha sem estar nas '
+              'comissões. Toque em “Adicionar usuário”.',
+        )
+      else
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final u in _linkedUsers)
+              _UserChip(
+                name: u.name,
+                accent: _accent,
+                onRemove: () => setState(
+                    () => _linkedUsers.removeWhere((x) => x.id == u.id)),
+              ),
+          ],
         ),
-        const SizedBox(height: 6),
-      ];
+      const SizedBox(height: 12),
+      _AddButton(
+        label: cheio
+            ? 'Limite de $_kMaxVinculados usuários atingido'
+            : 'Adicionar usuário',
+        accent: _accent,
+        enabled: !cheio,
+        onTap: _pickLinkedUser,
+      ),
+      const SizedBox(height: 6),
+    ];
+  }
+
+  bool get _comissaoNaoAplicavel =>
+      _commissionModel == CommissionPaymentModel.naoAplicavel;
 
   List<Widget> _sectionComissoes() => [
-        _Band('COMISSÕES', LucideIcons.dollarSign),
-        _Helper(
-            'Registre cada participante. A mesma pessoa pode ter uma função de corretor/captador/SDR e uma de gerência.'),
+        _Helper('Registre cada participante. A mesma pessoa pode ter uma '
+            'função de corretor/captador/SDR e uma de gerência.'),
         const SizedBox(height: 12),
-        _tf('', 'Externo', _externalBrokerName,
+        // Travas da empresa ao vivo: quanto cada grupo já soma na ficha.
+        if (!_comissaoNaoAplicavel && _participants.isNotEmpty)
+          ListenableBuilder(
+            listenable:
+                Listenable.merge([for (final p in _participants) p.percent]),
+            builder: (context, _) => _ReguaComissoes(
+              grupos: _gruposDeComissao(),
+              participantes: _participants.length,
+              accent: _accent,
+            ),
+          ),
+        _tf('', 'Corretor externo', _externalBrokerName,
             req: false,
             na: false,
             maxLength: 255,
             hint: 'Corretor não cadastrado no sistema'),
+        _Band('PARTICIPANTES', LucideIcons.users),
+        if (_participants.isEmpty)
+          _Vazio(
+            icon: LucideIcons.userPlus,
+            titulo: 'Nenhum participante ainda',
+            texto: _comissaoNaoAplicavel
+                ? 'Com o modelo de comissão “$_kNaAcao”, participantes são '
+                    'opcionais.'
+                : 'Adicione quem recebe nesta venda: corretor, captador, '
+                    'SDR, gerência. É preciso ao menos um com valor.',
+          ),
+        if (_participants.isEmpty) const SizedBox(height: 12),
         for (var i = 0; i < _participants.length; i++)
           _ParticipantCard(
             index: i,
@@ -2439,21 +2810,118 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         const SizedBox(height: 6),
       ];
 
+  /// Soma de cada grupo com trava na empresa — a MESMA conta de
+  /// [_validarTravasDeComissao] (valor fixo, SDR, diretor e outros ficam
+  /// fora), só para mostrar antes do "Próximo".
+  List<({String rotulo, double atual, double maximo})> _gruposDeComissao() {
+    double corretores = 0, gerencia = 0, gestorSdr = 0;
+    var temGestorSdr = false;
+    for (final p in _participants) {
+      final v = p.fixo ? 0.0 : (_pct(p.percent.text) ?? 0);
+      switch (p.funcao) {
+        case _Funcao.corretor:
+        case _Funcao.captador:
+          corretores += v;
+        case _Funcao.gerencia:
+          gerencia += v;
+        case _Funcao.gestorSdr:
+          gestorSdr += v;
+          temGestorSdr = true;
+        case _Funcao.diretor:
+        case _Funcao.sdr:
+        case _Funcao.outros:
+          break;
+      }
+    }
+    final maxC = _rules.corretoresTotalMax;
+    final maxG = _rules.gerenciaTotalMax;
+    final maxS = _rules.gestorSdrMax;
+    return [
+      if (maxC != null)
+        (rotulo: 'Corretores e captadores', atual: corretores, maximo: maxC),
+      if (maxG != null) (rotulo: 'Gerência', atual: gerencia, maximo: maxG),
+      if (maxS != null && temGestorSdr)
+        (rotulo: 'Gestor SDR', atual: gestorSdr, maximo: maxS),
+    ];
+  }
+
   List<Widget> _sectionObservacoes() => [
         _Band('OBSERVAÇÕES', LucideIcons.notebookPen),
         _tf('', 'Observações gerais', _notes,
             req: false,
             na: false,
             maxLines: 8,
-            hint: 'Informações adicionais, condições especiais…'),
-        _Helper('Opcional. Entra na ficha junto com a descrição.'),
+            hint: 'Informações adicionais, condições especiais…',
+            helper: 'Opcional. Entra na ficha junto com a descrição.'),
+        // Revisão antes de criar: o essencial de cada passo e o que falta.
+        _Band('RESUMO DA FICHA', LucideIcons.listChecks),
+        _Helper('Toque em um passo para conferir ou completar.'),
+        const SizedBox(height: 4),
+        for (var i = 0; i < _tabIds.length - 1; i++) _linhaRevisao(i),
         const SizedBox(height: 6),
       ];
+
+  Widget _linhaRevisao(int idx) {
+    final tid = _tabIds[idx];
+    final meta = _tabMeta(tid);
+    return _LinhaRevisao(
+      icon: meta.icon,
+      titulo: meta.title,
+      detalhe: _resumoDoPasso(tid),
+      status: _statusDoPasso(tid),
+      onTap: () => _goTo(idx),
+    );
+  }
+
+  /// O essencial preenchido em cada passo, em uma linha.
+  String _resumoDoPasso(int tid) {
+    String ou(String v, String vazio) {
+      final t = v.trim();
+      if (t.isEmpty) return vazio;
+      return isSaleFormNa(t) ? kSaleFormNa : t;
+    }
+
+    String dinheiro(String v) {
+      final t = v.trim();
+      if (t.isEmpty) return '—';
+      return isSaleFormNa(t) ? kSaleFormNa : 'R\$ $t';
+    }
+
+    String quantos(int n, String um, String varios) =>
+        n == 1 ? '1 $um' : '$n $varios';
+
+    final data = _saleDate.na
+        ? kSaleFormNa
+        : _saleDate.value == null
+            ? 'Sem data'
+            : DateFormat('dd/MM/yyyy').format(_saleDate.value!);
+    return switch (tid) {
+      0 => '$data · ${ou(_saleUnit.text, 'sem unidade')}',
+      1 => ou(_buyer.name.text, 'Nome não informado'),
+      2 => _hasBuyerSpouse
+          ? ou(_buyerSpouse.name.text, 'Nome não informado')
+          : 'Sem cônjuge ou sócio',
+      3 => ou(_seller.name.text, 'Nome não informado'),
+      4 => _hasSellerSpouse
+          ? ou(_sellerSpouse.name.text, 'Nome não informado')
+          : 'Sem cônjuge ou sócio',
+      5 => 'Venda ${dinheiro(_saleValue.text)} · '
+          'Comissão ${dinheiro(_totalCommission.text)}',
+      6 => _linkedUsers.isEmpty
+          ? 'Só você e quem estiver nas comissões'
+          : quantos(_linkedUsers.length, 'usuário vinculado',
+              'usuários vinculados'),
+      7 => _participants.isEmpty
+          ? 'Nenhum participante'
+          : quantos(_participants.length, 'participante', 'participantes'),
+      _ => '',
+    };
+  }
 
   // ── Pickers ─────────────────────────────────────────────────────────────
 
   Future<void> _pickParticipantUser(_Participant p) async {
-    final u = await _showUserPicker();
+    final u = await _showUserPicker(titulo: 'Participante da comissão');
     if (u is AdminUser) {
       setState(() {
         p.userId = u.id;
@@ -2467,7 +2935,7 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
       _toast('Máximo de $_kMaxVinculados usuários vinculados.', error: true);
       return;
     }
-    final u = await _showUserPicker();
+    final u = await _showUserPicker(titulo: 'Vincular usuário à ficha');
     if (u is AdminUser && _linkedUsers.every((x) => x.id != u.id)) {
       setState(() => _linkedUsers
           .add(SaleFormPessoa(id: u.id, name: u.name, email: u.email)));
@@ -2475,7 +2943,10 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
   }
 
   Future<void> _pickColaborador(String key, ValueChanged<String> set) async {
-    final r = await _showUserPicker(allowNa: true);
+    final r = await _showUserPicker(
+      allowNa: true,
+      titulo: key == 'preAtendimento' ? 'Pré-atendimento' : 'Central de captação',
+    );
     if (r == null) return;
     setState(() {
       set(r is AdminUser ? r.name : kSaleFormNa);
@@ -2522,46 +2993,212 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
   }
 
   /// Devolve [AdminUser] ou [kSaleFormNa] (quando [allowNa]).
-  Future<Object?> _showUserPicker({bool allowNa = false}) {
+  Future<Object?> _showUserPicker({
+    required String titulo,
+    bool allowNa = false,
+  }) {
     return showModalBottomSheet<Object>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _UserPickerSheet(accent: _accent, allowNa: allowNa),
+      builder: (_) => _UserPickerSheet(
+        accent: _accent,
+        titulo: titulo,
+        allowNa: allowNa,
+      ),
     );
   }
 }
 
-/// Cabeçalho do passo — ícone tonal na cor da marca + título + "Passo X de N"
-/// + barra de progresso, e uma linha discreta de tipo/equipe.
+/// Cabeçalho do passo — responde de cara: em que passo estou (ícone tonal,
+/// título, "Passo X de N" e segmentos), o que este passo pede (uma frase) e
+/// quanto falta ("Faltam 3" ao vivo; tocar marca os campos). Linha discreta
+/// de tipo/equipe. Encolhe em tela baixa (teclado, paisagem).
 class _StepHeader extends StatelessWidget {
   const _StepHeader({
     required this.index,
     required this.total,
     required this.title,
-    required this.subtitle,
+    required this.need,
     required this.icon,
     required this.color,
     required this.typeLabel,
     required this.teamName,
+    required this.status,
+    required this.densidade,
+    required this.margem,
+    this.onStatus,
   });
   final int index;
   final int total;
   final String title;
-  final String subtitle;
+
+  /// O que o passo pede, em uma frase.
+  final String need;
   final IconData icon;
   final Color color;
   final String typeLabel;
   final String teamName;
+  final _StatusPasso status;
+  final _Densidade densidade;
+
+  /// Margens laterais da página (bordas, área segura, coluna no tablet).
+  final EdgeInsets margem;
+
+  /// Toque no "Faltam N": marca nos campos o que falta.
+  final VoidCallback? onStatus;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final muted = ThemeHelpers.textSecondaryColor(context);
-    final frac = (index + 1) / total;
+    final texto = ThemeHelpers.textColor(context);
+    final acionavel = status.estado == _EstadoPasso.pendente ||
+        status.estado == _EstadoPasso.revisar;
+    final chip = _StatusChip(
+      status: status,
+      onTap: acionavel ? onStatus : null,
+    );
+    final contexto =
+        teamName.trim().isEmpty ? typeLabel : '$typeLabel · $teamName';
+    final Widget corpo = switch (densidade) {
+      // Muito baixa (paisagem com teclado): só os segmentos.
+      _Densidade.minima => Padding(
+          padding: margem.copyWith(top: 6, bottom: 6),
+          child: _ProgressoPassos(
+            total: total,
+            atual: index,
+            color: color,
+            altura: 3,
+          ),
+        ),
+      _Densidade.compacta => Padding(
+          padding: margem.copyWith(top: 8, bottom: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: title,
+                            style: TextStyle(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.2,
+                              color: texto,
+                            ),
+                          ),
+                          TextSpan(
+                            text: '  ·  ${index + 1} de $total',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: muted,
+                            ),
+                          ),
+                        ],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  chip,
+                ],
+              ),
+              const SizedBox(height: 7),
+              _ProgressoPassos(
+                total: total,
+                atual: index,
+                color: color,
+                altura: 3,
+              ),
+            ],
+          ),
+        ),
+      _Densidade.normal => Padding(
+          padding: margem.copyWith(top: 14, bottom: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: isDark ? 0.22 : 0.14),
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: Icon(icon, size: 20, color: color),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: texto,
+                            letterSpacing: -0.3,
+                            height: 1.05,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'Passo ${index + 1} de $total · $need',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: muted,
+                            fontWeight: FontWeight.w600,
+                            height: 1.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _ProgressoPassos(total: total, atual: index, color: color),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Icon(LucideIcons.handshake, size: 12, color: muted),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      contexto,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: muted,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  chip,
+                ],
+              ),
+            ],
+          ),
+        ),
+    };
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
         // Flush: sem caixa tingida — só um sublinhado na cor da marca
         // (ecoa o indicador de TabBar do app). Ver dreamkeysapp-flush-design.
@@ -2570,82 +3207,124 @@ class _StepHeader extends StatelessWidget {
           bottom: BorderSide(color: color.withValues(alpha: 0.7), width: 2),
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: corpo,
+    );
+  }
+}
+
+/// Progresso em segmentos, um por passo: feitos em tom, o atual cheio, os
+/// próximos no trilho — mostra quantos passos são e onde se está.
+class _ProgressoPassos extends StatelessWidget {
+  const _ProgressoPassos({
+    required this.total,
+    required this.atual,
+    required this.color,
+    this.altura = 4,
+  });
+  final int total;
+  final int atual;
+  final Color color;
+  final double altura;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final trilho = isDark
+        ? ThemeHelpers.borderLightColor(context)
+        : ThemeHelpers.borderColor(context);
+    return Semantics(
+      label: 'Passo ${atual + 1} de $total',
+      child: Row(
         children: [
-          Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
+          for (var i = 0; i < total; i++) ...[
+            if (i > 0) const SizedBox(width: 3),
+            Expanded(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                height: altura,
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: isDark ? 0.22 : 0.14),
-                  borderRadius: BorderRadius.circular(13),
-                ),
-                child: Icon(icon, size: 20, color: color),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: ThemeHelpers.textColor(context),
-                        letterSpacing: -0.3,
-                        height: 1.05,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Passo ${index + 1} de $total · $subtitle',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: muted,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
+                  color: i < atual
+                      ? color.withValues(alpha: 0.45)
+                      : i == atual
+                          ? color
+                          : trilho,
+                  borderRadius: BorderRadius.circular(altura),
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(3),
-            child: LinearProgressIndicator(
-              value: frac,
-              minHeight: 4,
-              backgroundColor:
-                  ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
-              valueColor: AlwaysStoppedAnimation(color),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// "Faltam 3" · "Completo" · "Revisar" · "Opcional" — o estado do passo.
+/// Cor por significado (aviso/sucesso), nunca a da marca.
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({required this.status, this.onTap});
+  final _StatusPasso status;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final aviso = isDark
+        ? AppColors.message.warningTextDarkMode
+        : AppColors.message.warningText;
+    final ok = isDark
+        ? AppColors.message.successTextDarkMode
+        : AppColors.message.successText;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final n = status.faltam.length;
+    final (IconData icone, String rotulo, Color cor) = switch (status.estado) {
+      _EstadoPasso.pendente => (
+          LucideIcons.circleDashed,
+          n == 1 ? 'Falta 1' : 'Faltam $n',
+          aviso,
+        ),
+      _EstadoPasso.revisar => (LucideIcons.circleAlert, 'Revisar', aviso),
+      _EstadoPasso.completo => (LucideIcons.circleCheck, 'Completo', ok),
+      _EstadoPasso.opcional => (LucideIcons.circle, 'Opcional', muted),
+    };
+    final pilula = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: cor.withValues(alpha: isDark ? 0.14 : 0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: cor.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icone, size: 12, color: cor),
+          const SizedBox(width: 4),
+          Text(
+            rotulo,
+            maxLines: 1,
+            softWrap: false,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: cor,
             ),
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Icon(LucideIcons.handshake, size: 12, color: muted),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  '$typeLabel · $teamName',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: muted,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-              ),
-            ],
-          ),
         ],
+      ),
+    );
+    // Mesma altura tocável ou não: o cabeçalho não pula quando o passo
+    // fica completo.
+    final alvo = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: pilula,
+    );
+    if (onTap == null) return alvo;
+    return Tooltip(
+      message: 'Mostrar o que falta',
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: alvo,
       ),
     );
   }
@@ -2687,26 +3366,6 @@ class _Band extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _MiniLabel extends StatelessWidget {
-  const _MiniLabel(this.text);
-  final String text;
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 4, bottom: 8),
-      child: Text(
-        text.toUpperCase(),
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 1.0,
-          color: ThemeHelpers.textSecondaryColor(context),
-        ),
       ),
     );
   }
@@ -2754,42 +3413,221 @@ class _ErrorLine extends StatelessWidget {
   }
 }
 
-/// Chip "N/A" no canto do campo: marca "Não aplicável" (o campo trava e
-/// mostra o texto); tocar de novo desmarca. Só aparece com o campo vazio ou
-/// já marcado — digitou um valor, ele sai do caminho.
+/// Enunciado de pergunta de escolha única — frase normal (não caixa-alta),
+/// para ler como pergunta.
+class _QuestionLabel extends StatelessWidget {
+  const _QuestionLabel(this.text, {this.required = false});
+  final String text;
+  final bool required;
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 8),
+      child: Text.rich(
+        TextSpan(
+          children: [
+            TextSpan(text: text),
+            if (required)
+              TextSpan(
+                text: ' *',
+                style: TextStyle(color: Theme.of(context).colorScheme.primary),
+              ),
+          ],
+        ),
+        style: TextStyle(
+          fontSize: 13.5,
+          height: 1.3,
+          fontWeight: FontWeight.w800,
+          color: ThemeHelpers.textColor(context),
+        ),
+      ),
+    );
+  }
+}
+
+/// Legenda do chip "Não se aplica" — em campo estreito ele vira só o ícone;
+/// a legenda ensina uma vez, no topo do passo.
+class _LegendaNa extends StatelessWidget {
+  const _LegendaNa();
+  @override
+  Widget build(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: ThemeHelpers.borderColor(context)),
+            ),
+            child: Icon(LucideIcons.ban, size: 12, color: muted),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Algum dado não existe nesta venda? Toque neste ícone no campo '
+              'para marcar “$_kNaAcao”.',
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.35,
+                fontWeight: FontWeight.w500,
+                color: muted,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Vazio que ensina: o que aparece aqui e como chegar lá.
+class _Vazio extends StatelessWidget {
+  const _Vazio({required this.icon, required this.titulo, required this.texto});
+  final IconData icon;
+  final String titulo;
+  final String texto;
+  @override
+  Widget build(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: ThemeHelpers.borderColor(context)),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, size: 22, color: muted),
+          const SizedBox(height: 10),
+          Text(
+            titulo,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+              color: ThemeHelpers.textColor(context),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            texto,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.35,
+              fontWeight: FontWeight.w500,
+              color: muted,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Número que importa em destaque + rótulo curto ("2 de 10 vinculados").
+class _Contador extends StatelessWidget {
+  const _Contador({required this.numero, required this.rotulo});
+  final String numero;
+  final String rotulo;
+  @override
+  Widget build(BuildContext context) {
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: numero,
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.5,
+              color: ThemeHelpers.textColor(context),
+            ),
+          ),
+          TextSpan(
+            text: '  $rotulo',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: ThemeHelpers.textSecondaryColor(context),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Chip "Não se aplica" no canto do campo: marca "Não aplicável" (o campo
+/// trava e mostra o valor); tocar de novo desmarca. Só aparece com o campo
+/// vazio ou já marcado — digitou um valor, ele sai do caminho. Em campo
+/// estreito (ou já marcado, quando o campo já diz "Não aplicável") fica só o
+/// ícone, com tooltip.
 class _NaChip extends StatelessWidget {
-  const _NaChip({required this.active, required this.onTap});
+  const _NaChip({
+    required this.active,
+    required this.onTap,
+    this.compact = false,
+  });
   final bool active;
   final VoidCallback onTap;
+  final bool compact;
   @override
   Widget build(BuildContext context) {
     final accent = Theme.of(context).colorScheme.primary;
     final muted = ThemeHelpers.textSecondaryColor(context);
+    final cor = active ? accent : muted;
     return Tooltip(
-      message: active ? 'Desmarcar Não aplicável' : 'Marcar como Não aplicável',
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(6, 8, 8, 8),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-            decoration: BoxDecoration(
-              color: active ? accent.withValues(alpha: 0.14) : Colors.transparent,
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(
-                color: active
-                    ? accent.withValues(alpha: 0.55)
-                    : ThemeHelpers.borderColor(context).withValues(alpha: 0.8),
+      message: active ? 'Desfazer “$_kNaAcao”' : 'Marcar “$_kNaAcao”',
+      child: Semantics(
+        button: true,
+        toggled: active,
+        label: _kNaAcao,
+        excludeSemantics: true,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(4, 8, 8, 8),
+            child: Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: compact ? 6 : 8,
+                vertical: 4,
               ),
-            ),
-            child: Text(
-              'N/A',
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.4,
-                color: active ? accent : muted,
+              decoration: BoxDecoration(
+                color: active
+                    ? accent.withValues(alpha: 0.14)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: active
+                      ? accent.withValues(alpha: 0.55)
+                      : ThemeHelpers.borderColor(context),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(LucideIcons.ban, size: 13, color: cor),
+                  if (!compact) ...[
+                    const SizedBox(width: 4),
+                    Text(
+                      _kNaAcao,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: cor,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           ),
@@ -2836,50 +3674,60 @@ class _Field extends StatelessWidget {
     // Visual (filled, borda, foco, erro) herdado do _formTheme.
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
-      child: ValueListenableBuilder<TextEditingValue>(
-        valueListenable: controller,
-        builder: (context, value, _) {
-          final isNa = isSaleFormNa(value.text);
-          final muted = ThemeHelpers.textSecondaryColor(context);
-          final showChip = allowNa && (value.text.isEmpty || isNa);
-          return TextField(
-            controller: controller,
-            readOnly: isNa && allowNa,
-            minLines: 1,
-            maxLines: maxLines,
-            maxLength: maxLength,
-            keyboardType: money || digitsOnly ? TextInputType.number : keyboard,
-            inputFormatters: money
-                ? [CurrencyInputFormatter()]
-                : digitsOnly
-                    ? [FilteringTextInputFormatter.digitsOnly]
-                    : [SaleFormFieldFormatter(mask)],
-            onChanged: onChanged,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: isNa ? muted : null,
-                  fontStyle: isNa ? FontStyle.italic : null,
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final estreito = _chipCompacto(
+              context, c.maxWidth, required ? '$label *' : label);
+          return ValueListenableBuilder<TextEditingValue>(
+            valueListenable: controller,
+            builder: (context, value, _) {
+              final isNa = isSaleFormNa(value.text);
+              final muted = ThemeHelpers.textSecondaryColor(context);
+              final showChip = allowNa && (value.text.isEmpty || isNa);
+              return TextField(
+                controller: controller,
+                readOnly: isNa && allowNa,
+                minLines: 1,
+                maxLines: maxLines,
+                maxLength: maxLength,
+                keyboardType:
+                    money || digitsOnly ? TextInputType.number : keyboard,
+                inputFormatters: money
+                    ? [CurrencyInputFormatter()]
+                    : digitsOnly
+                        ? [FilteringTextInputFormatter.digitsOnly]
+                        : [SaleFormFieldFormatter(mask)],
+                onChanged: onChanged,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: isNa ? muted : null,
+                      fontStyle: isNa ? FontStyle.italic : null,
+                    ),
+                decoration: InputDecoration(
+                  labelText: required ? '$label *' : label,
+                  hintText: hint,
+                  helperText: helper,
+                  helperMaxLines: 3,
+                  errorText: errorText,
+                  counterText: maxLength != null ? '' : null,
+                  prefixText: money && !isNa ? 'R\$ ' : null,
+                  suffixIcon: showChip
+                      ? _NaChip(
+                          active: isNa,
+                          // Marcado, o campo já diz "Não aplicável": o chip
+                          // fica só no ícone (tocar desfaz).
+                          compact: estreito || isNa,
+                          onTap: () {
+                            controller.text = isNa ? '' : kSaleFormNa;
+                            onChanged?.call(controller.text);
+                          },
+                        )
+                      : null,
+                  suffixIconConstraints:
+                      const BoxConstraints(minWidth: 0, minHeight: 0),
                 ),
-            decoration: InputDecoration(
-              labelText: required ? '$label *' : label,
-              hintText: hint,
-              helperText: helper,
-              helperMaxLines: 3,
-              errorText: errorText,
-              counterText: maxLength != null ? '' : null,
-              prefixText: money && !isNa ? 'R\$ ' : null,
-              suffixIcon: showChip
-                  ? _NaChip(
-                      active: isNa,
-                      onTap: () {
-                        controller.text = isNa ? '' : kSaleFormNa;
-                        onChanged?.call(controller.text);
-                      },
-                    )
-                  : null,
-              suffixIconConstraints:
-                  const BoxConstraints(minWidth: 0, minHeight: 0),
-            ),
+              );
+            },
           );
         },
       ),
@@ -2887,26 +3735,56 @@ class _Field extends StatelessWidget {
   }
 }
 
+/// Duas colunas quando couber. Em tela estreita (320dp) ou com texto
+/// ampliado os campos empilham: um campo inteiro por linha é melhor que
+/// rótulo e valor cortados.
 class _Row2 extends StatelessWidget {
   const _Row2({
     required this.left,
     required this.right,
     this.leftFlex = 1,
     this.rightFlex = 1,
+    this.minLeft = 140,
+    this.minRight = 140,
   });
   final Widget left;
   final Widget right;
   final int leftFlex;
   final int rightFlex;
+
+  /// Largura mínima de cada coluna (texto em 100%) para ficar lado a lado.
+  final double minLeft;
+  final double minRight;
+
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(flex: leftFlex, child: left),
-        const SizedBox(width: 12),
-        Expanded(flex: rightFlex, child: right),
-      ],
+    return LayoutBuilder(
+      builder: (context, c) {
+        const gap = 12.0;
+        final escala = MediaQuery.textScalerOf(context)
+            .scale(1)
+            .clamp(1.0, 1.6)
+            .toDouble();
+        final util = c.maxWidth - gap;
+        final wLeft = util * leftFlex / (leftFlex + rightFlex);
+        final wRight = util - wLeft;
+        final cabe = !c.maxWidth.isFinite ||
+            (wLeft >= minLeft * escala && wRight >= minRight * escala);
+        if (!cabe) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [left, right],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(flex: leftFlex, child: left),
+            const SizedBox(width: gap),
+            Expanded(flex: rightFlex, child: right),
+          ],
+        );
+      },
     );
   }
 }
@@ -2928,7 +3806,7 @@ class _Dropdown extends StatelessWidget {
   final ValueChanged<String?> onChanged;
   final bool required;
 
-  /// Opção "― Não aplicável ―" no topo (valor "Não aplicável").
+  /// Opção "― Não se aplica ―" no topo (valor gravado "Não aplicável").
   final bool allowNa;
 
   /// Rótulo de exibição por valor (ex.: "(indisponível)").
@@ -2964,6 +3842,8 @@ class _Dropdown extends StatelessWidget {
         key: ValueKey('$label|$v'),
         initialValue: v,
         isExpanded: true,
+        // Lista longa (UFs, mídias) não cobre a tela inteira em paisagem.
+        menuMaxHeight: MediaQuery.sizeOf(context).height * 0.6,
         icon: Icon(LucideIcons.chevronDown, size: 18, color: muted),
         borderRadius: BorderRadius.circular(14),
         dropdownColor: ThemeHelpers.cardBackgroundColor(context),
@@ -2971,6 +3851,19 @@ class _Dropdown extends StatelessWidget {
               fontWeight: FontWeight.w600,
               color: ThemeHelpers.textColor(context),
             ),
+        // No campo, a opção "Não se aplica" aparece como o valor gravado
+        // ("Não aplicável") — igual aos campos de texto marcados.
+        selectedItemBuilder: (context) => [
+          if (allowNa)
+            Text(
+              kSaleFormNa,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: muted, fontStyle: FontStyle.italic),
+            ),
+          for (final o in options)
+            Text(labels[o] ?? o, maxLines: 1, overflow: TextOverflow.ellipsis),
+        ],
         items: items,
         onChanged: onChanged,
         decoration: InputDecoration(
@@ -3006,47 +3899,58 @@ class _DateField extends StatelessWidget {
     final muted = ThemeHelpers.textSecondaryColor(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
-      child: InkWell(
-        onTap: na ? null : onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: InputDecorator(
-          // Visual filled herdado do _formTheme (igual aos campos).
-          decoration: InputDecoration(
-            labelText: required ? '$label *' : label,
-            errorText: errorText,
-            suffixIcon: onNa != null && (na || value == null)
-                ? _NaChip(active: na, onTap: onNa!)
-                : Padding(
-                    padding: const EdgeInsets.only(right: 12),
-                    child: Icon(LucideIcons.calendar, size: 16, color: muted),
-                  ),
-            suffixIconConstraints:
-                const BoxConstraints(minWidth: 0, minHeight: 0),
-          ),
-          child: Text(
-            na
-                ? kSaleFormNa
-                : value != null
-                    ? DateFormat('dd/MM/yyyy', 'pt_BR').format(value!)
-                    : 'Selecionar',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              fontStyle: na ? FontStyle.italic : null,
-              color: value != null && !na
-                  ? ThemeHelpers.textColor(context)
-                  : muted,
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final estreito = _chipCompacto(
+              context, c.maxWidth, required ? '$label *' : label);
+          return InkWell(
+            onTap: na ? null : onTap,
+            borderRadius: BorderRadius.circular(14),
+            child: InputDecorator(
+              // Visual filled herdado do _formTheme (igual aos campos).
+              decoration: InputDecoration(
+                labelText: required ? '$label *' : label,
+                errorText: errorText,
+                suffixIcon: onNa != null && (na || value == null)
+                    ? _NaChip(
+                        active: na,
+                        compact: estreito || na,
+                        onTap: onNa!,
+                      )
+                    : Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child:
+                            Icon(LucideIcons.calendar, size: 16, color: muted),
+                      ),
+                suffixIconConstraints:
+                    const BoxConstraints(minWidth: 0, minHeight: 0),
+              ),
+              child: Text(
+                na
+                    ? kSaleFormNa
+                    : value != null
+                        ? DateFormat('dd/MM/yyyy', 'pt_BR').format(value!)
+                        : 'Selecionar',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontStyle: na ? FontStyle.italic : null,
+                  color: value != null && !na
+                      ? ThemeHelpers.textColor(context)
+                      : muted,
+                ),
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
 }
 
-/// Campo que abre um seletor (gerente, colaboradores, unidades) — mesmo
-/// visual dos inputs; "― Não aplicável ―" é opção dentro do seletor.
+/// Campo que abre um seletor (gerente, colaboradores, unidades, participante)
+/// — mesmo visual dos inputs; "Não se aplica" é opção dentro do seletor.
 class _PickerField extends StatelessWidget {
   const _PickerField({
     required this.label,
@@ -3167,28 +4071,40 @@ class _Choice extends StatelessWidget {
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 6),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: selected ? accent.withValues(alpha: 0.12) : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected
-                ? accent.withValues(alpha: 0.5)
-                : ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 8),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color:
+                selected ? accent.withValues(alpha: 0.12) : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected
+                  ? accent.withValues(alpha: 0.5)
+                  : ThemeHelpers.borderColor(context),
+            ),
           ),
-        ),
-        child: Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontWeight: FontWeight.w800,
-            fontSize: 13,
-            color: selected ? accent : ThemeHelpers.textSecondaryColor(context),
+          // Encolhe em vez de cortar ("Não se aplica" em 320dp/130%).
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              maxLines: 1,
+              softWrap: false,
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
+                color: selected
+                    ? accent
+                    : ThemeHelpers.textSecondaryColor(context),
+              ),
+            ),
           ),
         ),
       ),
@@ -3197,37 +4113,55 @@ class _Choice extends StatelessWidget {
 }
 
 class _AddButton extends StatelessWidget {
-  const _AddButton({required this.label, required this.accent, required this.onTap});
+  const _AddButton({
+    required this.label,
+    required this.accent,
+    required this.onTap,
+    this.enabled = true,
+  });
   final String label;
   final Color accent;
   final VoidCallback onTap;
+
+  /// Travado (ex.: limite atingido): cadeado + motivo no rótulo.
+  final bool enabled;
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 12),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: accent.withValues(alpha: 0.4)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.plus, size: 15, color: accent),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    color: accent, fontWeight: FontWeight.w800, fontSize: 12.5),
-              ),
+    final cor = enabled ? accent : ThemeHelpers.textSecondaryColor(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: enabled
+                  ? accent.withValues(alpha: 0.4)
+                  : ThemeHelpers.borderColor(context),
             ),
-          ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(enabled ? LucideIcons.plus : LucideIcons.lock,
+                  size: 15, color: cor),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: cor, fontWeight: FontWeight.w800, fontSize: 12.5),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -3242,29 +4176,52 @@ class _UserChip extends StatelessWidget {
   final VoidCallback onRemove;
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final nome = name.trim();
     return Container(
-      padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
+      padding: const EdgeInsets.fromLTRB(4, 3, 2, 3),
       decoration: BoxDecoration(
-        color: accent.withValues(alpha: 0.10),
+        color: accent.withValues(alpha: isDark ? 0.14 : 0.08),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: accent.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          CircleAvatar(
+            radius: 12,
+            backgroundColor: accent.withValues(alpha: isDark ? 0.26 : 0.16),
+            child: Text(
+              nome.isNotEmpty ? nome[0].toUpperCase() : '?',
+              style: TextStyle(
+                  color: accent, fontWeight: FontWeight.w900, fontSize: 11),
+            ),
+          ),
+          const SizedBox(width: 7),
+          // Nome inteiro (dois "Carlos" não se confundem); corta só no fim.
           Flexible(
             child: Text(
-              name.split(' ').first,
+              nome,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                  color: accent, fontWeight: FontWeight.w800, fontSize: 12.5),
+                color: ThemeHelpers.textColor(context),
+                fontWeight: FontWeight.w700,
+                fontSize: 12.5,
+              ),
             ),
           ),
-          const SizedBox(width: 5),
-          GestureDetector(
-            onTap: onRemove,
-            child: Icon(LucideIcons.x, size: 14, color: accent),
+          Tooltip(
+            message: 'Remover $nome',
+            child: InkResponse(
+              onTap: onRemove,
+              radius: 18,
+              child: Padding(
+                padding: const EdgeInsets.all(7),
+                child: Icon(LucideIcons.x,
+                    size: 14, color: ThemeHelpers.textSecondaryColor(context)),
+              ),
+            ),
           ),
         ],
       ),
@@ -3316,79 +4273,80 @@ class _ParticipantCard extends StatelessWidget {
     ];
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
       decoration: BoxDecoration(
         color: ThemeHelpers.cardBackgroundColor(context),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5)),
+        // Hairline sólido: no claro o cartão branco some sobre o fundo.
+        border: Border.all(color: ThemeHelpers.borderColor(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Cabeçalho: nº do participante + função atual + remover.
           Row(
             children: [
               Expanded(
-                child: GestureDetector(
-                  onTap: onPickUser,
-                  child: Row(
-                    children: [
-                      Icon(LucideIcons.userPlus, size: 16, color: accent),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          p.userId == null ? 'Selecionar usuário *' : p.userName,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w800,
-                            color: p.userId == null
-                                ? muted
-                                : ThemeHelpers.textColor(context),
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
+                child: Text(
+                  'PARTICIPANTE ${index + 1} · ${p.funcao.label.toUpperCase()}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.1,
+                    color: muted,
                   ),
                 ),
               ),
-              GestureDetector(
-                onTap: onRemove,
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 8),
-                  child: Icon(LucideIcons.trash2, size: 16, color: muted),
-                ),
+              IconButton(
+                tooltip: 'Remover participante',
+                visualDensity: VisualDensity.compact,
+                onPressed: onRemove,
+                icon: Icon(LucideIcons.trash2, size: 16, color: muted),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          // Quem recebe: mesmo visual dos selects do formulário.
+          _PickerField(
+            label: 'Usuário',
+            required: true,
+            value: p.userId == null ? null : p.userName,
+            placeholder: 'Selecionar quem recebe',
+            onTap: onPickUser,
+          ),
           Wrap(
             spacing: 6,
             runSpacing: 6,
             children: [
               for (final f in opcoes)
-                GestureDetector(
-                  onTap: () => onFuncao(f),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: p.funcao == f
-                          ? accent.withValues(alpha: 0.12)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(
+                Semantics(
+                  button: true,
+                  selected: p.funcao == f,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => onFuncao(f),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 7),
+                      decoration: BoxDecoration(
                         color: p.funcao == f
-                            ? accent.withValues(alpha: 0.5)
-                            : ThemeHelpers.borderColor(context)
-                                .withValues(alpha: 0.5),
+                            ? accent.withValues(alpha: 0.12)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: p.funcao == f
+                              ? accent.withValues(alpha: 0.5)
+                              : ThemeHelpers.borderColor(context),
+                        ),
                       ),
-                    ),
-                    child: Text(
-                      f.label,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 12,
-                        color: p.funcao == f ? accent : muted,
+                      child: Text(
+                        f.label,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 12,
+                          color: p.funcao == f ? accent : muted,
+                        ),
                       ),
                     ),
                   ),
@@ -3435,13 +4393,16 @@ class _ParticipantCard extends StatelessWidget {
                 ),
             decoration: InputDecoration(
               labelText: isSdr
-                  ? 'Valor fixo'
+                  ? 'Valor fixo da empresa'
                   : emReais
-                      ? 'Valor fixo (R\$)'
+                      ? 'Valor fixo'
                       : isDiretor
-                          ? 'Porcentagem fixa (%)'
-                          : 'Porcentagem (%)',
+                          ? 'Porcentagem fixa'
+                          : 'Porcentagem',
+              // Unidade à vista no próprio valor: "R$ 300,00" ou "2,5 %".
               prefixText: emReais ? 'R\$ ' : null,
+              suffixText: emReais ? null : '%',
+              helperMaxLines: 2,
               helperText: isSdr
                   ? 'Valor fixo pela empresa.'
                   : isDiretor
@@ -3460,11 +4421,12 @@ class _ParticipantCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   'Contrato de intermediação?',
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontWeight: FontWeight.w700, color: muted),
                 ),
               ),
+              const SizedBox(width: 8),
               Switch(value: p.emitirNota, onChanged: onEmitir),
             ],
           ),
@@ -3474,35 +4436,126 @@ class _ParticipantCard extends StatelessWidget {
   }
 }
 
-/// Moldura comum das folhas de seleção: altura máxima, alça, teclado.
+/// Moldura comum das folhas de seleção: teto de 88% da tela, cabeçalho fixo
+/// (título à esquerda, fechar à direita) e UM corpo rolável — busca, "Não se
+/// aplica" e lista rolam juntos, então nada estoura em paisagem ou com o
+/// teclado aberto (que empurra a folha para cima).
 class _SheetFrame extends StatelessWidget {
-  const _SheetFrame({required this.children});
+  const _SheetFrame({
+    required this.titulo,
+    required this.icon,
+    required this.accent,
+    required this.children,
+    this.subtitulo,
+    this.rodape,
+  });
+  final String titulo;
+  final String? subtitulo;
+  final IconData icon;
+  final Color accent;
   final List<Widget> children;
+
+  /// Ação fixa no pé (ex.: "Concluir").
+  final Widget? rodape;
+
   @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final muted = ThemeHelpers.textSecondaryColor(context);
     return Padding(
       padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
       child: Container(
-        constraints: BoxConstraints(maxHeight: mq.size.height * 0.8),
+        constraints: BoxConstraints(maxHeight: mq.size.height * 0.88),
         decoration: BoxDecoration(
           color: ThemeHelpers.cardBackgroundColor(context),
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
-        padding: EdgeInsets.fromLTRB(18, 10, 18, 14 + mq.padding.bottom),
+        padding: EdgeInsets.fromLTRB(18, 10, 18, 12 + mq.padding.bottom),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(
-              width: 38,
-              height: 4,
-              decoration: BoxDecoration(
-                color: ThemeHelpers.borderColor(context),
-                borderRadius: BorderRadius.circular(4),
+            Center(
+              child: Container(
+                width: 38,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: ThemeHelpers.borderColor(context),
+                  borderRadius: BorderRadius.circular(4),
+                ),
               ),
             ),
-            const SizedBox(height: 14),
-            ...children,
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: isDark ? 0.22 : 0.14),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: Icon(icon, size: 17, color: accent),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        titulo,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 16,
+                          height: 1.2,
+                          letterSpacing: -0.2,
+                          color: ThemeHelpers.textColor(context),
+                        ),
+                      ),
+                      if (subtitulo != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitulo!,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.3,
+                            fontWeight: FontWeight.w500,
+                            color: muted,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  tooltip: 'Fechar',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: Icon(LucideIcons.x, size: 18, color: muted),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                padding: EdgeInsets.zero,
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                children: children,
+              ),
+            ),
+            if (rodape != null) ...[
+              const SizedBox(height: 10),
+              rodape!,
+            ],
           ],
         ),
       ),
@@ -3510,10 +4563,40 @@ class _SheetFrame extends StatelessWidget {
   }
 }
 
-/// Linha "― Não aplicável ―" das folhas de seleção.
+/// Busca das folhas no mesmo visual filled dos campos da ficha.
+InputDecoration _buscaDecoration(
+  BuildContext context,
+  Color accent,
+  String hint,
+) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  final muted = ThemeHelpers.textSecondaryColor(context);
+  OutlineInputBorder b(Color c, double w) => OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: w == 0 ? BorderSide.none : BorderSide(color: c, width: w),
+      );
+  return InputDecoration(
+    hintText: hint,
+    hintStyle: TextStyle(
+        color: muted.withValues(alpha: 0.8), fontWeight: FontWeight.w500),
+    prefixIcon: Icon(LucideIcons.search, size: 18, color: muted),
+    isDense: true,
+    filled: true,
+    fillColor: isDark
+        ? AppColors.background.backgroundTertiaryDarkMode
+        : AppColors.background.backgroundTertiary,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+    border: b(Colors.transparent, 0),
+    enabledBorder: b(Colors.transparent, 0),
+    focusedBorder: b(accent, 1.6),
+  );
+}
+
+/// Linha "Não se aplica" das folhas de seleção (grava "Não aplicável").
 class _NaTile extends StatelessWidget {
-  const _NaTile({required this.onTap});
+  const _NaTile({required this.onTap, this.selected = false});
   final VoidCallback onTap;
+  final bool selected;
   @override
   Widget build(BuildContext context) {
     final muted = ThemeHelpers.textSecondaryColor(context);
@@ -3522,18 +4605,22 @@ class _NaTile extends StatelessWidget {
       contentPadding: EdgeInsets.zero,
       leading: CircleAvatar(
         radius: 16,
-        backgroundColor: ThemeHelpers.borderColor(context).withValues(alpha: 0.4),
+        backgroundColor: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
         child: Icon(LucideIcons.ban, size: 15, color: muted),
       ),
       title: Text(
-        kSaleFormNaSelectLabel,
+        _kNaAcao,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
             fontWeight: FontWeight.w700, fontStyle: FontStyle.italic, color: muted),
       ),
-      subtitle: const Text('Sem informação no cadastro',
+      subtitle: const Text('Ninguém nesta função nesta venda',
           maxLines: 1, overflow: TextOverflow.ellipsis),
+      trailing: selected
+          ? Icon(LucideIcons.check,
+              size: 16, color: Theme.of(context).colorScheme.primary)
+          : null,
       onTap: onTap,
     );
   }
@@ -3549,11 +4636,94 @@ Widget _avatar(Color accent, String name) => CircleAvatar(
       ),
     );
 
+/// Esqueleto das listas de pessoas (avatar + nome + e-mail), fiel à linha.
+class _SkeletonPessoas extends StatelessWidget {
+  const _SkeletonPessoas({this.linhas = 6});
+  final int linhas;
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        for (var i = 0; i < linhas; i++)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              children: [
+                const SkeletonBox(width: 32, height: 32, borderRadius: 16),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonText(width: 150.0 - (i % 3) * 24, height: 12),
+                      const SizedBox(height: 6),
+                      SkeletonText(width: 190.0 - (i % 2) * 44, height: 10),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Vazio das folhas: o que aconteceu e o que fazer.
+class _AvisoFolha extends StatelessWidget {
+  const _AvisoFolha({
+    required this.icon,
+    required this.titulo,
+    required this.texto,
+  });
+  final IconData icon;
+  final String titulo;
+  final String texto;
+  @override
+  Widget build(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 8),
+      child: Column(
+        children: [
+          Icon(icon, size: 24, color: muted),
+          const SizedBox(height: 10),
+          Text(
+            titulo,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+              color: ThemeHelpers.textColor(context),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            texto,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.35,
+              fontWeight: FontWeight.w500,
+              color: muted,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Sheet de seleção de usuário (participantes, colaboradores e vincular).
 /// Devolve [AdminUser] ou [kSaleFormNa] (quando [allowNa]).
 class _UserPickerSheet extends StatefulWidget {
-  const _UserPickerSheet({required this.accent, this.allowNa = false});
+  const _UserPickerSheet({
+    required this.accent,
+    required this.titulo,
+    this.allowNa = false,
+  });
   final Color accent;
+  final String titulo;
   final bool allowNa;
   @override
   State<_UserPickerSheet> createState() => _UserPickerSheetState();
@@ -3563,7 +4733,14 @@ class _UserPickerSheetState extends State<_UserPickerSheet> {
   final _searchCtrl = TextEditingController();
   bool _loading = true;
   List<AdminUser> _users = [];
+
+  /// Último termo buscado no servidor (buscar no teclado).
   String _q = '';
+
+  /// O que está digitado: filtra na hora a lista já carregada.
+  String _filtro = '';
+  String? _erro;
+  int _erroStatus = 0;
 
   @override
   void initState() {
@@ -3578,7 +4755,10 @@ class _UserPickerSheetState extends State<_UserPickerSheet> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _erro = null;
+    });
     final res = await AdminUsersService.instance.listUsers(
       limit: 100,
       search: _q.isEmpty ? null : _q,
@@ -3589,72 +4769,116 @@ class _UserPickerSheetState extends State<_UserPickerSheet> {
       _loading = false;
       if (res.success && res.data != null) {
         _users = res.data!.users;
+      } else {
+        // Erro não é vazio: diz a causa e oferece "Tentar de novo".
+        _erro = res.message ?? 'Não foi possível carregar os usuários.';
+        _erroStatus = res.statusCode;
       }
     });
   }
 
+  void _onDigitar(String v) {
+    final t = v.trim();
+    setState(() => _filtro = t);
+    // Apagou a busca feita no servidor: volta a lista completa.
+    if (t.isEmpty && _q.isNotEmpty) {
+      _q = '';
+      _load();
+    }
+  }
+
+  /// Resultado da busca no servidor vem inteiro; o filtro local só vale
+  /// enquanto o termo digitado ainda não foi buscado.
+  List<AdminUser> get _visiveis {
+    final f = _filtro.toLowerCase();
+    if (f.isEmpty || f == _q.toLowerCase()) return _users;
+    return _users
+        .where((u) =>
+            u.name.toLowerCase().contains(f) ||
+            u.email.toLowerCase().contains(f))
+        .toList();
+  }
+
+  Widget _vazio() {
+    if (_filtro.isNotEmpty && _filtro.toLowerCase() != _q.toLowerCase()) {
+      return _AvisoFolha(
+        icon: LucideIcons.searchX,
+        titulo: 'Ninguém na lista com “$_filtro”',
+        texto: 'Toque em buscar no teclado para procurar em todos os '
+            'usuários da empresa.',
+      );
+    }
+    if (_q.isNotEmpty) {
+      return _AvisoFolha(
+        icon: LucideIcons.searchX,
+        titulo: 'Ninguém encontrado para “$_q”',
+        texto: 'Confira a grafia ou busque pelo e-mail.',
+      );
+    }
+    return const _AvisoFolha(
+      icon: LucideIcons.users,
+      titulo: 'Nenhum usuário disponível',
+      texto: 'Os usuários ativos da empresa aparecem aqui.',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final lista = _visiveis;
     return _SheetFrame(
+      titulo: widget.titulo,
+      subtitulo: 'Escolha na lista ou busque pelo nome ou e-mail.',
+      icon: LucideIcons.userRound,
+      accent: widget.accent,
       children: [
         TextField(
           controller: _searchCtrl,
           textInputAction: TextInputAction.search,
+          cursorColor: widget.accent,
+          onChanged: _onDigitar,
           onSubmitted: (v) {
             _q = v.trim();
             _load();
           },
-          decoration: InputDecoration(
-            hintText: 'Buscar colaborador por nome ou e-mail…',
-            prefixIcon: const Icon(LucideIcons.search, size: 18),
-            isDense: true,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-          ),
+          decoration: _buscaDecoration(
+              context, widget.accent, 'Nome ou e-mail do colaborador…'),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 8),
         if (widget.allowNa)
           _NaTile(onTap: () => Navigator.of(context).pop(kSaleFormNa)),
-        Flexible(
-          child: _loading
-              ? const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 28),
-                  child: Center(child: CircularProgressIndicator()),
-                )
-              : _users.isEmpty
-                  ? Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 24),
-                      child: Text('Nenhum usuário encontrado.',
-                          style: TextStyle(color: secondary)),
-                    )
-                  : ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: _users.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 4),
-                      itemBuilder: (_, i) {
-                        final u = _users[i];
-                        return ListTile(
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                          leading: _avatar(widget.accent, u.name),
-                          title: Text(u.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontWeight: FontWeight.w700)),
-                          subtitle: Text(u.email,
-                              maxLines: 1, overflow: TextOverflow.ellipsis),
-                          onTap: () => Navigator.of(context).pop(u),
-                        );
-                      },
-                    ),
-        ),
+        if (_loading)
+          const _SkeletonPessoas()
+        else if (_erro != null)
+          AppErrorState.fromApi(
+            message: _erro,
+            statusCode: _erroStatus,
+            onRetry: _load,
+            dense: true,
+          )
+        else if (lista.isEmpty)
+          _vazio()
+        else
+          for (final u in lista)
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: _avatar(widget.accent, u.name),
+              title: Text(u.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: u.email.isEmpty
+                  ? null
+                  : Text(u.email, maxLines: 1, overflow: TextOverflow.ellipsis),
+              onTap: () => Navigator.of(context).pop(u),
+            ),
       ],
     );
   }
 }
 
 /// Seleção de gestor ("Nome do Gerente" do web): gestores da empresa +
-/// "― Não aplicável ―". Devolve [SaleFormPessoa] ou [kSaleFormNa].
+/// "Não se aplica". Devolve [SaleFormPessoa] ou [kSaleFormNa].
 class _PessoaPickerSheet extends StatefulWidget {
   const _PessoaPickerSheet({
     required this.accent,
@@ -3684,95 +4908,77 @@ class _PessoaPickerSheetState extends State<_PessoaPickerSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return _SheetFrame(
-      children: [
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            widget.titulo,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontWeight: FontWeight.w900,
-              fontSize: 16,
-              color: ThemeHelpers.textColor(context),
+    return FutureBuilder<List<SaleFormPessoa>>(
+      future: widget.future,
+      builder: (context, snap) {
+        final carregando = snap.connectionState != ConnectionState.done;
+        final atual = widget.atual.trim();
+        final todos = [...(snap.data ?? const <SaleFormPessoa>[])];
+        if (atual.isNotEmpty &&
+            !isSaleFormNa(atual) &&
+            todos.every((g) => g.name != atual)) {
+          todos.insert(0, SaleFormPessoa(id: '', name: atual));
+        }
+        final lista = _q.isEmpty
+            ? todos
+            : todos
+                .where((g) =>
+                    g.name.toLowerCase().contains(_q) ||
+                    g.email.toLowerCase().contains(_q))
+                .toList();
+        return _SheetFrame(
+          titulo: widget.titulo,
+          subtitulo: 'Gestores da empresa.',
+          icon: LucideIcons.userCog,
+          accent: widget.accent,
+          children: [
+            TextField(
+              controller: _searchCtrl,
+              cursorColor: widget.accent,
+              onChanged: (v) => setState(() => _q = v.trim().toLowerCase()),
+              decoration:
+                  _buscaDecoration(context, widget.accent, 'Buscar gestor…'),
             ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        TextField(
-          controller: _searchCtrl,
-          onChanged: (v) => setState(() => _q = v.trim().toLowerCase()),
-          decoration: InputDecoration(
-            hintText: 'Buscar gestor…',
-            prefixIcon: const Icon(LucideIcons.search, size: 18),
-            isDense: true,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-        ),
-        const SizedBox(height: 10),
-        _NaTile(onTap: () => Navigator.of(context).pop(kSaleFormNa)),
-        Flexible(
-          child: FutureBuilder<List<SaleFormPessoa>>(
-            future: widget.future,
-            builder: (context, snap) {
-              if (snap.connectionState != ConnectionState.done) {
-                return const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 28),
-                  child: Center(child: CircularProgressIndicator()),
-                );
-              }
-              final todos = [...(snap.data ?? const <SaleFormPessoa>[])];
-              final atual = widget.atual.trim();
-              if (atual.isNotEmpty &&
-                  !isSaleFormNa(atual) &&
-                  todos.every((g) => g.name != atual)) {
-                todos.insert(0, SaleFormPessoa(id: '', name: atual));
-              }
-              final lista = _q.isEmpty
-                  ? todos
-                  : todos
-                      .where((g) =>
-                          g.name.toLowerCase().contains(_q) ||
-                          g.email.toLowerCase().contains(_q))
-                      .toList();
-              if (lista.isEmpty) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 24),
-                  child: Text('Nenhum gestor encontrado.',
-                      style: TextStyle(color: secondary)),
-                );
-              }
-              return ListView.separated(
-                shrinkWrap: true,
-                itemCount: lista.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 4),
-                itemBuilder: (_, i) {
-                  final g = lista[i];
-                  return ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: _avatar(widget.accent, g.name),
-                    title: Text(g.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w700)),
-                    subtitle: g.email.isEmpty
-                        ? null
-                        : Text(g.email,
-                            maxLines: 1, overflow: TextOverflow.ellipsis),
-                    trailing: g.name == atual
-                        ? Icon(LucideIcons.check, size: 16, color: widget.accent)
-                        : null,
-                    onTap: () => Navigator.of(context).pop(g),
-                  );
-                },
-              );
-            },
-          ),
-        ),
-      ],
+            const SizedBox(height: 8),
+            _NaTile(
+              selected: isSaleFormNa(atual),
+              onTap: () => Navigator.of(context).pop(kSaleFormNa),
+            ),
+            if (carregando)
+              const _SkeletonPessoas(linhas: 4)
+            else if (lista.isEmpty)
+              _AvisoFolha(
+                icon: LucideIcons.searchX,
+                titulo: _q.isEmpty
+                    ? 'Nenhum gestor cadastrado'
+                    : 'Nenhum gestor com “${_searchCtrl.text.trim()}”',
+                texto: _q.isEmpty
+                    ? 'Os gestores da empresa aparecem aqui. Sem gerente '
+                        'nesta venda? Use “$_kNaAcao”.'
+                    : 'Confira a grafia ou busque pelo e-mail.',
+              )
+            else
+              for (final g in lista)
+                ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: _avatar(widget.accent, g.name),
+                  title: Text(g.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700)),
+                  subtitle: g.email.isEmpty
+                      ? null
+                      : Text(g.email,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                  trailing: g.name == atual
+                      ? Icon(LucideIcons.check, size: 16, color: widget.accent)
+                      : null,
+                  onTap: () => Navigator.of(context).pop(g),
+                ),
+          ],
+        );
+      },
     );
   }
 }
@@ -3796,73 +5002,397 @@ class _UnidadesSheetState extends State<_UnidadesSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final muted = ThemeHelpers.textSecondaryColor(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // Confirmar é verde (semântica de ação), não a cor da marca.
+    final verde =
+        isDark ? AppColors.status.successDarkMode : AppColors.status.success;
+    final n = _sel.length;
     return _SheetFrame(
+      titulo: 'Compartilhar com outras unidades',
+      subtitulo:
+          'Opcional. Os gestores dessas unidades também poderão ver a ficha.',
+      icon: LucideIcons.building2,
+      accent: widget.accent,
+      rodape: SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          onPressed: () => Navigator.of(context).pop(_sel.toList()),
+          style: FilledButton.styleFrom(
+            backgroundColor: verde,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14)),
+          ),
+          icon: const Icon(LucideIcons.check, size: 17),
+          label: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              n == 0
+                  ? 'Concluir'
+                  : n == 1
+                      ? 'Concluir · 1 unidade'
+                      : 'Concluir · $n unidades',
+              maxLines: 1,
+              softWrap: false,
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+          ),
+        ),
+      ),
       children: [
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            'Compartilhar com outras unidades',
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontWeight: FontWeight.w900,
-              fontSize: 16,
-              color: ThemeHelpers.textColor(context),
-            ),
+        for (final u in widget.unidades)
+          CheckboxListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            activeColor: widget.accent,
+            value: _sel.contains(u.id),
+            title: Text(u.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w700)),
+            onChanged: (v) => setState(() {
+              if (v == true) {
+                _sel.add(u.id);
+              } else {
+                _sel.remove(u.id);
+              }
+            }),
           ),
-        ),
-        const SizedBox(height: 4),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            'Opcional. Os gestores dessas unidades também poderão ver a ficha.',
-            style: TextStyle(fontSize: 12, color: muted),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Flexible(
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              for (final u in widget.unidades)
-                CheckboxListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  activeColor: widget.accent,
-                  value: _sel.contains(u.id),
-                  title: Text(u.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w700)),
-                  onChanged: (v) => setState(() {
-                    if (v == true) {
-                      _sel.add(u.id);
-                    } else {
-                      _sel.remove(u.id);
-                    }
-                  }),
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton(
-            onPressed: () => Navigator.of(context).pop(_sel.toList()),
-            style: FilledButton.styleFrom(
-              backgroundColor: widget.accent,
-              padding: const EdgeInsets.symmetric(vertical: 13),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14)),
-            ),
-            child: const Text('Concluir',
-                style: TextStyle(fontWeight: FontWeight.w900)),
-          ),
-        ),
       ],
+    );
+  }
+}
+
+/// Esqueleto fiel da ficha enquanto a edição carrega: cabeçalho do passo,
+/// campos (alguns em duas colunas) e a barra de ações.
+class _FichaSkeleton extends StatelessWidget {
+  const _FichaSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    Widget campo([double altura = 50]) => SkeletonBox(
+          height: altura,
+          borderRadius: 14,
+          margin: const EdgeInsets.only(bottom: 12),
+        );
+    Widget dupla() => Row(
+          children: [
+            Expanded(child: campo()),
+            const SizedBox(width: 12),
+            Expanded(child: campo()),
+          ],
+        );
+    return LayoutBuilder(
+      builder: (context, c) => Column(
+        children: [
+          Expanded(
+            child: ListView(
+              physics: const NeverScrollableScrollPhysics(),
+              padding: EdgeInsets.zero,
+              children: [
+                Container(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(
+                        color: ThemeHelpers.borderLightColor(context),
+                        width: 2,
+                      ),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          SkeletonBox(width: 42, height: 42, borderRadius: 13),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                SkeletonText(width: 150, height: 16),
+                                SizedBox(height: 8),
+                                SkeletonText(width: 220, height: 11),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          for (var i = 0; i < 9; i++) ...[
+                            if (i > 0) const SizedBox(width: 3),
+                            const Expanded(
+                              child: SkeletonBox(height: 4, borderRadius: 4),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      const SkeletonText(width: 170, height: 10),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: SkeletonText(
+                          width: 90,
+                          height: 11,
+                          margin: EdgeInsets.only(bottom: 14),
+                        ),
+                      ),
+                      dupla(),
+                      campo(),
+                      campo(),
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: SkeletonText(
+                          width: 120,
+                          height: 11,
+                          margin: EdgeInsets.only(top: 6, bottom: 14),
+                        ),
+                      ),
+                      campo(),
+                      dupla(),
+                      campo(96),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Tela baixa: sem a barra, para o esqueleto não estourar.
+          if (c.maxHeight >= 360)
+            Container(
+              padding: EdgeInsets.fromLTRB(
+                  16, 12, 16, 12 + MediaQuery.paddingOf(context).bottom),
+              decoration: BoxDecoration(
+                color: ThemeHelpers.cardBackgroundColor(context),
+                border: Border(
+                  top: BorderSide(
+                      color: ThemeHelpers.borderLightColor(context)),
+                ),
+              ),
+              child: const SkeletonBox(height: 48, borderRadius: 14),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Travas de comissão da empresa, ao vivo: quanto cada grupo já soma na
+/// ficha contra o máximo (mesma conta da validação — aqui só mostra).
+class _ReguaComissoes extends StatelessWidget {
+  const _ReguaComissoes({
+    required this.grupos,
+    required this.participantes,
+    required this.accent,
+  });
+  final List<({String rotulo, double atual, double maximo})> grupos;
+  final int participantes;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final texto = ThemeHelpers.textColor(context);
+    final erro = isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final trilho = isDark
+        ? ThemeHelpers.borderLightColor(context)
+        : ThemeHelpers.borderColor(context);
+    String pct(double v) => '${_CreateSaleFormPageState._pctText(v)}%';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: ThemeHelpers.borderColor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _Contador(
+            numero: '$participantes',
+            rotulo: participantes == 1 ? 'participante' : 'participantes',
+          ),
+          for (final g in grupos) ...[
+            const SizedBox(height: 10),
+            Builder(builder: (context) {
+              const tol = 0.001;
+              final acima = g.atual > g.maximo + tol;
+              final frac = g.maximo > 0
+                  ? (g.atual / g.maximo).clamp(0.0, 1.0).toDouble()
+                  : (g.atual > 0 ? 1.0 : 0.0);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          g.rotulo,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            color: muted,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${pct(g.atual)} de ${pct(g.maximo)}',
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w900,
+                          color: acima ? erro : texto,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 5),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(3),
+                    child: LinearProgressIndicator(
+                      value: frac,
+                      minHeight: 4,
+                      backgroundColor: trilho,
+                      valueColor: AlwaysStoppedAnimation(acima ? erro : accent),
+                    ),
+                  ),
+                  if (acima) ...[
+                    const SizedBox(height: 5),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(LucideIcons.triangleAlert, size: 13, color: erro),
+                        const SizedBox(width: 5),
+                        Expanded(
+                          child: Text(
+                            'Acima do máximo da empresa — ajuste os '
+                            'percentuais antes de avançar.',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              height: 1.3,
+                              fontWeight: FontWeight.w700,
+                              color: erro,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              );
+            }),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Linha do resumo final: o passo, o essencial preenchido e o que falta.
+/// Tocar volta ao passo. Linha flush com filete, como as listas do app.
+class _LinhaRevisao extends StatelessWidget {
+  const _LinhaRevisao({
+    required this.icon,
+    required this.titulo,
+    required this.detalhe,
+    required this.status,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String titulo;
+  final String detalhe;
+  final _StatusPasso status;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final aviso = isDark
+        ? AppColors.message.warningTextDarkMode
+        : AppColors.message.warningText;
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 11),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: muted),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    titulo,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                      color: ThemeHelpers.textColor(context),
+                    ),
+                  ),
+                  if (detalhe.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      detalhe,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.3,
+                        fontWeight: FontWeight.w600,
+                        color: muted,
+                      ),
+                    ),
+                  ],
+                  if (status.estado == _EstadoPasso.pendente) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Falta: ${_juntarRotulos(status.faltam)}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        height: 1.3,
+                        fontWeight: FontWeight.w700,
+                        color: aviso,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            _StatusChip(status: status),
+            const SizedBox(width: 2),
+            Icon(LucideIcons.chevronRight, size: 16, color: muted),
+          ],
+        ),
+      ),
     );
   }
 }

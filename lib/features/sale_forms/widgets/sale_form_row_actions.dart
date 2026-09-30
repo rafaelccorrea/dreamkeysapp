@@ -11,10 +11,13 @@ import '../../../features/workspace/models/company_team_model.dart';
 import '../../../features/workspace/services/admin_users_service.dart';
 import '../../../features/workspace/services/company_team_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
+import '../../../shared/widgets/skeleton_box.dart';
 import '../pages/create_sale_form_page.dart';
 import '../pages/sale_form_detail_page.dart';
 import 'sale_form_row_rules.dart';
 import 'sale_form_signatures_sheet.dart';
+import 'sale_form_tones.dart';
 
 /// Executa uma ação do menu da ficha (lista e detalhe usam o mesmo caminho,
 /// espelho do menu web). Devolve `true` quando a ficha mudou e a tela deve
@@ -294,9 +297,11 @@ Future<bool> _confirm(
 }) async {
   final muted = ThemeHelpers.textSecondaryColor(context);
   final dark = Theme.of(context).brightness == Brightness.dark;
+  // Confirmar = verde cheio nos dois temas (o verde claro do escuro deixa o
+  // texto branco ilegível); destrutivo = vermelho.
   final tone = danger
       ? (dark ? AppColors.status.errorDarkMode : AppColors.status.error)
-      : (dark ? AppColors.status.successDarkMode : AppColors.status.success);
+      : SaleFormTom.verdeDeConfirmar();
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
@@ -361,6 +366,9 @@ Future<T?> _sheet<T>(
     ),
     builder: (ctx) {
       final mq = MediaQuery.of(ctx);
+      // Pouca altura útil (teclado aberto em paisagem, tela baixa): o
+      // cabeçalho encolhe para o corpo continuar com espaço para rolar.
+      final apertado = mq.size.height - mq.viewInsets.bottom < 420;
       return AnimatedPadding(
         duration: const Duration(milliseconds: 160),
         padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
@@ -371,7 +379,12 @@ Future<T?> _sheet<T>(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 8, 10),
+                padding: EdgeInsets.fromLTRB(
+                  16,
+                  apertado ? 10 : 16,
+                  8,
+                  apertado ? 6 : 10,
+                ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -381,7 +394,7 @@ Future<T?> _sheet<T>(
                         children: [
                           Text(
                             title,
-                            maxLines: 2,
+                            maxLines: apertado ? 1 : 2,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontSize: 17,
@@ -393,6 +406,8 @@ Future<T?> _sheet<T>(
                             const SizedBox(height: 4),
                             Text(
                               subtitle,
+                              maxLines: apertado ? 2 : null,
+                              overflow: apertado ? TextOverflow.ellipsis : null,
                               style: TextStyle(
                                 fontSize: 12.5,
                                 height: 1.35,
@@ -472,11 +487,11 @@ List<({String name, String? email})> linkedUsersFromRaw(dynamic raw) {
     final u = e['user'];
     final nome = (u is Map ? u['name'] : null)?.toString().trim() ?? '';
     final id = e['userId']?.toString() ?? '';
+    // Sem nome no cadastro: rótulo legível (id não vai para a tela); o
+    // e-mail, quando vem, aparece embaixo e diferencia um do outro.
     final name = nome.isNotEmpty
         ? nome
-        : (id.isEmpty
-            ? ''
-            : 'Usuário vinculado (${id.length > 8 ? id.substring(0, 8) : id}…)');
+        : (id.isEmpty ? '' : 'Usuário sem nome no cadastro');
     if (name.isEmpty) continue;
     users.add((
       name: name,
@@ -502,28 +517,51 @@ Future<void> showFichaPeopleSheet(
   required String emptyText,
   required Future<List<({String name, String? email})>> Function() load,
 }) {
-  final fut = load();
   return _sheet<void>(
     context,
     title: title,
     subtitle: subtitle,
-    body: (ctx) => FutureBuilder<List<({String name, String? email})>>(
-      future: fut,
+    body: (ctx) => _PessoasCorpo(load: load, emptyText: emptyText),
+  );
+}
+
+/// Corpo da folha de pessoas: esqueleto das linhas enquanto carrega, erro
+/// com "Tentar de novo" (chama o mesmo [load]) e vazio com ícone.
+class _PessoasCorpo extends StatefulWidget {
+  const _PessoasCorpo({required this.load, required this.emptyText});
+  final Future<List<({String name, String? email})>> Function() load;
+  final String emptyText;
+
+  @override
+  State<_PessoasCorpo> createState() => _PessoasCorpoState();
+}
+
+class _PessoasCorpoState extends State<_PessoasCorpo> {
+  late Future<List<({String name, String? email})>> _fut = widget.load();
+
+  void _tentarDeNovo() => setState(() => _fut = widget.load());
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<({String name, String? email})>>(
+      future: _fut,
       builder: (ctx, snap) {
         if (snap.connectionState != ConnectionState.done) {
-          return const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          return const _LinhasSkeleton();
+        }
+        if (snap.hasError) {
+          return _AvisoSheet(
+            icon: LucideIcons.circleAlert,
+            texto: snap.error.toString(),
+            acao: 'Tentar de novo',
+            onAcao: _tentarDeNovo,
           );
         }
         final users = snap.data ?? const [];
-        if (snap.hasError || users.isEmpty) {
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
-            child: Text(
-              snap.hasError ? snap.error.toString() : emptyText,
-              style: TextStyle(color: ThemeHelpers.textSecondaryColor(ctx)),
-            ),
+        if (users.isEmpty) {
+          return _AvisoSheet(
+            icon: LucideIcons.usersRound,
+            texto: widget.emptyText,
           );
         }
         return ListView.separated(
@@ -540,71 +578,110 @@ Future<void> showFichaPeopleSheet(
           ),
         );
       },
-    ),
-  );
+    );
+  }
 }
 
 Future<CompanyTeam?> _pickTeam(
   BuildContext context, {
   String? currentTeamId,
 }) {
-  final fut = CompanyTeamService.instance.listTeams(
-    status: 'active',
-    limit: 100,
-  );
   return _sheet<CompanyTeam>(
     context,
     title: 'Trocar equipe',
     subtitle:
         'Só equipes ativas que participam de fichas de venda. A troca é registrada na auditoria.',
-    body: (ctx) => FutureBuilder(
-      future: fut,
-      builder: (ctx, snap) {
-        if (!snap.hasData) {
-          return const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-          );
-        }
-        final res = snap.data!;
-        final teams = res.success && res.data != null
-            ? res.data!.teams
-                .where((t) => t.isActive && t.useInSaleForms)
-                .toList()
-            : <CompanyTeam>[];
-        if (teams.isEmpty) {
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
-            child: Text(
-              res.success
-                  ? 'Nenhuma equipe ativa em fichas de venda.'
-                  : (res.message ?? 'Não foi possível carregar as equipes.'),
-              style: TextStyle(color: ThemeHelpers.textSecondaryColor(ctx)),
-            ),
-          );
-        }
-        return ListView.separated(
-          shrinkWrap: true,
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-          itemCount: teams.length,
-          separatorBuilder: (_, _) => Divider(
-            height: 1,
-            color: ThemeHelpers.borderLightColor(ctx),
-          ),
-          itemBuilder: (ctx, i) {
-            final t = teams[i];
-            final atual = t.id == currentTeamId;
-            return _PessoaLinha(
-              nome: t.name,
-              apoio: atual ? 'Equipe atual' : null,
-              cor: _hex(t.color),
-              onTap: atual ? null : () => Navigator.pop(ctx, t),
-            );
-          },
+    body: (ctx) => _EquipesCorpo(currentTeamId: currentTeamId),
+  );
+}
+
+/// Lista de equipes da troca: esqueleto, erro com a causa real (código HTTP
+/// preservado) e "Tentar de novo", vazio que explica. A equipe atual fica
+/// marcada e não é tocável.
+class _EquipesCorpo extends StatefulWidget {
+  const _EquipesCorpo({this.currentTeamId});
+  final String? currentTeamId;
+
+  @override
+  State<_EquipesCorpo> createState() => _EquipesCorpoState();
+}
+
+class _EquipesCorpoState extends State<_EquipesCorpo> {
+  bool _loading = true;
+  String? _erro;
+  int _erroStatus = 0;
+  List<CompanyTeam> _teams = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _carregar();
+  }
+
+  Future<void> _carregar() async {
+    setState(() {
+      _loading = true;
+      _erro = null;
+    });
+    final res = await CompanyTeamService.instance.listTeams(
+      status: 'active',
+      limit: 100,
+    );
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      if (res.success && res.data != null) {
+        _teams = res.data!.teams
+            .where((t) => t.isActive && t.useInSaleForms)
+            .toList();
+      } else {
+        _erro = res.message ?? 'Não foi possível carregar as equipes.';
+        _erroStatus = res.statusCode;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const _LinhasSkeleton();
+    if (_erro != null) {
+      return SingleChildScrollView(
+        child: AppErrorState.fromApi(
+          message: _erro,
+          statusCode: _erroStatus,
+          onRetry: _carregar,
+          dense: true,
+        ),
+      );
+    }
+    if (_teams.isEmpty) {
+      return const _AvisoSheet(
+        icon: LucideIcons.usersRound,
+        texto: 'Nenhuma equipe ativa participa de fichas de venda. Isso se '
+            'ajusta no cadastro de cada equipe.',
+      );
+    }
+    return ListView.separated(
+      shrinkWrap: true,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      itemCount: _teams.length,
+      separatorBuilder: (_, _) => Divider(
+        height: 1,
+        color: ThemeHelpers.borderLightColor(context),
+      ),
+      itemBuilder: (ctx, i) {
+        final t = _teams[i];
+        final atual = t.id == widget.currentTeamId;
+        return _PessoaLinha(
+          nome: t.name,
+          apoio: atual ? 'Equipe atual' : null,
+          cor: _hex(t.color),
+          marcado: atual,
+          onTap: atual ? null : () => Navigator.pop(ctx, t),
         );
       },
-    ),
-  );
+    );
+  }
 }
 
 Future<AdminUser?> _pickUser(
@@ -634,6 +711,7 @@ class _UserPickerState extends State<_UserPicker> {
   List<AdminUser> _all = const [];
   bool _loading = true;
   String? _error;
+  int _errorStatus = 0;
 
   @override
   void initState() {
@@ -642,6 +720,12 @@ class _UserPickerState extends State<_UserPicker> {
   }
 
   Future<void> _load() async {
+    if (!_loading) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     final res = await AdminUsersService.instance.listUsers(
       page: 1,
       limit: 500,
@@ -651,12 +735,14 @@ class _UserPickerState extends State<_UserPicker> {
     setState(() {
       _loading = false;
       if (res.success && res.data != null) {
+        _error = null;
         _all = res.data!.users
             .where((u) => u.id != widget.excludeUserId && u.isActiveInCompany)
             .toList()
           ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       } else {
         _error = res.message ?? 'Erro ao carregar usuários da empresa.';
+        _errorStatus = res.statusCode;
       }
     });
   }
@@ -677,6 +763,51 @@ class _UserPickerState extends State<_UserPicker> {
                 u.name.toLowerCase().contains(q) ||
                 u.email.toLowerCase().contains(q))
             .toList();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accent =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final hair = ThemeHelpers.borderLightColor(context);
+    OutlineInputBorder borda(Color c, [double w = 1]) => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: c, width: w),
+        );
+    final Widget corpo;
+    if (_loading) {
+      corpo = const _LinhasSkeleton();
+    } else if (_error != null) {
+      corpo = SingleChildScrollView(
+        child: AppErrorState.fromApi(
+          message: _error,
+          statusCode: _errorStatus,
+          onRetry: _load,
+          dense: true,
+        ),
+      );
+    } else if (list.isEmpty) {
+      corpo = _AvisoSheet(
+        icon: LucideIcons.searchX,
+        texto: q.isEmpty
+            ? 'Nenhum outro usuário ativo na empresa.'
+            : 'Ninguém encontrado para "${_search.text.trim()}". Confira o '
+                'nome ou busque pelo e-mail.',
+      );
+    } else {
+      corpo = ListView.separated(
+        shrinkWrap: true,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        itemCount: list.length,
+        separatorBuilder: (_, _) => Divider(
+          height: 1,
+          color: ThemeHelpers.borderLightColor(context),
+        ),
+        itemBuilder: (ctx, i) => _PessoaLinha(
+          nome: list[i].name,
+          apoio: list[i].email,
+          onTap: () => Navigator.pop(ctx, list[i]),
+        ),
+      );
+    }
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -686,70 +817,43 @@ class _UserPickerState extends State<_UserPicker> {
           child: TextField(
             controller: _search,
             onChanged: (_) => setState(() {}),
+            textInputAction: TextInputAction.search,
             decoration: InputDecoration(
               hintText: 'Buscar por nome ou e-mail',
-              prefixIcon: const Icon(LucideIcons.search, size: 18),
+              isDense: true,
+              prefixIcon: Icon(LucideIcons.search, size: 18, color: accent),
               filled: true,
-              fillColor: Theme.of(context).brightness == Brightness.dark
-                  ? Colors.white.withValues(alpha: 0.045)
-                  : Colors.black.withValues(alpha: 0.03),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide.none,
-              ),
+              fillColor: isDark
+                  ? AppColors.background.backgroundTertiaryDarkMode
+                  : AppColors.background.backgroundTertiary,
+              contentPadding: const EdgeInsets.symmetric(vertical: 13),
+              border: borda(hair),
+              enabledBorder: borda(hair),
+              focusedBorder: borda(accent.withValues(alpha: 0.65), 1.4),
             ),
           ),
         ),
-        Flexible(
-          child: _loading
-              ? const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Center(
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                )
-              : _error != null
-                  ? Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Text(
-                        _error!,
-                        style: TextStyle(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                        ),
-                      ),
-                    )
-                  : ListView.separated(
-                      shrinkWrap: true,
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                      itemCount: list.length,
-                      separatorBuilder: (_, _) => Divider(
-                        height: 1,
-                        color: ThemeHelpers.borderLightColor(context),
-                      ),
-                      itemBuilder: (ctx, i) => _PessoaLinha(
-                        nome: list[i].name,
-                        apoio: list[i].email,
-                        onTap: () => Navigator.pop(ctx, list[i]),
-                      ),
-                    ),
-        ),
+        Flexible(child: corpo),
       ],
     );
   }
 }
 
 /// Linha flush com avatar de iniciais (pessoa) ou ponto de cor (equipe).
+/// [marcado] = a escolha atual (check no lugar do chevron, sem toque).
 class _PessoaLinha extends StatelessWidget {
   const _PessoaLinha({
     required this.nome,
     this.apoio,
     this.cor,
     this.onTap,
+    this.marcado = false,
   });
   final String nome;
   final String? apoio;
   final Color? cor;
   final VoidCallback? onTap;
+  final bool marcado;
 
   @override
   Widget build(BuildContext context) {
@@ -811,10 +915,107 @@ class _PessoaLinha extends StatelessWidget {
                 ],
               ),
             ),
-            if (onTap != null)
+            if (marcado)
+              Icon(
+                LucideIcons.circleCheck,
+                size: 18,
+                color: SaleFormTom.sucesso(context).texto,
+              )
+            else if (onTap != null)
               Icon(LucideIcons.chevronRight, size: 18, color: muted),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Esqueleto das linhas de pessoa/equipe (avatar + nome + linha de apoio).
+class _LinhasSkeleton extends StatelessWidget {
+  const _LinhasSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      children: [
+        for (var i = 0; i < 4; i++)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 11),
+            child: Row(
+              children: const [
+                SkeletonBox(width: 36, height: 36, borderRadius: 18),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonBox(width: 150, height: 13, borderRadius: 6),
+                      SizedBox(height: 6),
+                      SkeletonBox(width: 190, height: 11, borderRadius: 6),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Vazio ou erro dentro de uma folha: ícone, frase e (opcional) uma ação
+/// neutra.
+class _AvisoSheet extends StatelessWidget {
+  const _AvisoSheet({
+    required this.icon,
+    required this.texto,
+    this.acao,
+    this.onAcao,
+  });
+  final IconData icon;
+  final String texto;
+  final String? acao;
+  final VoidCallback? onAcao;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 26, color: muted),
+          const SizedBox(height: 10),
+          Text(
+            texto,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, height: 1.4, color: muted),
+          ),
+          if (acao != null && onAcao != null) ...[
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: onAcao,
+              icon: const Icon(LucideIcons.rotateCw, size: 16),
+              label: Text(acao!),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: ThemeHelpers.textColor(context),
+                side: BorderSide(color: ThemeHelpers.borderColor(context)),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                textStyle: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

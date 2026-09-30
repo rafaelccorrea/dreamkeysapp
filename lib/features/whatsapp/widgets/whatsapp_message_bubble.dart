@@ -1,9 +1,12 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../models/whatsapp_message_content.dart' show resumoDaCitacao;
 import '../models/whatsapp_models.dart';
 import 'whatsapp_conversation_card.dart' show whatsAppMessageTypeIcon;
 import 'whatsapp_midia_da_bolha.dart';
@@ -33,6 +36,10 @@ class WhatsAppMessageBubble extends StatelessWidget {
   /// Nome do contato, para o título da imagem em tela cheia.
   final String? contactLabel;
 
+  /// Mensagem que esta responde (achada pelo wamid entre as carregadas):
+  /// desenha a citação com barra lateral e nome, como no WhatsApp.
+  final WhatsAppMessage? citada;
+
   const WhatsAppMessageBubble({
     super.key,
     required this.message,
@@ -40,7 +47,17 @@ class WhatsAppMessageBubble extends StatelessWidget {
     this.isLastInGroup = true,
     this.onRenovarMidia,
     this.contactLabel,
+    this.citada,
   });
+
+  /// Foto ou vídeo com arquivo: encosta nos cantos da bolha (respiro de 3,
+  /// como no iPhone) e, sem legenda, leva a hora numa pílula sobre a mídia.
+  bool get _midiaVisual {
+    final t = message.messageType;
+    return (t == WhatsAppMessageType.image ||
+            t == WhatsAppMessageType.video) &&
+        (message.mediaUrl ?? '').trim().isNotEmpty;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -79,8 +96,25 @@ class WhatsAppMessageBubble extends StatelessWidget {
     final textColor = ThemeHelpers.textColor(context);
     final metaColor =
         ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.85);
+    // Verde de TEXTO (autor, citação): o token puro some sobre o verde claro
+    // da bolha no modo claro — puxado para a tinta do texto, sem hex novo.
+    final greenInk = isDark
+        ? green
+        : Color.lerp(
+            AppColors.message.successText,
+            AppColors.text.text,
+            0.35,
+          )!;
 
     final text = (message.message ?? '').trim();
+    final temTexto = text.isNotEmpty;
+    final citada = this.citada;
+
+    // Foto/vídeo encostam nos cantos; o texto ao redor mantém o recuo de 12
+    // (3 da bolha + 9 aqui).
+    final midiaColada = _midiaVisual;
+    final horaNaMidia = midiaColada && !temTexto;
+    final lado = midiaColada ? 9.0 : 0.0;
 
     // Cantos contínuos: lado do remetente "fecha" entre bolhas do grupo e a
     // cauda (canto de 4) aparece só na última.
@@ -104,87 +138,221 @@ class WhatsAppMessageBubble extends StatelessWidget {
     final showAiLabel = isAi && isFirstInGroup;
     final userName = (message.userName ?? '').trim();
     final showAuthor = !isAi && isOwn && userName.isNotEmpty && isFirstInGroup;
+    final temRotulo = showAiLabel || showAuthor;
+
+    // Hora e ticks nunca estouram: encolhem se a bolha ficar estreita demais.
+    final meta = FittedBox(
+      fit: BoxFit.scaleDown,
+      child: _buildMetaRow(context, theme, metaColor, isOwn),
+    );
 
     return Padding(
       padding: EdgeInsets.only(bottom: isLastInGroup ? 10 : 2),
-      child: Row(
-        mainAxisAlignment:
-            isOwn ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          if (isOwn) const SizedBox(width: 52),
-          Flexible(
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
-              decoration: BoxDecoration(
-                color: bubbleColor,
-                borderRadius: radius,
-                border: Border.all(color: borderColor, width: 0.8),
-                boxShadow: isDark
-                    ? null
-                    : ThemeHelpers.cardShadow(context, strength: 0.35),
-              ),
-              child: Column(
-                // Fim (direita) para o horário assentar no canto da bolha,
-                // como no WhatsApp — o bloco de texto continua lido à esquerda.
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (showAiLabel)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 3),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(LucideIcons.bot, size: 12, color: purple),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Assistente IA',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: purple,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 10.5,
-                              letterSpacing: 0.2,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Largura como no WhatsApp: ~80% da coluna, com teto em tablet e
+          // paisagem (antes só a folga de 52 — em 1000dp a bolha esticava).
+          final maxBubble = math.min(constraints.maxWidth * 0.8, 520.0);
+          return Align(
+            alignment: isOwn ? Alignment.centerRight : Alignment.centerLeft,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxBubble),
+              child: Container(
+                padding: midiaColada
+                    ? EdgeInsets.fromLTRB(3, 3, 3, temTexto ? 6 : 3)
+                    : const EdgeInsets.fromLTRB(12, 8, 12, 6),
+                decoration: BoxDecoration(
+                  color: bubbleColor,
+                  borderRadius: radius,
+                  border: Border.all(color: borderColor, width: 0.8),
+                  boxShadow: isDark
+                      ? null
+                      : ThemeHelpers.cardShadow(context, strength: 0.35),
+                ),
+                child: Column(
+                  // Texto lido à esquerda (autor, citação, legenda); só a
+                  // bolha sem texto assenta a hora no canto direito.
+                  crossAxisAlignment: temTexto
+                      ? CrossAxisAlignment.start
+                      : CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (showAiLabel)
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(
+                            lado, midiaColada ? 4 : 0, lado, 3),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(LucideIcons.bot, size: 12, color: purple),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                'Assistente IA',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: purple,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 10.5,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
                             ),
+                          ],
+                        ),
+                      )
+                    else if (showAuthor)
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(
+                            lado, midiaColada ? 4 : 0, lado, 2),
+                        child: Text(
+                          userName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: greenInk,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 10.5,
+                            letterSpacing: 0.1,
                           ),
-                        ],
-                      ),
-                    )
-                  else if (showAuthor)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 2),
-                      child: Text(
-                        userName,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: green,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 10.5,
-                          letterSpacing: 0.1,
                         ),
                       ),
-                    ),
-                  if (message.messageType.isMedia) ...[
-                    _buildMedia(context, theme, metaColor),
-                    if (text.isNotEmpty) const SizedBox(height: 6),
-                  ],
-                  if (text.isNotEmpty)
-                    SelectableText(
-                      text,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: textColor,
-                        fontSize: 15,
-                        height: 1.35,
-                        letterSpacing: -0.1,
+                    if (citada != null)
+                      Padding(
+                        padding: EdgeInsets.only(
+                          top: midiaColada && !temRotulo ? 0 : 2,
+                          bottom: midiaColada ? 3 : 6,
+                        ),
+                        child: _buildCitacao(
+                            context, citada, greenInk, metaColor),
                       ),
-                    ),
-                  const SizedBox(height: 2),
-                  _buildMetaRow(context, theme, metaColor, isOwn),
-                ],
+                    if (message.messageType.isMedia) ...[
+                      _buildMedia(
+                        context,
+                        theme,
+                        metaColor,
+                        sobreposicao: horaNaMidia
+                            ? _buildMetaRow(context, theme, metaColor, isOwn,
+                                sobreMidia: true)
+                            : null,
+                      ),
+                      if (temTexto) const SizedBox(height: 6),
+                    ],
+                    if (temTexto)
+                      // Hora na MESMA linha quando cabe (como no WhatsApp);
+                      // texto longo leva a hora para baixo, à direita.
+                      // Palavra ou URL maior que a bolha quebra por
+                      // caractere — nada estoura para o lado.
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: lado),
+                        child: Wrap(
+                          alignment: WrapAlignment.end,
+                          crossAxisAlignment: WrapCrossAlignment.end,
+                          spacing: 8,
+                          runSpacing: 1,
+                          children: [
+                            SelectableText(
+                              text,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: textColor,
+                                fontSize: 15,
+                                height: 1.35,
+                                letterSpacing: -0.1,
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 1),
+                              child: meta,
+                            ),
+                          ],
+                        ),
+                      )
+                    else if (!horaNaMidia) ...[
+                      const SizedBox(height: 4),
+                      meta,
+                    ],
+                  ],
+                ),
               ),
             ),
-          ),
-          if (!isOwn) const SizedBox(width: 52),
-        ],
+          );
+        },
+      ),
+    );
+  }
+
+  /// Resposta citada, como no WhatsApp: barra de 4 na cor de quem escreveu a
+  /// original (verde = você/empresa, azul = contato), nome em 1 linha e o
+  /// texto em até 2 — nome ou texto longos terminam em "…".
+  Widget _buildCitacao(
+    BuildContext context,
+    WhatsAppMessage citada,
+    Color greenInk,
+    Color metaColor,
+  ) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final resumo = resumoDaCitacao(citada, contactLabel);
+    final daCasa = citada.isOutbound;
+    final barra = daCasa
+        ? (isDark ? AppColors.status.greenDarkMode : AppColors.status.green)
+        : (isDark ? AppColors.status.blueDarkMode : AppColors.status.blue);
+    final tinta = daCasa
+        ? greenInk
+        : (isDark
+            ? AppColors.message.infoTextDarkMode
+            : AppColors.message.infoText);
+    final fundo = (isDark ? Colors.white : Colors.black)
+        .withValues(alpha: isDark ? 0.07 : 0.045);
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(9),
+      child: Container(
+        decoration: BoxDecoration(
+          color: fundo,
+          border: Border(left: BorderSide(color: barra, width: 4)),
+        ),
+        padding: const EdgeInsets.fromLTRB(9, 6, 10, 7),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              resumo.autor,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: tinta,
+                fontWeight: FontWeight.w800,
+                fontSize: 12,
+                height: 1.2,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (resumo.ehImagem) ...[
+                  Icon(LucideIcons.image, size: 13, color: metaColor),
+                  const SizedBox(width: 4),
+                ],
+                Flexible(
+                  child: Text(
+                    resumo.texto,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: ThemeHelpers.textSecondaryColor(context),
+                      fontSize: 12.5,
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -193,7 +361,15 @@ class WhatsAppMessageBubble extends StatelessWidget {
   /// ao tocar), áudio/nota de voz e vídeo com "tocar", documento com "abrir"
   /// — antes só a imagem aparecia e o resto pedia para abrir o painel web.
   /// Sem arquivo no servidor, "{Tipo} indisponível" como no web.
-  Widget _buildMedia(BuildContext context, ThemeData theme, Color metaColor) {
+  ///
+  /// [sobreposicao]: hora e ticks sobre foto/vídeo sem legenda (pílula
+  /// escura desenhada pela própria mídia).
+  Widget _buildMedia(
+    BuildContext context,
+    ThemeData theme,
+    Color metaColor, {
+    Widget? sobreposicao,
+  }) {
     final temArquivo = (message.mediaUrl ?? '').trim().isNotEmpty;
     switch (message.messageType) {
       case WhatsAppMessageType.image:
@@ -204,6 +380,7 @@ class WhatsAppMessageBubble extends StatelessWidget {
           onRenovarMidia: onRenovarMidia,
           titulo: message.isOutbound ? 'Você' : contactLabel,
           figurinha: message.messageType == WhatsAppMessageType.sticker,
+          sobreposicao: sobreposicao,
         );
       case WhatsAppMessageType.audio:
       case WhatsAppMessageType.voice:
@@ -212,6 +389,7 @@ class WhatsAppMessageBubble extends StatelessWidget {
         return WhatsAppMidiaTocavel(
           message: message,
           onRenovarMidia: onRenovarMidia,
+          sobreposicao: sobreposicao,
         );
       case WhatsAppMessageType.document:
         if (!temArquivo) return _midiaAusente(context, metaColor);
@@ -312,8 +490,15 @@ class WhatsAppMessageBubble extends StatelessWidget {
   }
 
   /// Horário + ticks no canto inferior direito da bolha (como no WhatsApp).
+  /// [sobreMidia]: sobre a pílula escura da foto/vídeo, em branco nos dois
+  /// temas (lida continua azul).
   Widget _buildMetaRow(
-      BuildContext context, ThemeData theme, Color metaColor, bool isOwn) {
+    BuildContext context,
+    ThemeData theme,
+    Color metaColor,
+    bool isOwn, {
+    bool sobreMidia = false,
+  }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final time = message.createdAt != null
         ? DateFormat('HH:mm').format(message.createdAt!.toLocal())
@@ -323,14 +508,16 @@ class WhatsAppMessageBubble extends StatelessWidget {
         isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
     final readBlue =
         isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
+    final cor = sobreMidia ? Colors.white : metaColor;
 
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
           time,
+          maxLines: 1,
           style: theme.textTheme.labelSmall?.copyWith(
-            color: metaColor,
+            color: cor,
             fontSize: 10.5,
             fontWeight: FontWeight.w500,
             height: 1.2,
@@ -350,7 +537,7 @@ class WhatsAppMessageBubble extends StatelessWidget {
               size: 13,
               color: message.status == WhatsAppMessageStatus.read
                   ? readBlue
-                  : metaColor,
+                  : cor,
             ),
         ],
         if (failed) ...[
@@ -383,6 +570,17 @@ class WhatsAppDaySeparator extends StatelessWidget {
     final diff = today.difference(day).inDays;
     if (diff == 0) return 'Hoje';
     if (diff == 1) return 'Ontem';
+    // Como no iPhone: dia da semana na última semana; ano só quando não é
+    // o ano corrente.
+    if (diff > 1 && diff < 7) {
+      final semana = DateFormat('EEEE', 'pt_BR').format(local);
+      return semana.isEmpty
+          ? semana
+          : '${semana[0].toUpperCase()}${semana.substring(1)}';
+    }
+    if (local.year != now.year) {
+      return DateFormat("d 'de' MMMM 'de' y", 'pt_BR').format(local);
+    }
     return DateFormat("d 'de' MMMM", 'pt_BR').format(local);
   }
 
@@ -394,15 +592,17 @@ class WhatsAppDaySeparator extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Center(
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           decoration: BoxDecoration(
             color: isDark
-                ? Colors.white.withValues(alpha: 0.07)
-                : Colors.black.withValues(alpha: 0.05),
+                ? AppColors.background.backgroundTertiaryDarkMode
+                : AppColors.background.backgroundTertiary,
             borderRadius: BorderRadius.circular(999),
           ),
           child: Text(
             _label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: theme.textTheme.labelSmall?.copyWith(
               color: ThemeHelpers.textSecondaryColor(context),
               fontWeight: FontWeight.w700,

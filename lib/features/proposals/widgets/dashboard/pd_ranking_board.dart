@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../../core/theme/theme_helpers.dart';
 import '../../services/proposals_dashboard_service.dart';
@@ -15,7 +16,8 @@ class PdRankingTab {
 }
 
 /// Rankings comerciais (ranqueados por valor finalizado). Abas com
-/// sublinhado; mostra os 5 primeiros e abre o restante no próprio lugar.
+/// sublinhado (a gramática da TabBar do app); mostra os 5 primeiros e abre o
+/// restante no próprio lugar.
 class PdRankingBoard extends StatefulWidget {
   const PdRankingBoard({super.key, required this.tabs});
 
@@ -50,29 +52,38 @@ class _PdRankingBoardState extends State<PdRankingBoard> {
           child: Row(
             children: [
               for (var i = 0; i < widget.tabs.length; i++)
-                InkWell(
-                  onTap: () => setState(() {
-                    _tab = i;
-                    _expanded = false;
-                  }),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 9),
-                    margin: const EdgeInsets.only(right: 18),
-                    decoration: BoxDecoration(
-                      border: Border(
-                        bottom: BorderSide(
-                          width: 2.5,
-                          color: i == tabIndex ? t.accent : Colors.transparent,
+                Semantics(
+                  button: true,
+                  selected: i == tabIndex,
+                  child: InkWell(
+                    onTap: () => setState(() {
+                      _tab = i;
+                      _expanded = false;
+                    }),
+                    child: Container(
+                      constraints: const BoxConstraints(minHeight: 44),
+                      alignment: Alignment.center,
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      margin: const EdgeInsets.only(right: 18),
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(
+                            width: 2.5,
+                            color: i == tabIndex
+                                ? t.accent
+                                : Colors.transparent,
+                          ),
                         ),
                       ),
-                    ),
-                    child: Text(
-                      widget.tabs[i].label,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.2,
-                        color: i == tabIndex ? t.text : t.muted,
+                      child: Text(
+                        widget.tabs[i].label,
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.2,
+                          color: i == tabIndex ? t.text : t.muted,
+                        ),
                       ),
                     ),
                   ),
@@ -82,7 +93,12 @@ class _PdRankingBoardState extends State<PdRankingBoard> {
         ),
         const PdHairline(),
         if (items.isEmpty)
-          const PdEmptyLine('Ninguém com propostas neste recorte.')
+          const PdEmptyLine(
+            'Ninguém com propostas neste recorte.',
+            hint: 'Troque o período ou revise os filtros avançados no topo '
+                'da tela.',
+            icon: LucideIcons.users,
+          )
         else ...[
           for (var i = 0; i < shown.length; i++) ...[
             if (i > 0) const PdHairline(indent: 34),
@@ -130,6 +146,7 @@ class _PdRankingBoardState extends State<PdRankingBoard> {
             width: 24,
             child: Text(
               '$position',
+              maxLines: 1,
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w900,
@@ -166,13 +183,15 @@ class _PdRankingBoardState extends State<PdRankingBoard> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${pdInt.format(item.finalizadas)}/${pdInt.format(item.total)} '
-                  'finalizadas · ${pdPercent(item.taxaConversao)}',
-                  maxLines: 1,
+                  '${pdInt.format(item.finalizadas)} de '
+                  '${pdInt.format(item.total)} finalizadas · '
+                  '${pdPercent(item.taxaConversao)} de conversão',
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
+                    height: 1.3,
                     color: t.muted,
                   ),
                 ),
@@ -180,6 +199,7 @@ class _PdRankingBoardState extends State<PdRankingBoard> {
             ),
           ),
           const SizedBox(width: 12),
+          // Valor em tinta de texto: a cor fica com a barra.
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 96),
             child: FittedBox(
@@ -190,9 +210,9 @@ class _PdRankingBoardState extends State<PdRankingBoard> {
                 maxLines: 1,
                 style: TextStyle(
                   fontSize: 14,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: isTop ? FontWeight.w900 : FontWeight.w800,
                   letterSpacing: -0.3,
-                  color: isTop ? t.accent : t.text,
+                  color: t.text,
                 ),
               ),
             ),

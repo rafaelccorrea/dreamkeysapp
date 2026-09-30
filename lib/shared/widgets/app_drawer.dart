@@ -1403,13 +1403,16 @@ class _AppDrawerState extends State<AppDrawer> {
                                   ),
                                 // Assinaturas pendentes: no web mora no menu
                                 // Fichas (/fichas-venda/assinaturas-pendentes).
+                                // Ícone de documento com relógio (espera):
+                                // não repete a caneta de Documentos >
+                                // Assinaturas.
                                 if (canSeeSaleForms)
                                   _buildDrawerItem(
                                     context: context,
                                     currentRoute: activeRoute,
                                     route: AppRoutes.saleFormsPendingSignatures,
-                                    icon: LucideIcons.penLine,
-                                    activeIcon: LucideIcons.penLine,
+                                    icon: LucideIcons.fileClock,
+                                    activeIcon: LucideIcons.fileClock,
                                     title: 'Assinaturas pendentes',
                                     accent: accent,
                                     onTap: () {
@@ -1732,8 +1735,8 @@ class _AppDrawerState extends State<AppDrawer> {
                                   context: context,
                                   currentRoute: activeRoute,
                                   route: AppRoutes.signatures,
-                                  icon: LucideIcons.penLine,
-                                  activeIcon: LucideIcons.penLine,
+                                  icon: LucideIcons.signature,
+                                  activeIcon: LucideIcons.signature,
                                   title: 'Assinaturas',
                                   accent: accent,
                                   onTap: () {

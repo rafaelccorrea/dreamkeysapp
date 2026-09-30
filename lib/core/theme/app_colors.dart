@@ -123,6 +123,11 @@ class StatusColors {
   final Color purple = const Color(0xFF8B5CF6);
   final Color purpleDarkMode = const Color(0xFFa78bfa);
 
+  /// Ciano (30/09/2026): status "Alugado" do imóvel. Claro mais escuro para
+  /// ter contraste como texto sobre branco.
+  final Color teal = const Color(0xFF0891B2);
+  final Color tealDarkMode = const Color(0xFF06B6D4);
+
   final Color rose = const Color(0xFFEC4899);
   final Color roseDarkMode = const Color(0xFFF472B6);
 

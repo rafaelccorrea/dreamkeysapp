@@ -289,19 +289,36 @@ Future<void> _openPdf(BuildContext context, PurchaseProposal p, int? etapa) asyn
       Uri.file(file.path),
       mode: LaunchMode.externalApplication,
     );
-    if (!ok && context.mounted) _snack(context, 'PDF salvo em ${file.path}');
-  } catch (e) {
-    if (context.mounted) _snack(context, 'Erro ao abrir o PDF: $e');
+    // Salvou mas não abriu: é informação, não erro (snack neutro).
+    if (!ok && context.mounted) {
+      _snack(context, 'PDF salvo em ${file.path}', ok: null);
+    }
+  } catch (_) {
+    if (context.mounted) {
+      _snack(
+        context,
+        'Não foi possível abrir o PDF. Confira se há um leitor de PDF no '
+        'aparelho.',
+      );
+    }
   }
 }
 
-void _snack(BuildContext context, String msg, {bool ok = false}) {
+/// Snack de retorno: verde quando deu certo, vermelho quando falhou e
+/// neutro (cor padrão do tema) quando só informa — `ok: null`.
+void _snack(BuildContext context, String msg, {bool? ok = false}) {
+  final dark = Theme.of(context).brightness == Brightness.dark;
+  final Color? background = ok == null
+      ? null
+      : ok
+          ? (dark ? AppColors.status.successDarkMode : AppColors.status.success)
+          : (dark ? AppColors.status.errorDarkMode : AppColors.status.error);
   final m = ScaffoldMessenger.of(context);
   m.hideCurrentSnackBar();
   m.showSnackBar(
     SnackBar(
       content: Text(msg),
-      backgroundColor: ok ? AppColors.status.success : AppColors.status.error,
+      backgroundColor: background,
       behavior: SnackBarBehavior.floating,
     ),
   );

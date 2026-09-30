@@ -340,7 +340,9 @@ class _PeriodSheetState extends State<_PeriodSheet> {
     final active = _draft.presetId == p.id;
     return InkWell(
       onTap: () => setState(() => _draft = p.compute()),
-      child: Padding(
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 48),
+        alignment: Alignment.centerLeft,
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: Row(
           children: [
@@ -389,7 +391,7 @@ class _PeriodSheetState extends State<_PeriodSheet> {
                 }),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 160),
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: 11),
                   decoration: BoxDecoration(
                     color: _draft.granularity == g.$1
                         ? ThemeHelpers.cardBackgroundColor(context)
@@ -544,168 +546,227 @@ class _AdvancedSheetState extends State<_AdvancedSheet> {
       padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxHeight: (mq.size.height - mq.viewInsets.bottom) * 0.9,
+          maxHeight: (mq.size.height - mq.viewInsets.bottom) * 0.88,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const _SheetHeader(title: 'Filtros avançados'),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Somente equipes comerciais',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w700,
-                            color: t.text,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _commercialOnly
-                              ? 'Equipes não comerciais ficam fora da conta.'
-                              : 'Todas as equipes entram na conta.',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w500,
-                            color: t.muted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Switch.adaptive(
-                    value: _commercialOnly,
-                    activeTrackColor: t.green,
-                    onChanged: (v) => setState(() => _commercialOnly = v),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  _tabButton(t, 0, 'Excluir corretores', _users.length),
-                  const SizedBox(width: 18),
-                  _tabButton(t, 1, 'Excluir equipes', _teams.length),
-                ],
-              ),
-            ),
-            const PdHairline(),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-              child: TextField(
-                controller: _search,
-                onChanged: (v) => setState(() => _query = v),
-                textInputAction: TextInputAction.search,
-                style: TextStyle(fontSize: 14, color: t.text),
-                decoration: InputDecoration(
-                  isDense: true,
-                  filled: true,
-                  fillColor: fill,
-                  hintText: _tab == 0 ? 'Buscar corretor' : 'Buscar equipe',
-                  hintStyle: TextStyle(color: t.muted, fontSize: 13.5),
-                  prefixIcon: Icon(LucideIcons.search, size: 17, color: t.muted),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 11,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-              ),
-            ),
+            // Tudo entre o título e o rodapé rola junto: com o teclado aberto
+            // em paisagem sobra pouca altura e nenhuma parte pode estourar.
             Flexible(
-              child: widget.loading && source.isEmpty
-                  ? ListView(
-                      shrinkWrap: true,
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                      children: const [
-                        SkeletonBox(height: 18, borderRadius: 6),
-                        SizedBox(height: 16),
-                        SkeletonBox(height: 18, borderRadius: 6),
-                        SizedBox(height: 16),
-                        SkeletonBox(height: 18, borderRadius: 6),
-                      ],
-                    )
-                  : sorted.isEmpty
-                      ? Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-                          child: PdEmptyLine(
-                            q.isEmpty
-                                ? 'Nada disponível para excluir.'
-                                : 'Nenhum resultado para "$_query".',
-                          ),
-                        )
-                      : ListView.separated(
-                          shrinkWrap: true,
+              child: CustomScrollView(
+                shrinkWrap: true,
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16),
-                          itemCount: sorted.length,
-                          separatorBuilder: (_, _) => const PdHairline(),
-                          itemBuilder: (_, i) {
-                            final o = sorted[i];
-                            final on = selected.contains(o.id);
-                            return InkWell(
-                              onTap: () => setState(() {
-                                if (on) {
-                                  selected.remove(o.id);
-                                } else {
-                                  selected.add(o.id);
-                                }
-                              }),
-                              child: Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 11),
-                                child: Row(
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Icon(
-                                      on
-                                          ? LucideIcons.circleMinus
-                                          : LucideIcons.circle,
-                                      size: 18,
-                                      color: on ? t.red : t.muted,
+                                    Text(
+                                      'Somente equipes comerciais',
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: t.text,
+                                      ),
                                     ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(
-                                        o.label.isEmpty ? o.id : o.label,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontSize: 13.5,
-                                          fontWeight: on
-                                              ? FontWeight.w700
-                                              : FontWeight.w500,
-                                          color: t.text,
-                                          decoration: on
-                                              ? TextDecoration.lineThrough
-                                              : null,
-                                          decorationColor: t.muted,
-                                        ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      _commercialOnly
+                                          ? 'Equipes não comerciais ficam '
+                                              'fora da conta.'
+                                          : 'Todas as equipes entram na conta.',
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w500,
+                                        color: t.muted,
                                       ),
                                     ),
                                   ],
                                 ),
                               ),
-                            );
-                          },
+                              const SizedBox(width: 10),
+                              Switch.adaptive(
+                                value: _commercialOnly,
+                                activeTrackColor: t.green,
+                                onChanged: (v) =>
+                                    setState(() => _commercialOnly = v),
+                              ),
+                            ],
+                          ),
                         ),
+                        const SizedBox(height: 10),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Row(
+                            children: [
+                              _tabButton(
+                                t,
+                                0,
+                                'Excluir corretores',
+                                _users.length,
+                              ),
+                              const SizedBox(width: 18),
+                              _tabButton(
+                                t,
+                                1,
+                                'Excluir equipes',
+                                _teams.length,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const PdHairline(),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                          child: TextField(
+                            controller: _search,
+                            onChanged: (v) => setState(() => _query = v),
+                            textInputAction: TextInputAction.search,
+                            style: TextStyle(fontSize: 14, color: t.text),
+                            decoration: InputDecoration(
+                              isDense: true,
+                              filled: true,
+                              fillColor: fill,
+                              hintText: _tab == 0
+                                  ? 'Buscar corretor'
+                                  : 'Buscar equipe',
+                              hintStyle:
+                                  TextStyle(color: t.muted, fontSize: 13.5),
+                              prefixIcon: Icon(
+                                LucideIcons.search,
+                                size: 17,
+                                color: t.muted,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 11,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: BorderSide.none,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (widget.loading && source.isEmpty)
+                    const SliverPadding(
+                      padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
+                      sliver: SliverToBoxAdapter(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            SkeletonBox(height: 18, borderRadius: 6),
+                            SizedBox(height: 22),
+                            SkeletonBox(height: 18, borderRadius: 6),
+                            SizedBox(height: 22),
+                            SkeletonBox(height: 18, borderRadius: 6),
+                          ],
+                        ),
+                      ),
+                    )
+                  else if (sorted.isEmpty)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                        child: PdEmptyLine(
+                          q.isEmpty
+                              ? 'Nada disponível para excluir.'
+                              : 'Nenhum resultado para "$_query".',
+                          hint: q.isEmpty
+                              ? null
+                              : 'Confira a grafia ou busque só pelo '
+                                  'primeiro nome.',
+                        ),
+                      ),
+                    )
+                  else
+                    SliverPadding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      sliver: SliverList.separated(
+                        itemCount: sorted.length,
+                        separatorBuilder: (_, _) => const PdHairline(),
+                        itemBuilder: (_, i) {
+                          final o = sorted[i];
+                          final on = selected.contains(o.id);
+                          return InkWell(
+                            onTap: () => setState(() {
+                              if (on) {
+                                selected.remove(o.id);
+                              } else {
+                                selected.add(o.id);
+                              }
+                            }),
+                            child: Container(
+                              constraints: const BoxConstraints(minHeight: 46),
+                              padding: const EdgeInsets.symmetric(vertical: 11),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    on
+                                        ? LucideIcons.circleMinus
+                                        : LucideIcons.circle,
+                                    size: 18,
+                                    color: on ? t.red : t.muted,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      o.label.isEmpty ? 'Sem nome' : o.label,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 13.5,
+                                        fontWeight: on
+                                            ? FontWeight.w700
+                                            : FontWeight.w500,
+                                        color: t.text,
+                                        decoration: on
+                                            ? TextDecoration.lineThrough
+                                            : null,
+                                        decorationColor: t.muted,
+                                      ),
+                                    ),
+                                  ),
+                                  if (on) ...[
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'fora da conta',
+                                      maxLines: 1,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: t.red,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
             ),
             const PdHairline(),
             Padding(
@@ -762,7 +823,7 @@ class _AdvancedSheetState extends State<_AdvancedSheet> {
           _search.clear();
         }),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 9),
+          padding: const EdgeInsets.symmetric(vertical: 13),
           decoration: BoxDecoration(
             border: Border(
               bottom: BorderSide(
@@ -944,7 +1005,8 @@ class _SheetHeader extends StatelessWidget {
   }
 }
 
-/// Botão de aplicar: tinta do texto (neutro), nunca o vermelho da marca.
+/// Botão de aplicar: verde de confirmação com texto branco, como todo
+/// "Aplicar" do app (nunca o vermelho da marca — ele não é confirmar).
 class _ApplyButton extends StatelessWidget {
   const _ApplyButton({required this.label, required this.onPressed});
 
@@ -954,15 +1016,17 @@ class _ApplyButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = PdTones.of(context);
-    return FilledButton(
+    return FilledButton.icon(
       style: FilledButton.styleFrom(
-        backgroundColor: t.text,
-        foregroundColor: ThemeHelpers.cardBackgroundColor(context),
-        minimumSize: const Size.fromHeight(46),
+        backgroundColor: t.green,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        minimumSize: const Size.fromHeight(48),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
       onPressed: onPressed,
-      child: FittedBox(
+      icon: const Icon(LucideIcons.check, size: 17),
+      label: FittedBox(
         fit: BoxFit.scaleDown,
         child: Text(
           label,

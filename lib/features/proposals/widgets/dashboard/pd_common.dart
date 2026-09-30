@@ -30,13 +30,35 @@ String pdDays(double v) {
   return '${s.endsWith(',0') ? s.substring(0, s.length - 2) : s}d';
 }
 
+/// `pdPlural(1, 'cancelada', 'canceladas')` → `1 cancelada`.
+String pdPlural(int n, String singular, String plural) =>
+    '${pdInt.format(n)} ${n == 1 ? singular : plural}';
+
+/// Nome curto da etapa de assinatura (1 comprador, 2 proprietário, 3
+/// corretor/captadores).
+String pdEtapaNome(int etapa) {
+  switch (etapa) {
+    case 1:
+      return 'Comprador';
+    case 2:
+      return 'Proprietário';
+    default:
+      return 'Corretor';
+  }
+}
+
 /// Paleta resolvida por tema. O vermelho da marca é destaque (valor
 /// fechado, capítulo); o significado vem das cores de status.
 class PdTones {
   final bool dark;
   final Color accent;
   final Color green;
+
+  /// Âmbar das MARCAS (barras, pontos, segmentos).
   final Color amber;
+
+  /// Âmbar para TEXTO — o das marcas não passa contraste como letra.
+  final Color amberText;
   final Color blue;
   final Color red;
   final Color purple;
@@ -45,11 +67,19 @@ class PdTones {
   final Color hairline;
   final Color track;
 
+  /// "Em aberto" nos gráficos: neutro que se enxerga (o trilho sumia no
+  /// branco e a coluna parecia vazia).
+  final Color rest;
+
+  /// Superfície da tela — vão de 2px entre segmentos e anel dos marcadores.
+  final Color surface;
+
   const PdTones._({
     required this.dark,
     required this.accent,
     required this.green,
     required this.amber,
+    required this.amberText,
     required this.blue,
     required this.red,
     required this.purple,
@@ -57,28 +87,37 @@ class PdTones {
     required this.muted,
     required this.hairline,
     required this.track,
+    required this.rest,
+    required this.surface,
   });
 
   factory PdTones.of(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final s = AppColors.status;
+    final m = AppColors.message;
+    final muted = ThemeHelpers.textSecondaryColor(context);
     return PdTones._(
       dark: dark,
       accent: dark
           ? AppColors.primary.primaryDarkMode
           : AppColors.primary.primary,
       green: dark ? s.successDarkMode : s.success,
-      // O âmbar do tema é claro demais sobre branco; no claro, escurece
-      // para manter legibilidade de texto e barras finas.
+      // Âmbar das marcas no claro: o do tema (#E6B84C) some no branco e o de
+      // texto (#D97706) fica colado no vermelho das excluídas (validador de
+      // paleta: ΔE 14 < 15). #C98A12 separa (ΔE 19); toda legenda leva
+      // rótulo + número, então o contraste 2,95:1 da marca tem alívio.
       amber: dark ? s.warningDarkMode : const Color(0xFFC98A12),
-      blue: dark ? s.infoDarkMode : const Color(0xFF2F6FBF),
+      amberText: dark ? m.warningTextDarkMode : m.warningText,
+      blue: dark ? s.infoDarkMode : m.infoText,
       red: dark ? s.errorDarkMode : s.error,
       purple: dark ? s.purpleDarkMode : s.purple,
       text: ThemeHelpers.textColor(context),
-      muted: ThemeHelpers.textSecondaryColor(context),
+      muted: muted,
       hairline: ThemeHelpers.borderLightColor(context),
       track: ThemeHelpers.borderColor(context)
           .withValues(alpha: dark ? 0.55 : 0.45),
+      rest: muted.withValues(alpha: dark ? 0.40 : 0.32),
+      surface: ThemeHelpers.backgroundColor(context),
     );
   }
 }
@@ -141,19 +180,20 @@ class PdChapterHeader extends StatelessWidget {
             children: [
               Text(
                 title,
-                maxLines: 1,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
                   letterSpacing: -0.3,
+                  height: 1.2,
                   color: t.text,
                 ),
               ),
               const SizedBox(height: 2),
               Text(
                 question,
-                maxLines: 2,
+                maxLines: 3,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 12,
@@ -170,6 +210,117 @@ class PdChapterHeader extends StatelessWidget {
           trailing!,
         ],
       ],
+    );
+  }
+}
+
+/// Número de leitura (abertura, contrapropostas, prazos): o valor em tinta
+/// de texto, um fio curto na cor do significado e o rótulo embaixo — a cor
+/// marca, o texto informa (número colorido some no branco).
+class PdFigure extends StatelessWidget {
+  const PdFigure({
+    super.key,
+    required this.value,
+    required this.label,
+    this.sub,
+    this.tone,
+    this.size = 18,
+  });
+
+  final String value;
+  final String label;
+  final String? sub;
+  final Color? tone;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = PdTones.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
+            maxLines: 1,
+            softWrap: false,
+            style: TextStyle(
+              fontSize: size,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.4,
+              height: 1.1,
+              color: t.text,
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          width: 16,
+          height: 2.5,
+          decoration: BoxDecoration(
+            color: tone ?? t.track,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          label,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w800,
+            height: 1.2,
+            color: t.text,
+          ),
+        ),
+        if (sub != null) ...[
+          const SizedBox(height: 1),
+          Text(
+            sub!,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w500,
+              height: 1.25,
+              color: t.muted,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Figuras lado a lado, separadas por filete vertical (altura intrínseca —
+/// nada de caixa com altura fixa em volta de texto).
+class PdLedger extends StatelessWidget {
+  const PdLedger({super.key, required this.children, this.gap = 12});
+
+  final List<Widget> children;
+  final double gap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = PdTones.of(context);
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0)
+              Container(
+                width: 1,
+                margin: EdgeInsets.symmetric(horizontal: gap),
+                color: t.hairline,
+              ),
+            Expanded(child: children[i]),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -219,7 +370,8 @@ class PdSegment {
   const PdSegment(this.value, this.color);
 }
 
-/// Barra 100% empilhada; segmentos zerados somem.
+/// Barra 100% empilhada; segmentos zerados somem e os vizinhos ficam
+/// separados por um vão de 2px.
 class PdStackedBar extends StatelessWidget {
   const PdStackedBar({
     super.key,
@@ -273,23 +425,91 @@ class PdDot extends StatelessWidget {
   }
 }
 
-/// Estado vazio de capítulo (texto discreto, sem caixa).
-class PdEmptyLine extends StatelessWidget {
-  const PdEmptyLine(this.message, {super.key});
+/// Item de legenda: ponto na cor da marca + rótulo em tinta de texto.
+class PdLegendItem extends StatelessWidget {
+  const PdLegendItem({super.key, required this.color, required this.label});
 
-  final String message;
+  final Color color;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
+    final t = PdTones.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        PdDot(color: color),
+        const SizedBox(width: 5),
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+              color: t.text,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Estado vazio de capítulo — sem caixa, mas ENSINA: o que aparece aqui e
+/// como chegar lá ([hint]).
+class PdEmptyLine extends StatelessWidget {
+  const PdEmptyLine(this.message, {super.key, this.hint, this.icon});
+
+  final String message;
+  final String? hint;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = PdTones.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Text(
-        message,
-        style: TextStyle(
-          fontSize: 12.5,
-          fontWeight: FontWeight.w600,
-          color: ThemeHelpers.textSecondaryColor(context),
-        ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (icon != null) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Icon(icon, size: 16, color: t.muted),
+            ),
+            const SizedBox(width: 10),
+          ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  message,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    height: 1.3,
+                    color: hint == null ? t.muted : t.text,
+                  ),
+                ),
+                if (hint != null) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    hint!,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                      height: 1.35,
+                      color: t.muted,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

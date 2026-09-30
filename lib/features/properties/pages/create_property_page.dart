@@ -14,7 +14,6 @@ import '../../../../shared/utils/error_cause.dart';
 import '../../../../shared/widgets/app_error_state.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/custom_text_field.dart';
-import '../../../../shared/widgets/custom_button.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
 import '../../../../shared/widgets/shimmer_image.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -4575,6 +4574,90 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     );
   }
 
+  /// Seletor de tipo na EDIÇÃO: os 16 tipos em três grupos com legenda
+  /// (Residencial / Comercial / Terreno e rural), cada chip com o ícone do
+  /// tipo — o mesmo do setup de criação e do card da lista. Acha-se o tipo
+  /// pelo grupo em vez de varrer 16 pastilhas só de texto.
+  Widget _buildTypeChoiceGroups(ThemeData theme) {
+    final accent = _stepAccent(_currentStep);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final captionStyle = theme.textTheme.labelMedium?.copyWith(
+      fontWeight: FontWeight.w800,
+      fontSize: 11.5,
+      letterSpacing: 0.1,
+      color: muted,
+    );
+    final groups = PropertyTypeVisual.grouped();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Tipo gravado que o app não conhece: aparece como veio e continua
+        // marcado até a pessoa escolher outro — e a linha diz por quê.
+        if (_loadedTypeUnknownUntouched) ...[
+          ChoiceChip(
+            avatar: Icon(Icons.help_outline_rounded, size: 16, color: accent),
+            label: Text(_typeDisplayLabel),
+            selected: true,
+            onSelected: (_) {},
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Tipo gravado no CRM que o app não reconhece. Ele é mantido até '
+            'você escolher outro abaixo.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: muted,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        for (final (i, g) in groups.indexed) ...[
+          if (i > 0) const SizedBox(height: 12),
+          Text(
+            g.$1.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: captionStyle,
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final type in g.$2)
+                _typeChoiceChip(type, accent: accent, muted: muted),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _typeChoiceChip(
+    PropertyType type, {
+    required Color accent,
+    required Color muted,
+  }) {
+    final isSelected = !_loadedTypeUnknownUntouched && _selectedType == type;
+    return ChoiceChip(
+      avatar: Icon(
+        PropertyTypeVisual.rounded(type),
+        size: 16,
+        color: isSelected ? accent : muted,
+      ),
+      label: Text(type.label),
+      selected: isSelected,
+      onSelected: (selected) {
+        if (selected) {
+          _setStateAndPersist(() {
+            _selectedType = type;
+            _typeTouched = true;
+          });
+        }
+      },
+    );
+  }
+
   /// Tema dos chips dentro do wizard — pill totalmente arredondada, borda
   /// hairline; quando selecionado, fill suave no acento da etapa e texto na
   /// cor do acento (peso 800). Sem checkmark por padrão (override por chip
@@ -4854,36 +4937,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                 : 'Escolha a categoria que melhor representa o anúncio.',
             child: widget.propertyId == null
                 ? _buildTypeSummaryRow(theme)
-                : Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      // Tipo gravado que o app não conhece: aparece como veio
-                      // e continua marcado até a pessoa escolher outro.
-                      if (_loadedTypeUnknownUntouched)
-                        ChoiceChip(
-                          label: Text(_typeDisplayLabel),
-                          selected: true,
-                          onSelected: (_) {},
-                        ),
-                      ...PropertyType.values.map((type) {
-                        final isSelected = !_loadedTypeUnknownUntouched &&
-                            _selectedType == type;
-                        return ChoiceChip(
-                          label: Text(type.label),
-                          selected: isSelected,
-                          onSelected: (selected) {
-                            if (selected) {
-                              _setStateAndPersist(() {
-                                _selectedType = type;
-                                _typeTouched = true;
-                              });
-                            }
-                          },
-                        );
-                      }),
-                    ],
-                  ),
+                : _buildTypeChoiceGroups(theme),
           ),
           if (_formRequiredKeys.contains('teamId') || _formTeams.isNotEmpty) ...[
             SizedBox(height: _wizGapBetweenSections),
@@ -4998,8 +5052,9 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             theme,
             icon: Icons.travel_explore_rounded,
             title: 'Busca por CEP',
-            subtitle:
-                'Toque na lupa para consultar quando o número estiver completo.',
+            subtitle: _zipCodeNotApplicable
+                ? 'CEP dispensado para este imóvel.'
+                : 'Toque na lupa para consultar quando o número estiver completo.',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -5021,35 +5076,45 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                     }
                     return null;
                   },
+                  // Sem CEP: a lupa fica apagada junto com o campo — buscar
+                  // um CEP vazio não faz sentido.
                   suffixIcon: IconButton(
                     icon: Icon(
                       Icons.search_rounded,
-                      color: _wizBrand(context),
+                      color: _zipCodeNotApplicable
+                          ? ThemeHelpers.textSecondaryColor(context)
+                              .withValues(alpha: 0.5)
+                          : _wizBrand(context),
                     ),
-                    onPressed: _searchCep,
+                    onPressed: _zipCodeNotApplicable ? null : _searchCep,
                     tooltip: 'Buscar CEP',
                   ),
                 ),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  controlAffinity: ListTileControlAffinity.leading,
+                const SizedBox(height: 8),
+                // Mesma linha de interruptor do resto do wizard (destaque,
+                // publicação) — o CheckboxListTile padrão destoava.
+                _wizardSwitchRow(
+                  theme,
+                  icon: Icons.location_off_outlined,
+                  title: 'Sem CEP (não se aplica)',
+                  subtitle: 'Imóvel rural, terreno ou loteamento sem CEP: '
+                      'preencha o endereço à mão.',
                   value: _zipCodeNotApplicable,
                   onChanged: (v) => setState(() {
-                    _zipCodeNotApplicable = v ?? false;
+                    _zipCodeNotApplicable = v;
                     if (_zipCodeNotApplicable) _zipCodeController.text = '';
                   }),
-                  title: const Text('Sem CEP (não se aplica)'),
-                  subtitle: const Text(
-                    'Imóvel rural, terreno ou loteamento sem CEP: preencha o endereço à mão.',
-                  ),
                 ),
                 const SizedBox(height: 12),
                 _wizardHintBanner(
                   theme,
-                  icon: Icons.map_outlined,
-                  message:
-                      'Ao informar um CEP válido, tentamos completar ruas, cidade e estado automaticamente.',
+                  icon: _zipCodeNotApplicable
+                      ? Icons.edit_location_alt_outlined
+                      : Icons.map_outlined,
+                  message: _zipCodeNotApplicable
+                      ? 'Sem CEP: preencha rua, número, bairro, cidade e UF '
+                          'nos campos abaixo.'
+                      : 'Ao informar um CEP válido, tentamos completar ruas, cidade e estado automaticamente.',
                 ),
               ],
             ),
@@ -5399,15 +5464,36 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             theme,
             icon: Icons.straighten_rounded,
             title: 'Metragens',
-            subtitle: 'A área construída é obrigatória (exceto terreno); a total é opcional.',
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: _buildFormField(
+            subtitle: _selectedType == PropertyType.land
+                ? 'Em terreno as duas são opcionais; informe a área total quando souber.'
+                : 'A área construída é obrigatória; a total é opcional.',
+            // Duas colunas só quando os dois rótulos cabem em uma linha: com
+            // "Área construída (m²) *" quebrando em 2 linhas ao lado de "Área
+            // total" (1 linha), os campos ficavam em degraus. Em 320dp ou com
+            // texto grande, empilha. A unidade vai dentro do campo (sempre
+            // visível) para o rótulo ficar curto.
+            child: LayoutBuilder(
+              builder: (context, c) {
+                final escala = MediaQuery.textScalerOf(context).scale(1);
+                final ladoALado = c.maxWidth / escala >= 280;
+                final unidade = Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Center(
+                    widthFactor: 1,
+                    child: Text(
+                      'm²',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: ThemeHelpers.textSecondaryColor(context),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                );
+                final total = _buildFormField(
                     theme,
                     controller: _totalAreaController,
-                    label: 'Área total (m²)',
+                    label: 'Área total',
+                    suffix: unidade,
                     hint: '0.0',
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
@@ -5426,16 +5512,14 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                       }
                       return null;
                     },
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildFormField(
+                  );
+                final construida = _buildFormField(
                     theme,
                     controller: _builtAreaController,
                     label: _selectedType == PropertyType.land
-                        ? 'Área construída (m²)'
-                        : 'Área construída (m²) *',
+                        ? 'Área construída'
+                        : 'Área construída *',
+                    suffix: unidade,
                     hint: '0.0',
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
@@ -5458,9 +5542,22 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                       }
                       return null;
                     },
-                  ),
-                ),
-              ],
+                  );
+                if (!ladoALado) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [total, const SizedBox(height: 12), construida],
+                  );
+                }
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: total),
+                    const SizedBox(width: 12),
+                    Expanded(child: construida),
+                  ],
+                );
+              },
             ),
           ),
           SizedBox(height: _wizGapBetweenSections),
@@ -6853,15 +6950,18 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             theme,
             icon: Icons.public_rounded,
             title: 'Disponibilidade e site',
+            // Na edição a frase do status vem primeiro: é o que muda para quem
+            // edita (a regra de aprovação da publicação já está na linha
+            // "Publicar no site").
             subtitle: !_approvalSettingsLoaded
                 ? 'Carregando regras da empresa…'
-                : (_requireApprovalToBeAvailable ||
-                        _requireOwnerAuthorizationToBeAvailable ||
-                        (_requireApprovalToPublishOnSite &&
-                            (_publishToSite || !_listingStatusIsDraft)))
-                    ? 'Esta empresa pode exigir fila de aprovação, autorização do proprietário e/ou aprovação de publicação — o backend define os status efetivos ao salvar, como no Intellisys web.'
-                    : widget.propertyId != null
-                        ? 'O status atual é mantido ao salvar; aqui você ajusta destaque e publicação no site.'
+                : widget.propertyId != null
+                    ? 'O status atual é mantido ao salvar; aqui você ajusta destaque e publicação no site.'
+                    : (_requireApprovalToBeAvailable ||
+                            _requireOwnerAuthorizationToBeAvailable ||
+                            (_requireApprovalToPublishOnSite &&
+                                (_publishToSite || !_listingStatusIsDraft)))
+                        ? 'Esta empresa pode exigir aprovação, autorização do proprietário ou aprovação da publicação: o status final é definido ao salvar.'
                         : 'Escolha como o imóvel entra no CRM e se deseja solicitar publicação no site.',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -6889,6 +6989,17 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                       rawStatus: _loadedPropertyStatus,
                     ),
                   ),
+                  // No funil de locação, a trilha diz em que etapa (de 9) ele
+                  // está — mais útil que só o nome da etapa.
+                  if (PropertyStatus.fromString(_loadedPropertyStatus)
+                          ?.isRentalFunnel ??
+                      false) ...[
+                    const SizedBox(height: 10),
+                    PropertyRentalFunnelTrail(
+                      status:
+                          PropertyStatus.fromString(_loadedPropertyStatus)!,
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Text(
                     'Salvar a edição não muda o status. Ele muda pelas ações do imóvel.',
@@ -7212,6 +7323,77 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     );
   }
 
+  /// Botão principal do rodapé do wizard. No lugar do `CustomButton` porque o
+  /// rótulo dele é um `Text` solto numa `Row`: com "Voltar" ao lado, em 360dp
+  /// "Finalizar cadastro" / "Salvar alterações" já estouravam — aqui o rótulo
+  /// encolhe (`FittedBox`) em vez de estourar. Carregando, diz o que faz
+  /// ("Verificando endereço", "Salvando") em vez de só girar.
+  Widget _wizardPrimaryButton({
+    required String text,
+    required IconData icon,
+    required VoidCallback onPressed,
+    bool loading = false,
+    String? loadingText,
+    Color? color,
+  }) {
+    final base = color ??
+        (_wizIsDark(context)
+            ? AppColors.primary.primaryDarkMode
+            : AppColors.primary.primary);
+    return SizedBox(
+      height: 48,
+      child: ElevatedButton(
+        onPressed: loading ? null : onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: base,
+          foregroundColor: Colors.white,
+          // Carregando não é "desabilitado": mantém a cor, só esmaece.
+          disabledBackgroundColor: base.withValues(alpha: 0.6),
+          disabledForegroundColor: Colors.white.withValues(alpha: 0.9),
+          elevation: 0,
+          minimumSize: const Size(0, 48),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (loading)
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            else
+              Icon(icon, size: 20),
+            if (!loading || loadingText != null) ...[
+              const SizedBox(width: 8),
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    loading ? '$loadingText…' : text,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   /// Footer minimalista com micro-progressão (linha tonal sutil) e ações limpas.
   Widget _buildNavigationButtons(ThemeData theme) {
     final isDark = _wizIsDark(context);
@@ -7283,6 +7465,9 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                       child: OutlinedButton.icon(
                         onPressed: _previousStep,
                         style: OutlinedButton.styleFrom(
+                          // "Voltar" é neutro: o tema pinta OutlinedButton com
+                          // o vermelho da marca.
+                          foregroundColor: ThemeHelpers.textColor(context),
                           padding:
                               const EdgeInsets.symmetric(horizontal: 14),
                           shape: RoundedRectangleBorder(
@@ -7296,35 +7481,43 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                           ),
                         ),
                         icon: const Icon(Icons.arrow_back_rounded, size: 18),
-                        label: const Text('Voltar'),
+                        label: const Text(
+                          'Voltar',
+                          maxLines: 1,
+                          softWrap: false,
+                        ),
                       ),
                     ),
                   if (_currentStep > 0) const SizedBox(width: 12),
                   Expanded(
                     child: _currentStep < _totalSteps - 1
-                        ? CustomButton(
+                        ? _wizardPrimaryButton(
                             text: 'Continuar',
-                            onPressed: _nextStep,
-                            // Checando duplicidade de endereço (etapa 2).
-                            isLoading: _checkingDuplicate,
                             icon: Icons.arrow_forward_rounded,
+                            onPressed: _nextStep,
+                            // Checando duplicidade de endereço (etapa 2): o
+                            // botão diz o que está fazendo.
+                            loading: _checkingDuplicate,
+                            loadingText: 'Verificando endereço',
                           )
                         : widget.propertyId != null
-                            ? CustomButton(
+                            // Salvar edição = confirmação → verde (régua).
+                            ? _wizardPrimaryButton(
                                 text: 'Salvar alterações',
-                                onPressed:
-                                    _isLoading ? null : () => _saveProperty(),
-                                isLoading: _isLoading,
                                 icon: Icons.check_rounded,
+                                onPressed: () => _saveProperty(),
+                                loading: _isLoading,
+                                loadingText: 'Salvando',
+                                color: AppColors.status.success,
                               )
-                            : CustomButton(
+                            // CTA principal de criação → marca.
+                            : _wizardPrimaryButton(
                                 text: 'Finalizar cadastro',
-                                onPressed: _isLoading
-                                    ? null
-                                    : () =>
-                                        _saveProperty(saveAsDraft: false),
-                                isLoading: _isLoading,
                                 icon: Icons.check_rounded,
+                                onPressed: () =>
+                                    _saveProperty(saveAsDraft: false),
+                                loading: _isLoading,
+                                loadingText: 'Salvando',
                               ),
                   ),
                 ],

@@ -1068,14 +1068,15 @@ class DocumentListResponse {
 
   factory DocumentListResponse.fromJson(Map<String, dynamic> json) {
     // A API retorna 'documents' ao invés de 'data'
-    final documentsList = json['documents'] as List<dynamic>? ?? 
+    final documentsList = json['documents'] as List<dynamic>? ??
                          json['data'] as List<dynamic>?;
-    
+
     return DocumentListResponse(
-      data: documentsList
-              ?.map((e) => Document.fromJson(e as Map<String, dynamic>))
-              .toList() ??
-          [],
+      data: [
+        ...?documentsList
+            ?.map((e) => Document.fromJson(e as Map<String, dynamic>)),
+        ..._documentsFromGroups(json['groupedDocuments']),
+      ],
       pagination: json['pagination'] != null
           ? DocumentPagination.fromJson(json['pagination'])
           : (json['page'] != null || json['total'] != null)
@@ -1095,6 +1096,38 @@ class DocumentListResponse {
   static int _calculateTotalPages(int total, int limit) {
     if (limit <= 0) return 1;
     return (total / limit).ceil();
+  }
+
+  /// `groupedDocuments` — paridade com o `useDocuments` do web (30/09/2026).
+  ///
+  /// O back separa, POR PÁGINA, os documentos de um mesmo cliente/imóvel com
+  /// 2+ documentos em grupos `{entityType, entity, documents}`; `documents`
+  /// traz só os soltos. Sem ler os grupos esses documentos sumiam do app e a
+  /// página vinha menor que `limit`, com `total` contando todos. Como no web,
+  /// entram na mesma lista depois dos soltos, levando o cliente/imóvel do grupo
+  /// (a lista não traz a relação no documento — o web anota `_groupEntity`).
+  static List<Document> _documentsFromGroups(dynamic raw) {
+    if (raw is! List) return const [];
+    final result = <Document>[];
+    for (final group in raw) {
+      if (group is! Map) continue;
+      final docs = group['documents'];
+      if (docs is! List) continue;
+      final entity = group['entity'];
+      final entityType = group['entityType']?.toString();
+      final relationKey = entityType == 'client'
+          ? 'client'
+          : (entityType == 'property' ? 'property' : null);
+      for (final doc in docs) {
+        if (doc is! Map) continue;
+        final docJson = Map<String, dynamic>.from(doc);
+        if (relationKey != null && entity is Map && docJson[relationKey] == null) {
+          docJson[relationKey] = Map<String, dynamic>.from(entity);
+        }
+        result.add(Document.fromJson(docJson));
+      }
+    }
+    return result;
   }
 }
 

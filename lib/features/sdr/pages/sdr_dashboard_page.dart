@@ -19,6 +19,7 @@ import '../models/sdr_settings_model.dart';
 import '../services/sdr_service.dart';
 import '../widgets/sdr_config_sheet.dart';
 import '../widgets/sdr_dashboard_filters_drawer.dart';
+import '../widgets/sdr_tinta_legivel.dart';
 
 final NumberFormat _int = NumberFormat.decimalPattern('pt_BR');
 final NumberFormat _compactMoney = NumberFormat.compactCurrency(
@@ -67,6 +68,15 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
   static const double _kPagePadTop = 12;
   static const double _kPagePadBottom = 88;
 
+  /// Coluna máxima em tablet/paisagem: o placar e as linhas não esticam de
+  /// ponta a ponta (o recuo extra entra no padding do ListView).
+  static const double _kMaxContentWidth = 760;
+
+  double _sideGutter(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    return math.max(0, (width - _kMaxContentWidth - 2 * _kPagePadH) / 2);
+  }
+
   // Paginação client-side dos painéis. O endpoint `sdr/metrics` devolve os
   // agregados completos de uma vez (sem page/limit no backend) — renderizar
   // tudo trava a tela em empresas grandes. Cada lista cresce em lotes via
@@ -112,31 +122,49 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
   // ─── Cores semânticas ──────────────────────────────────────────────────────
   // Violeta = identidade do agente de IA; verde = sucesso/ativo; âmbar =
   // atenção; vermelho = perda; azul = informação/origens.
+  //
+  // Contraste real no claro (30/09/2026): quase toda cor de significado
+  // aqui é texto (números, legendas, rótulo da aba, chip do período) ou
+  // ícone pequeno, e os tokens de status ficam em ~3:1 no branco. Saem por
+  // [sdrTintaLegivel] (≥ 4,5:1); no escuro voltam como vieram. As barras
+  // usam a mesma tinta para casar com a legenda.
 
-  Color _violet(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.dark
-          ? AppColors.status.purpleDarkMode
-          : AppColors.status.purple;
+  Color _violet(BuildContext context) => sdrTintaLegivel(
+        context,
+        Theme.of(context).brightness == Brightness.dark
+            ? AppColors.status.purpleDarkMode
+            : AppColors.status.purple,
+      );
 
-  Color _green(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.dark
-          ? AppColors.status.greenDarkMode
-          : AppColors.status.green;
+  Color _green(BuildContext context) => sdrTintaLegivel(
+        context,
+        Theme.of(context).brightness == Brightness.dark
+            ? AppColors.status.greenDarkMode
+            : AppColors.status.green,
+      );
 
-  Color _amber(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.dark
-          ? AppColors.status.warningDarkMode
-          : AppColors.status.warning;
+  /// Âmbar: no claro parte do `message.warningText` (o `status.warning`
+  /// #E6B84C some no branco).
+  Color _amber(BuildContext context) => sdrTintaLegivel(
+        context,
+        Theme.of(context).brightness == Brightness.dark
+            ? AppColors.status.warningDarkMode
+            : AppColors.message.warningText,
+      );
 
-  Color _red(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.dark
-          ? AppColors.status.errorDarkMode
-          : AppColors.status.error;
+  Color _red(BuildContext context) => sdrTintaLegivel(
+        context,
+        Theme.of(context).brightness == Brightness.dark
+            ? AppColors.status.errorDarkMode
+            : AppColors.status.error,
+      );
 
-  Color _blue(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.dark
-          ? AppColors.status.blueDarkMode
-          : AppColors.status.blue;
+  Color _blue(BuildContext context) => sdrTintaLegivel(
+        context,
+        Theme.of(context).brightness == Brightness.dark
+            ? AppColors.status.blueDarkMode
+            : AppColors.status.blue,
+      );
 
   // ─── Dados ─────────────────────────────────────────────────────────────────
 
@@ -270,8 +298,12 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
                   onRefresh: _refreshAll,
                   child: ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(
-                        0, _kPagePadTop, 0, _kPagePadBottom),
+                    padding: EdgeInsets.fromLTRB(
+                      _sideGutter(context),
+                      _kPagePadTop,
+                      _sideGutter(context),
+                      _kPagePadBottom,
+                    ),
                     children: [
                       if (_hasAgent) ...[
                         Padding(
@@ -327,14 +359,8 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
                 height: 56,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(18),
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      violet.withValues(alpha: isDark ? 0.30 : 0.18),
-                      violet.withValues(alpha: isDark ? 0.10 : 0.06),
-                    ],
-                  ),
+                  // Tinta chapada (sem gradiente inventado — régua da casa).
+                  color: violet.withValues(alpha: isDark ? 0.20 : 0.12),
                   border: Border.all(
                     color: violet.withValues(alpha: isDark ? 0.45 : 0.32),
                   ),
@@ -517,24 +543,27 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+        // Título à esquerda, período à direita; quando os dois não cabem
+        // numa linha (320dp, fonte grande, período personalizado), o chip
+        // desce inteiro em vez de espremer o título ou cortar as datas.
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          runSpacing: 8,
           children: [
             // Título de seção nunca trunca nesta tela — quebra em linhas.
-            Expanded(
-              child: Text(
-                'LEADS NO PERÍODO',
-                softWrap: true,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: secondary,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1.4,
-                  fontSize: 10,
-                  height: 1.4,
-                ),
+            Text(
+              'LEADS NO PERÍODO',
+              softWrap: true,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: secondary,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.4,
+                fontSize: 10,
+                height: 1.4,
               ),
             ),
-            const SizedBox(width: 8),
             _periodChip(context),
           ],
         ),
@@ -599,9 +628,11 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
                     context, amber, 'qualificando', s.inQualification),
               if (s.lost > 0) _legendItem(context, red, 'perdidos', s.lost),
               if (_funnelRest(s) > 0)
+                // Número é texto: cinza secundário cheio (a 60% ficava em
+                // ~2,8:1 no branco).
                 _legendItem(
                   context,
-                  secondary.withValues(alpha: 0.6),
+                  secondary,
                   'outros',
                   _funnelRest(s),
                 ),
@@ -716,15 +747,17 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
         ),
         const SizedBox(width: 6),
         Expanded(
+          // Duas linhas: em 320dp com fonte grande a frase inteira importa
+          // mais que a economia de altura.
           child: Text(
             label,
-            maxLines: 1,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.labelSmall?.copyWith(
               color: tone,
               fontWeight: FontWeight.w800,
               fontSize: 11.5,
-              height: 1.1,
+              height: 1.25,
             ),
           ),
         ),
@@ -753,14 +786,20 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
           children: [
             Icon(LucideIcons.calendarRange, size: 12, color: violet),
             const SizedBox(width: 5),
-            Text(
-              _filters.periodLabel(),
-              style: TextStyle(
-                color: violet,
-                fontWeight: FontWeight.w800,
-                fontSize: 11,
+            Flexible(
+              child: Text(
+                _filters.periodLabel(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: violet,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
+                ),
               ),
             ),
+            const SizedBox(width: 3),
+            Icon(LucideIcons.chevronDown, size: 12, color: violet),
           ],
         ),
       ),
@@ -972,7 +1011,8 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
         icon: LucideIcons.inbox,
         tone: _violet(context),
         title: 'Sem leads no período',
-        body: 'Ajuste o período ou os filtros para ver as métricas do SDR.',
+        body: 'Nenhum lead entrou no funil SDR neste recorte. Amplie o '
+            'período ou tire filtros de equipe para ver as métricas.',
       ));
       return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch, children: nodes);
@@ -1118,9 +1158,12 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
               ),
             ),
             const SizedBox(height: 3),
+            // Três colunas em ~80dp cada no 320: o rótulo quebra em até 3
+            // linhas e, no limite, reticências (nunca corte seco).
             Text(
               label,
-              maxLines: 2,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
               style: theme.textTheme.labelSmall?.copyWith(
                 color: ThemeHelpers.textSecondaryColor(context),
                 fontWeight: FontWeight.w700,
@@ -1250,6 +1293,8 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
             ),
           ),
           const SizedBox(height: 8),
+          // Datas nas pontas e o pico no meio; o pico encolhe com
+          // reticências se a fonte do sistema crescer (as datas não).
           Row(
             children: [
               Text(
@@ -1260,19 +1305,30 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const Spacer(),
-              Icon(LucideIcons.trendingUp, size: 11, color: violet),
-              const SizedBox(width: 4),
-              Text(
-                'pico: ${_int.format(peak.total)}'
-                '${peak.date != null ? ' em ${fmtDay.format(peak.date!)}' : ''}',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: secondary,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
+              const SizedBox(width: 8),
+              Expanded(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(LucideIcons.trendingUp, size: 11, color: violet),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        'pico: ${_int.format(peak.total)}'
+                        '${peak.date != null ? ' em ${fmtDay.format(peak.date!)}' : ''}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: secondary,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               Text(
                 last != null ? fmtDay.format(last) : '',
                 style: theme.textTheme.labelSmall?.copyWith(
@@ -1587,6 +1643,8 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
 
   // ─── Estados ───────────────────────────────────────────────────────────────
 
+  /// Vazio que ensina: o que falta e o caminho (os filtros), com o botão
+  /// neutro "Ajustar filtros" — o recorte é a causa mais comum do vazio.
   Widget _emptyState(
     BuildContext context, {
     required IconData icon,
@@ -1595,6 +1653,7 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
     required String body,
   }) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 4),
       child: Column(
@@ -1604,10 +1663,8 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
             height: 64,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(colors: [
-                tone.withValues(alpha: 0.18),
-                tone.withValues(alpha: 0.06),
-              ]),
+              // Tinta chapada (sem gradiente inventado).
+              color: tone.withValues(alpha: isDark ? 0.16 : 0.10),
               border: Border.all(color: tone.withValues(alpha: 0.32)),
             ),
             child: Icon(icon, color: tone, size: 28),
@@ -1631,6 +1688,30 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
               height: 1.4,
             ),
           ),
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            onPressed: _openFilters,
+            icon: const Icon(LucideIcons.slidersHorizontal, size: 16),
+            label: const Text(
+              'Ajustar filtros',
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: ThemeHelpers.textColor(context),
+              side: BorderSide(color: ThemeHelpers.borderColor(context)),
+              minimumSize: const Size(0, 40),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              textStyle: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -1651,31 +1732,38 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
     return SingleChildScrollView(
       physics: const NeverScrollableScrollPhysics(),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-            _kPagePadH, _kPagePadTop, _kPagePadH, _kPagePadBottom),
+        padding: EdgeInsets.fromLTRB(
+          _kPagePadH + _sideGutter(context),
+          _kPagePadTop,
+          _kPagePadH + _sideGutter(context),
+          _kPagePadBottom,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Console do agente.
-            Row(
-              children: const [
-                SkeletonBox(width: 56, height: 56, borderRadius: 18),
-                SizedBox(width: 13),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SkeletonText(width: 110, height: 17, borderRadius: 5),
-                      SizedBox(height: 7),
-                      SkeletonText(width: 190, height: 11, borderRadius: 4),
-                      SizedBox(height: 6),
-                      SkeletonText(width: 160, height: 10, borderRadius: 4),
-                    ],
+            // Console do agente — só para quem tem o WhatsApp-IA (fiel ao
+            // que vai aparecer).
+            if (_hasAgent) ...[
+              Row(
+                children: const [
+                  SkeletonBox(width: 56, height: 56, borderRadius: 18),
+                  SizedBox(width: 13),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SkeletonText(width: 110, height: 17, borderRadius: 5),
+                        SizedBox(height: 7),
+                        SkeletonText(width: 190, height: 11, borderRadius: 4),
+                        SizedBox(height: 6),
+                        SkeletonText(width: 160, height: 10, borderRadius: 4),
+                      ],
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 22),
+                ],
+              ),
+              const SizedBox(height: 22),
+            ],
             // Placar.
             Row(
               children: const [
@@ -1706,26 +1794,37 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
             const SkeletonBox(
                 width: double.infinity, height: 10, borderRadius: 999),
             const SizedBox(height: 10),
-            Row(
-              children: const [
+            const Wrap(
+              spacing: 14,
+              runSpacing: 6,
+              children: [
                 SkeletonText(width: 86, height: 10, borderRadius: 4),
-                SizedBox(width: 14),
                 SkeletonText(width: 86, height: 10, borderRadius: 4),
-                SizedBox(width: 14),
                 SkeletonText(width: 70, height: 10, borderRadius: 4),
               ],
             ),
             const SizedBox(height: 22),
-            // Rail de abas.
+            // Rail de abas flush (rótulos + filete), como o de verdade.
             Row(
               children: [
-                for (var i = 0; i < 3; i++) ...[
-                  if (i > 0) const SizedBox(width: 10),
+                for (var i = 0; i < 3; i++)
                   const Expanded(
-                    child: SkeletonBox(height: 40, borderRadius: 10),
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(vertical: 14),
+                      child: Center(
+                        child: SkeletonText(
+                          width: 76,
+                          height: 12,
+                          borderRadius: 4,
+                        ),
+                      ),
+                    ),
                   ),
-                ],
               ],
+            ),
+            Container(
+              height: 1,
+              color: ThemeHelpers.borderLightColor(context),
             ),
             const SizedBox(height: 20),
             // Cabeçalho de painel.
@@ -1773,14 +1872,13 @@ class _ConversionDial extends StatelessWidget {
     required this.rate,
     required this.tone,
     required this.track,
-    this.size = 74,
   });
 
   /// Percentual 0–100.
   final double rate;
   final Color tone;
   final Color track;
-  final double size;
+  static const double size = 74;
 
   @override
   Widget build(BuildContext context) {
@@ -1985,37 +2083,47 @@ class _AgentRow extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final green =
-        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
-    final amber =
-        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
-    final red = isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-    final violet =
-        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
+    // Texto e ícone pequeno: tinta legível (≥ 4,5:1 no claro).
+    final green = sdrTintaLegivel(
+      context,
+      isDark ? AppColors.status.greenDarkMode : AppColors.status.green,
+    );
+    final amber = sdrTintaLegivel(
+      context,
+      isDark ? AppColors.status.warningDarkMode : AppColors.message.warningText,
+    );
+    final red = sdrTintaLegivel(
+      context,
+      isDark ? AppColors.status.errorDarkMode : AppColors.status.error,
+    );
+    final violet = sdrTintaLegivel(
+      context,
+      isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple,
+    );
     final convFrac = (agent.conversionRate / 100).clamp(0.0, 1.0);
     final isTop = rank == 1 && agent.transferred > 0;
     final rankTone = isTop ? violet : secondary;
 
-    Widget stat(String value, String label, Color tone) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Text(
-            value,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: tone,
-              fontWeight: FontWeight.w900,
+    // Número na cor do significado + palavra inteira (sem "transf." /
+    // "qualif."): as leituras moram num Wrap sob o nome, então o nome não
+    // disputa a linha com três colunas de números em 320dp.
+    Widget stat(int value, String singular, String plural, Color tone) {
+      return Text.rich(
+        TextSpan(
+          children: [
+            TextSpan(
+              text: _int.format(value),
+              style: TextStyle(color: tone, fontWeight: FontWeight.w900),
             ),
-          ),
-          Text(
-            label,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: secondary,
-              fontSize: 9,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
+            TextSpan(text: ' ${value == 1 ? singular : plural}'),
+          ],
+        ),
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: secondary,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          height: 1.3,
+        ),
       );
     }
 
@@ -2025,7 +2133,7 @@ class _AgentRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
                 width: 30,
@@ -2068,20 +2176,28 @@ class _AgentRow extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       '${_int.format(agent.totalLeads)} lead${agent.totalLeads == 1 ? '' : 's'} no período',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: secondary,
                         fontSize: 10.5,
                       ),
                     ),
+                    const SizedBox(height: 5),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 2,
+                      children: [
+                        stat(agent.transferred, 'transferido', 'transferidos',
+                            green),
+                        stat(agent.inQualification, 'qualificando',
+                            'qualificando', amber),
+                        stat(agent.lost, 'perdido', 'perdidos', red),
+                      ],
+                    ),
                   ],
                 ),
               ),
-              const SizedBox(width: 10),
-              stat(_int.format(agent.transferred), 'transf.', green),
-              const SizedBox(width: 12),
-              stat(_int.format(agent.inQualification), 'qualif.', amber),
-              const SizedBox(width: 12),
-              stat(_int.format(agent.lost), 'perdidos', red),
             ],
           ),
           const SizedBox(height: 8),
@@ -2141,9 +2257,15 @@ class _SourceRow extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final blue = isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
-    final green =
-        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
+    // Texto e ícone pequeno: tinta legível (≥ 4,5:1 no claro).
+    final blue = sdrTintaLegivel(
+      context,
+      isDark ? AppColors.status.blueDarkMode : AppColors.status.blue,
+    );
+    final green = sdrTintaLegivel(
+      context,
+      isDark ? AppColors.status.greenDarkMode : AppColors.status.green,
+    );
     final convFrac = (source.conversionRate / 100).clamp(0.0, 1.0);
 
     return Padding(
@@ -2182,7 +2304,7 @@ class _SourceRow extends StatelessWidget {
                       '${_int.format(source.totalLeads)} lead${source.totalLeads == 1 ? '' : 's'}'
                       ' · ${_int.format(source.transferred)} transferido${source.transferred == 1 ? '' : 's'}'
                       '${source.averageValue > 0 ? ' · ticket ${_compactMoney.format(source.averageValue)}' : ''}',
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: secondary,
@@ -2245,8 +2367,11 @@ class _BadgedToolbarAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final tone =
-        isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple;
+    // Selo com número branco em cima: fundo na tinta legível.
+    final tone = sdrTintaLegivel(
+      context,
+      isDark ? AppColors.status.purpleDarkMode : AppColors.status.purple,
+    );
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -2295,30 +2420,38 @@ class _DeniedView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Padding(
-      padding: const EdgeInsets.all(28),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.lock, size: 38, color: secondary),
-            const SizedBox(height: 12),
-            Text(
-              'Você não tem acesso ao SDR com IA.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
+    // Texto da cerca de verdade (sdr-01): o Dash SDR lê o CRM — módulo
+    // `kanban_management` + `kanban:view_all_teams`. Rola em paisagem com
+    // fonte grande em vez de estourar.
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(28),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(LucideIcons.lock, size: 38, color: secondary),
+              const SizedBox(height: 12),
+              Text(
+                'Você não tem acesso ao Dash SDR',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: ThemeHelpers.textColor(context),
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Solicite ao administrador o módulo de IA no WhatsApp e a permissão de gestão do atendimento.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: secondary, fontSize: 12.5),
-            ),
-          ],
+              const SizedBox(height: 6),
+              Text(
+                'O painel mostra os leads do funil SDR no CRM. Peça ao '
+                'administrador o módulo CRM e a permissão de ver todas as '
+                'equipes.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: secondary, fontSize: 12.5, height: 1.4),
+              ),
+            ],
+          ),
         ),
       ),
     );

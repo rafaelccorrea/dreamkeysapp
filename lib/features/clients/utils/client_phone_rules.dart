@@ -24,9 +24,15 @@ class ClientPhoneDuplicate {
   final String duplicateOf;
   final String duplicateOfLabel;
 
-  /// `getDuplicateClientPhoneMessage` do web.
+  /// `getDuplicateClientPhoneMessage` do web — no meio da frase só a inicial
+  /// vira minúscula: "WhatsApp" mantém a grafia da marca.
   String get message =>
-      '$label não pode ser igual ao ${duplicateOfLabel.toLowerCase()}';
+      '$label não pode ser igual ao ${_inSentence(duplicateOfLabel)}';
+
+  static String _inSentence(String label) {
+    if (label.isEmpty || label.startsWith('WhatsApp')) return label;
+    return label[0].toLowerCase() + label.substring(1);
+  }
 }
 
 class ClientPhoneRules {

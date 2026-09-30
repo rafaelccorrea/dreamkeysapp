@@ -3,17 +3,26 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
+import '../../widgets/sdr_tinta_legivel.dart';
 import '../models/sdr_roulette_rules.dart';
 
 /// Tinta da Roleta de SDRs — a régua aprovada no web ("ficou PERFEITO",
 /// 21/09/2026). Cor só com significado, a mesma em toda a tela:
-///   · verde WhatsApp — NA ROLETA (recebe conversa) e a ação principal;
-///   · âmbar          — FOLGA: pausa com prazo, em curso ou marcada;
-///   · ardósia        — PAUSADO à mão (não é perigo: é estar fora);
-///   · azul info      — LOCAÇÃO, o mesmo azul do selo Locação da lista;
-///   · rosa           — só o destrutivo (cancelar a folga marcada).
-/// Neutros grafite no escuro (#111116/#15151B/#0C0C11/#1C1C23, nunca
-/// navy); no claro, papel branco com fio (ThemeHelpers/AppColors).
+///   · verde     — NA ROLETA (recebe conversa) e a ação principal;
+///   · âmbar     — FOLGA: pausa com prazo, em curso ou marcada;
+///   · ardósia   — PAUSADO à mão (não é perigo: é estar fora);
+///   · azul info — LOCAÇÃO, o mesmo azul do selo Locação da lista;
+///   · vermelho  — só o destrutivo (cancelar a folga marcada) e o erro.
+///
+/// Revisão 30/09/2026: tudo por token da casa (`AppColors`/`ThemeHelpers`),
+/// sem hex solto — o verde é o `status.green` que o WhatsApp do app já usa;
+/// o âmbar do claro parte do `message.warningText` (o `status.warning`
+/// #E6B84C some no branco); neutros saem de `AppColors.background`.
+///
+/// Contraste real no claro: as cores de significado saem por
+/// [sdrTintaLegivel] (≥ 4,5:1 sobre o fill terciário, logo sobre o branco e
+/// a banda) — são texto, ícone pequeno ou fundo de botão com texto branco na
+/// tela toda. No escuro os tokens já passam e voltam como vieram.
 class RoletaTinta {
   RoletaTinta._();
 
@@ -24,34 +33,57 @@ class RoletaTinta {
   // ─── Significado ─────────────────────────────────────────────────────────
 
   static Color verde(BuildContext c) {
-    return escuro(c) ? const Color(0xFF25D366) : const Color(0xFF128C7E);
+    return sdrTintaLegivel(
+      c,
+      escuro(c) ? AppColors.status.greenDarkMode : AppColors.status.green,
+    );
   }
 
-  /// Tinta sobre o verde: branco no claro; no escuro o verde é vivo demais
-  /// para texto branco (mesma escolha do web).
-  static Color tintaSobreVerde(BuildContext c) {
-    return escuro(c) ? const Color(0xFF06210F) : Colors.white;
+  /// Tinta sobre o verde: branco no claro; no escuro o verde é claro demais
+  /// para texto branco (a mesma regra da cor primária da casa).
+  static Color tintaSobreVerde(BuildContext c) => tintaSobreCor(c);
+
+  /// Texto sobre qualquer cor de significado cheia (verde, azul, âmbar):
+  /// branco no claro (as tintas legíveis passam de 4,5:1 com ele); escuro
+  /// no escuro, onde os tons são claros demais para branco.
+  static Color tintaSobreCor(BuildContext c) {
+    return ThemeHelpers.onPrimaryColor(c);
   }
 
   static Color ambar(BuildContext c) {
-    return escuro(c) ? const Color(0xFFF59E0B) : const Color(0xFFB45309);
+    return sdrTintaLegivel(
+      c,
+      escuro(c)
+          ? AppColors.status.warningDarkMode
+          : AppColors.message.warningText,
+    );
   }
 
   static Color ardosia(BuildContext c) {
-    return escuro(c) ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    return sdrTintaLegivel(
+      c,
+      escuro(c) ? AppColors.text.textLightDarkMode : AppColors.text.textLight,
+    );
   }
 
   /// Ardósia da barra de composição (mais baixa que a do texto).
   static Color ardosiaBarra(BuildContext c) {
-    return escuro(c) ? const Color(0xFF34343F) : const Color(0xFFD5DAE1);
+    return ardosia(c).withValues(alpha: escuro(c) ? 0.42 : 0.45);
   }
 
   static Color azul(BuildContext c) {
-    return escuro(c) ? AppColors.status.infoDarkMode : AppColors.status.info;
+    return sdrTintaLegivel(
+      c,
+      escuro(c) ? AppColors.status.infoDarkMode : AppColors.status.info,
+    );
   }
 
-  static Color rosa(BuildContext c) {
-    return escuro(c) ? const Color(0xFFFB7185) : const Color(0xFFE11D48);
+  /// Destrutivo e erro — o vermelho de erro da casa.
+  static Color vermelho(BuildContext c) {
+    return sdrTintaLegivel(
+      c,
+      escuro(c) ? AppColors.status.errorDarkMode : AppColors.status.error,
+    );
   }
 
   static Color daSituacao(BuildContext c, SdrSituation s) {
@@ -74,44 +106,34 @@ class RoletaTinta {
   }
 
   /// Chapa dos cartões e da folha (sheet).
-  static Color painel(BuildContext c) {
-    return escuro(c)
-        ? const Color(0xFF111116)
-        : AppColors.background.cardBackground;
-  }
+  static Color painel(BuildContext c) => ThemeHelpers.cardBackgroundColor(c);
 
   /// Banda: placa de instrumento, rodapé da folha.
   static Color banda(BuildContext c) {
-    return escuro(c) ? const Color(0xFF15151B) : const Color(0xFFF7F7F9);
+    return escuro(c)
+        ? AppColors.background.backgroundSecondaryDarkMode
+        : AppColors.background.backgroundSecondary;
   }
 
   /// Poço: trilho da barra de composição, trilho da chave desligada.
   static Color poco(BuildContext c) {
     return escuro(c)
-        ? const Color(0xFF0C0C11)
-        : AppColors.background.backgroundSecondary;
+        ? AppColors.background.backgroundDarkMode
+        : AppColors.background.backgroundTertiary;
   }
 
   /// Chapa neutra: avatar de iniciais, botão Voltar.
   static Color chapa(BuildContext c) {
     return escuro(c)
-        ? const Color(0xFF1C1C23)
+        ? AppColors.background.backgroundTertiaryDarkMode
         : AppColors.background.backgroundTertiary;
   }
 
-  /// Campo preenchido (datas e motivo da folga).
-  static Color campo(BuildContext c) {
-    return escuro(c)
-        ? const Color(0xFF0C0C11)
-        : AppColors.background.backgroundTertiary;
-  }
+  /// Campo preenchido (datas e motivo da folga): afundado no painel.
+  static Color campo(BuildContext c) => poco(c);
 
-  /// Busca no estilo da caixa do WhatsApp (fill translúcido, sem borda).
-  static Color campoDeBusca(BuildContext c) {
-    return escuro(c)
-        ? Colors.white.withValues(alpha: 0.08)
-        : const Color(0xFF767680).withValues(alpha: 0.14);
-  }
+  /// Busca no estilo da caixa do WhatsApp (fill sólido, sem borda).
+  static Color campoDeBusca(BuildContext c) => chapa(c);
 
   static Color fio(BuildContext c) {
     return escuro(c)
@@ -125,7 +147,7 @@ class RoletaTinta {
         : ThemeHelpers.borderColor(c);
   }
 
-  /// No branco a borda É a separação; no grafite o fio basta.
+  /// No branco a borda É a separação; no escuro o fio basta.
   static Color bordaDoCartao(BuildContext c) {
     return escuro(c) ? fio(c) : ThemeHelpers.borderColor(c);
   }
@@ -137,9 +159,9 @@ class RoletaTinta {
 
   /// Fundo translúcido do cabeçalho de seção preso no topo.
   static Color vidro(BuildContext c) {
-    return escuro(c)
-        ? const Color(0xFF0A0A0F).withValues(alpha: 0.82)
-        : Colors.white.withValues(alpha: 0.9);
+    return ThemeHelpers.backgroundColor(c).withValues(
+      alpha: escuro(c) ? 0.86 : 0.92,
+    );
   }
 }
 
@@ -154,7 +176,7 @@ void mostrarAvisoDaRoleta(BuildContext context, String texto, RoletaTom tom) {
   final (Color cor, IconData icone) = switch (tom) {
     RoletaTom.sucesso => (RoletaTinta.verde(context), LucideIcons.circleCheck),
     RoletaTom.aviso => (RoletaTinta.ambar(context), LucideIcons.triangleAlert),
-    RoletaTom.erro => (RoletaTinta.rosa(context), LucideIcons.circleAlert),
+    RoletaTom.erro => (RoletaTinta.vermelho(context), LucideIcons.circleAlert),
   };
   messenger
     ..hideCurrentSnackBar()

@@ -410,17 +410,22 @@ class PermissionSelection {
 
   bool get _roleLocksUserPerms => _role == 'manager' || _role == 'admin';
 
-  /// Motivo da trava de uma permissão na grade (null = editável).
+  /// Motivo da trava de uma permissão na grade (null = editável). Aparece
+  /// na própria linha, ao lado do cadeado — frase curta que diz o porquê.
   String? lockReason(UserPermission p) {
-    if (ownerLocked) return 'Proprietário';
-    if (isEdit && PermissionRules.adminOnly.contains(p.name) && !elevatedActor) {
-      return 'Só administrador';
+    if (ownerLocked) {
+      return 'Apenas o usuário master pode alterar as permissões do proprietário.';
     }
-    if (_roleLocksUserPerms && _isUserPerm(p)) return 'Obrigatória';
+    if (isEdit && PermissionRules.adminOnly.contains(p.name) && !elevatedActor) {
+      return 'Somente administradores ou o usuário master podem conceder esta permissão.';
+    }
+    if (_roleLocksUserPerms && _isUserPerm(p)) {
+      return 'Obrigatória para este papel';
+    }
     if (selected.contains(p.id) &&
         (PermissionRules.brokerFixed.contains(p.name) ||
             PermissionRules.isSystemRequired(p.name))) {
-      return 'Obrigatória';
+      return 'Obrigatória para todo usuário';
     }
     return null;
   }

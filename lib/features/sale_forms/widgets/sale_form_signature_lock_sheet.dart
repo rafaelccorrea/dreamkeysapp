@@ -3,10 +3,10 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/routes/app_routes.dart';
-import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
+import 'sale_form_tones.dart';
 
 /// Trava por assinatura parada — paridade com `SignatureLockGate` +
 /// `SaleFormSignatureLockModal` do web.
@@ -89,12 +89,10 @@ class _SignatureLockSheetState extends State<_SignatureLockSheet> {
   String? _recusando;
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
-  Color get _green =>
-      _isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
-  Color get _red =>
-      _isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-  Color get _warn =>
-      _isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+  // Tons legíveis também no modo claro; o verde cheio fica para o botão.
+  Color get _green => SaleFormTom.sucesso(context).texto;
+  Color get _red => SaleFormTom.erro(context).texto;
+  SaleFormTom get _warn => SaleFormTom.aviso(context);
 
   void _snack(String msg) {
     if (!mounted) return;
@@ -200,6 +198,8 @@ class _SignatureLockSheetState extends State<_SignatureLockSheet> {
     final t = Theme.of(context).textTheme;
     final muted = ThemeHelpers.textSecondaryColor(context);
     final dias = _status.thresholdDays;
+    final n = _status.items.length;
+    final aviso = _warn;
     return PopScope(
       canPop: false,
       child: Padding(
@@ -213,26 +213,55 @@ class _SignatureLockSheetState extends State<_SignatureLockSheet> {
                   const BorderRadius.vertical(top: Radius.circular(22)),
             ),
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+              padding: EdgeInsets.fromLTRB(20, 20, 20, 24 + mq.padding.bottom),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Row(
                     children: [
-                      Icon(LucideIcons.shieldAlert, size: 20, color: _warn),
-                      const SizedBox(width: 10),
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: aviso.sinal
+                              .withValues(alpha: _isDark ? 0.18 : 0.14),
+                          borderRadius: BorderRadius.circular(13),
+                        ),
+                        child: Icon(
+                          LucideIcons.shieldAlert,
+                          size: 21,
+                          color: aviso.texto,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
                       Expanded(
-                        child: Text(
-                          'Assinatura pendente obrigatória',
-                          style: t.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w900,
-                          ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Assinatura pendente obrigatória',
+                              style: t.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w900,
+                                height: 1.15,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              n == 1
+                                  ? '1 ficha esperando a sua assinatura'
+                                  : '$n fichas esperando a sua assinatura',
+                              style: t.bodySmall?.copyWith(
+                                color: aviso.texto,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 12),
                   Text(
                     'Você tem assinatura de ficha de venda pendente há mais de '
                     '$dias ${dias == 1 ? 'dia' : 'dias'}. Para continuar '
@@ -258,11 +287,25 @@ class _SignatureLockSheetState extends State<_SignatureLockSheet> {
     final recusando = _recusando == item.saleFormId;
     final ocupado = _verificando || _recusando != null;
     final max = _status.maxNotifications;
-    final tentativa = max > 0
-        ? '${item.notificationCount > max ? max : item.notificationCount}/$max'
-        : '${item.notificationCount}';
+    final vistos =
+        item.notificationCount > max ? max : item.notificationCount;
+    final tentativa =
+        max > 0 ? '$vistos de $max' : '${item.notificationCount}';
+    final fill = SaleFormTom.verdeDeConfirmar();
+    final erro = SaleFormTom.erro(context);
+    // Botões secundários: contorno com a cor do significado (verde = já
+    // assinei, vermelho = recusar, neutro = abrir a ficha).
+    ButtonStyle contorno(Color cor) => OutlinedButton.styleFrom(
+          foregroundColor: cor,
+          side: BorderSide(color: cor.withValues(alpha: 0.45)),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          textStyle: const TextStyle(fontWeight: FontWeight.w800),
+        );
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(vertical: 14),
       decoration: BoxDecoration(
         border: Border(
           top: BorderSide(color: ThemeHelpers.borderLightColor(context)),
@@ -275,25 +318,41 @@ class _SignatureLockSheetState extends State<_SignatureLockSheet> {
             children: [
               Expanded(
                 child: Text(
-                  'Ficha ${item.formNumber}',
+                  item.formNumber.isEmpty
+                      ? 'Ficha sem número'
+                      : 'Ficha ${item.formNumber}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: t.bodyLarge?.copyWith(fontWeight: FontWeight.w900),
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
-                item.daysPending == 1
-                    ? 'há 1 dia'
-                    : 'há ${item.daysPending} dias',
-                style: t.labelMedium?.copyWith(
-                  color: _red,
-                  fontWeight: FontWeight.w900,
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: erro.sinal.withValues(alpha: _isDark ? 0.18 : 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(LucideIcons.hourglass, size: 12, color: _red),
+                    const SizedBox(width: 4),
+                    Text(
+                      item.daysPending == 1
+                          ? 'há 1 dia'
+                          : 'há ${item.daysPending} dias',
+                      style: t.labelMedium?.copyWith(
+                        color: _red,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: 4),
           Text(
             'Aviso $tentativa'
             '${item.signerEmail != null ? ' · ${item.signerEmail}' : ''}',
@@ -301,20 +360,35 @@ class _SignatureLockSheetState extends State<_SignatureLockSheet> {
             overflow: TextOverflow.ellipsis,
             style: t.labelSmall?.copyWith(color: muted),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
             child: link != null
                 ? FilledButton.icon(
                     onPressed: ocupado ? null : () => _assinar(item),
                     icon: const Icon(LucideIcons.penLine, size: 17),
-                    label: const Text('Assinar no Autentique'),
+                    label: const FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        'Assinar agora',
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
+                    ),
                     style: FilledButton.styleFrom(
-                      backgroundColor: _green,
+                      backgroundColor: fill,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      disabledBackgroundColor: fill.withValues(alpha: 0.35),
+                      disabledForegroundColor:
+                          Colors.white.withValues(alpha: 0.85),
+                      minimumSize: const Size(0, 50),
+                      elevation: 0,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
+                      ),
+                      textStyle: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
                   )
@@ -322,32 +396,48 @@ class _SignatureLockSheetState extends State<_SignatureLockSheet> {
                     onPressed: ocupado ? null : () => _abrirFicha(item),
                     icon: const Icon(LucideIcons.fileText, size: 17),
                     label: const Text('Abrir a ficha'),
+                    style: contorno(ThemeHelpers.textColor(context)),
                   ),
           ),
-          const SizedBox(height: 8),
+          if (link != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Abre o Autentique fora do app. Depois, toque em "Já assinei".',
+              style: t.labelSmall?.copyWith(color: muted, height: 1.35),
+            ),
+          ],
+          const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
-                child: OutlinedButton(
+                child: OutlinedButton.icon(
                   onPressed: ocupado ? null : () => _jaAssinei(item),
-                  child: FittedBox(
+                  icon: const Icon(LucideIcons.checkCheck, size: 16),
+                  label: FittedBox(
                     fit: BoxFit.scaleDown,
-                    child: Text(_verificando ? 'Verificando…' : 'Já assinei'),
+                    child: Text(
+                      _verificando ? 'Verificando…' : 'Já assinei',
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
                   ),
+                  style: contorno(_green),
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: OutlinedButton(
+                child: OutlinedButton.icon(
                   onPressed: ocupado ? null : () => _recusar(item),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: _red,
-                    side: BorderSide(color: _red.withValues(alpha: 0.45)),
-                  ),
-                  child: FittedBox(
+                  icon: const Icon(LucideIcons.ban, size: 16),
+                  label: FittedBox(
                     fit: BoxFit.scaleDown,
-                    child: Text(recusando ? 'Registrando…' : 'Recusar'),
+                    child: Text(
+                      recusando ? 'Registrando…' : 'Recusar',
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
                   ),
+                  style: contorno(_red),
                 ),
               ),
             ],
@@ -380,6 +470,7 @@ class _RecusaDialogState extends State<_RecusaDialog> {
   Widget build(BuildContext context) {
     final ok = _c.text.trim().length >= 10;
     return AlertDialog(
+      backgroundColor: ThemeHelpers.cardBackgroundColor(context),
       title: Text('Recusar a assinatura da ficha ${widget.formNumber}?'),
       content: SingleChildScrollView(
         child: Column(
@@ -408,7 +499,6 @@ class _RecusaDialogState extends State<_RecusaDialog> {
                 hintText: 'Por que você não quer assinar esta ficha?',
                 helperText: 'Mínimo de 10 caracteres.',
                 alignLabelWithHint: true,
-                border: OutlineInputBorder(),
               ),
             ),
           ],

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -61,6 +62,11 @@ class SdrRoulettePage extends StatefulWidget {
 class _SdrRoulettePageState extends State<SdrRoulettePage> {
   static const double _kPadH = 16;
 
+  /// Largura máxima do conteúdo em tablet/paisagem: além disso os cartões
+  /// esticariam de ponta a ponta. A placa (banda) continua de borda a borda;
+  /// só o recuo cresce.
+  static const double _kLarguraMax = 760;
+
   /// Respiro final: o botão flutuante do chat (56px a 80px do fundo).
   static const double _kPadBottom = 96;
 
@@ -80,6 +86,10 @@ class _SdrRoulettePageState extends State<SdrRoulettePage> {
   final Set<String> _alternando = <String>{};
   final Set<String> _marcando = <String>{};
   bool _folhaAberta = false;
+
+  /// Recuo lateral do conteúdo — 16 no celular; em tela larga, o que centra
+  /// uma coluna de [_kLarguraMax]. Recalculado a cada build.
+  double _recuo = _kPadH;
 
   @override
   void initState() {
@@ -244,6 +254,8 @@ class _SdrRoulettePageState extends State<SdrRoulettePage> {
 
   @override
   Widget build(BuildContext context) {
+    final largura = MediaQuery.sizeOf(context).width;
+    _recuo = math.max(_kPadH, (largura - _kLarguraMax) / 2);
     return AppScaffold(
       title: 'WhatsApp',
       showBottomNavigation: false,
@@ -372,6 +384,7 @@ class _SdrRoulettePageState extends State<SdrRoulettePage> {
           deLocacao: nLocacao,
           mostrarLocacao: marcacaoDisponivel,
           quemRecebe: naRoleta,
+          recuo: _recuo,
         ),
       ),
       SliverToBoxAdapter(child: _ferragens(context, filtros, filtro)),
@@ -392,8 +405,16 @@ class _SdrRoulettePageState extends State<SdrRoulettePage> {
             icone: LucideIcons.userRoundSearch,
             titulo: 'Ninguém com esse filtro',
             texto: _busca.trim().isNotEmpty
-                ? 'Nenhum SDR com "${_busca.trim()}".'
-                : 'Troque o filtro acima.',
+                ? 'Nenhum SDR com "${_busca.trim()}" neste filtro.'
+                : 'Nenhum SDR está nesta situação agora.',
+            acao: 'Mostrar todos',
+            onAcao: () {
+              _buscaCtrl.clear();
+              setState(() {
+                _busca = '';
+                _filtro = SdrRouletteFilter.todos;
+              });
+            },
           ),
         )
       else
@@ -408,7 +429,9 @@ class _SdrRoulettePageState extends State<SdrRoulettePage> {
             marcacaoDisponivel: marcacaoDisponivel,
             agora: agora,
           ),
-      SliverToBoxAdapter(child: _rodape(context)),
+      SliverToBoxAdapter(
+        child: _rodape(context, marcacaoDisponivel: marcacaoDisponivel),
+      ),
       SliverToBoxAdapter(
         child: SizedBox(
           height: _kPadBottom + MediaQuery.paddingOf(context).bottom,
@@ -423,7 +446,7 @@ class _SdrRoulettePageState extends State<SdrRoulettePage> {
   Widget _cabecalho(BuildContext context, int total) {
     final secundario = RoletaTinta.textoSecundario(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(_kPadH, 6, _kPadH, 14),
+      padding: EdgeInsets.fromLTRB(_recuo, 6, _recuo, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -478,7 +501,7 @@ class _SdrRoulettePageState extends State<SdrRoulettePage> {
     SdrRouletteFilter ativo,
   ) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(_kPadH, 14, _kPadH, 0),
+      padding: EdgeInsets.fromLTRB(_recuo, 14, _recuo, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -612,10 +635,11 @@ class _SdrRoulettePageState extends State<SdrRoulettePage> {
             titulo: titulo,
             n: itens.length,
             cor: RoletaTinta.daSituacao(context, situacao),
+            recuo: _recuo + 2,
           ),
         ),
         SliverPadding(
-          padding: EdgeInsets.fromLTRB(_kPadH, 0, _kPadH, ultima ? 0 : 6),
+          padding: EdgeInsets.fromLTRB(_recuo, 0, _recuo, ultima ? 0 : 6),
           sliver: SliverList.builder(
             itemCount: itens.length,
             itemBuilder: (context, i) {
@@ -642,15 +666,19 @@ class _SdrRoulettePageState extends State<SdrRoulettePage> {
     );
   }
 
+  /// Vazio que ensina: o que aparece aqui e, quando há, o caminho de volta
+  /// (botão neutro — não é ação de risco nem de confirmação).
   Widget _vazio(
     BuildContext context, {
     required IconData icone,
     required String titulo,
     required String texto,
+    String? acao,
+    VoidCallback? onAcao,
   }) {
     final secundario = RoletaTinta.textoSecundario(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(28, 40, 28, 12),
+      padding: EdgeInsets.fromLTRB(_recuo + 12, 40, _recuo + 12, 12),
       child: Column(
         children: [
           Icon(icone, size: 30, color: secundario.withValues(alpha: 0.6)),
@@ -670,34 +698,72 @@ class _SdrRoulettePageState extends State<SdrRoulettePage> {
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 12.5, height: 1.4, color: secundario),
           ),
+          if (acao != null && onAcao != null) ...[
+            const SizedBox(height: 14),
+            OutlinedButton.icon(
+              onPressed: onAcao,
+              icon: const Icon(LucideIcons.listRestart, size: 16),
+              label: Text(
+                acao,
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.ellipsis,
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: RoletaTinta.texto(context),
+                side: BorderSide(color: RoletaTinta.fioForte(context)),
+                minimumSize: const Size(0, 40),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                textStyle: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(11),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
 
-  /// Rodapé informativo, flush (sem caixa).
-  Widget _rodape(BuildContext context) {
+  /// Rodapé flush (sem caixa) que ensina a ler a tela: o que a chave faz, o
+  /// que é "Só locação" (quando o servidor tem a marcação) e a regra da casa.
+  /// Quem mexe todo dia não precisa segurar o dedo para ler o tooltip.
+  Widget _rodape(BuildContext context, {required bool marcacaoDisponivel}) {
     final secundario = RoletaTinta.textoSecundario(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(_kPadH, 20, _kPadH, 0),
+      padding: EdgeInsets.fromLTRB(_recuo, 20, _recuo, 0),
       child: Container(
         padding: const EdgeInsets.only(top: 12),
         decoration: BoxDecoration(
           border: Border(top: BorderSide(color: RoletaTinta.fio(context))),
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 1.5),
-              child: Icon(LucideIcons.info, size: 14, color: secundario),
+            _LinhaDaLegenda(
+              icone: LucideIcons.toggleRight,
+              cor: RoletaTinta.verde(context),
+              termo: 'Chave ligada',
+              texto: ': recebe as conversas que chegam na fila. Desligada: '
+                  'fica fora da roleta até alguém religar.',
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                SdrRouletteRules.rodape,
-                style: TextStyle(fontSize: 11.5, height: 1.45, color: secundario),
+            if (marcacaoDisponivel)
+              _LinhaDaLegenda(
+                icone: LucideIcons.keyRound,
+                cor: RoletaTinta.azul(context),
+                termo: 'Só locação',
+                texto: ': recebe apenas conversas de locação, com o card no '
+                    'funil de locação.',
               ),
+            _LinhaDaLegenda(
+              icone: LucideIcons.info,
+              cor: secundario,
+              texto: SdrRouletteRules.rodape,
+              ultima: true,
             ),
           ],
         ),
@@ -710,180 +776,209 @@ class _SdrRoulettePageState extends State<SdrRoulettePage> {
   /// Esqueleto fiel ao layout: cabeçalho, placa (manchete, pilha, barra,
   /// leituras), busca, filtros, cabeçalho de seção e cartões.
   Widget _esqueleto(BuildContext context) {
+    // Em tela larga o esqueleto ocupa a mesma coluna central da lista.
     return SingleChildScrollView(
       physics: const NeverScrollableScrollPhysics(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(_kPadH, 8, _kPadH, 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    SkeletonBox(width: 18, height: 18, borderRadius: 5),
-                    SizedBox(width: 8),
-                    Flexible(
-                      child: SkeletonText(
-                        width: 190,
-                        height: 17,
-                        borderRadius: 5,
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(height: 7),
-                Padding(
-                  padding: EdgeInsets.only(left: 26),
-                  child: FractionallySizedBox(
-                    widthFactor: 0.8,
-                    child: SkeletonText(height: 11, borderRadius: 4),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-            decoration: BoxDecoration(
-              color: RoletaTinta.banda(context),
-              border: Border(
-                top: BorderSide(color: RoletaTinta.fio(context)),
-                bottom: BorderSide(color: RoletaTinta.fio(context)),
-              ),
-            ),
-            child: const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    SkeletonBox(width: 40, height: 34, borderRadius: 8),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          FractionallySizedBox(
-                            widthFactor: 0.7,
-                            child: SkeletonText(height: 13, borderRadius: 4),
-                          ),
-                          SizedBox(height: 6),
-                          FractionallySizedBox(
-                            widthFactor: 0.8,
-                            child: SkeletonText(height: 10, borderRadius: 4),
-                          ),
-                        ],
-                      ),
-                    ),
-                    SizedBox(width: 8),
-                    SkeletonBox(width: 30, height: 30, borderRadius: 999),
-                    SizedBox(width: 4),
-                    SkeletonBox(width: 30, height: 30, borderRadius: 999),
-                    SizedBox(width: 4),
-                    SkeletonBox(width: 30, height: 30, borderRadius: 999),
-                  ],
-                ),
-                SizedBox(height: 14),
-                SkeletonBox(width: double.infinity, height: 6, borderRadius: 999),
-                SizedBox(height: 10),
-                Wrap(
-                  spacing: 14,
-                  runSpacing: 6,
-                  children: [
-                    SkeletonText(width: 74, height: 11, borderRadius: 4),
-                    SkeletonText(width: 70, height: 11, borderRadius: 4),
-                    SkeletonText(width: 80, height: 11, borderRadius: 4),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(_kPadH, 14, _kPadH, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SkeletonBox(height: 42, borderRadius: 12),
-                SizedBox(height: 16),
-                Wrap(
-                  spacing: 18,
-                  runSpacing: 8,
-                  children: [
-                    SkeletonText(width: 52, height: 12, borderRadius: 4),
-                    SkeletonText(width: 74, height: 12, borderRadius: 4),
-                    SkeletonText(width: 70, height: 12, borderRadius: 4),
-                    SkeletonText(width: 68, height: 12, borderRadius: 4),
-                  ],
-                ),
-                SizedBox(height: 12),
-              ],
-            ),
-          ),
-          Container(
-            height: 1,
-            margin: const EdgeInsets.symmetric(horizontal: _kPadH),
-            color: RoletaTinta.fioForte(context),
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(18, 16, 18, 10),
-            child: Row(
-              children: [
-                SkeletonBox(width: 7, height: 7, borderRadius: 999),
-                SizedBox(width: 7),
-                SkeletonText(width: 110, height: 10, borderRadius: 4),
-              ],
-            ),
-          ),
-          for (var i = 0; i < 4; i++)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(_kPadH, 0, _kPadH, 8),
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-                decoration: BoxDecoration(
-                  color: RoletaTinta.painel(context),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: RoletaTinta.bordaDoCartao(context)),
-                  boxShadow: RoletaTinta.sombraDoCartao(context),
-                ),
-                child: const Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SkeletonBox(width: 38, height: 38, borderRadius: 999),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          FractionallySizedBox(
-                            widthFactor: 0.62,
-                            child: SkeletonText(height: 13, borderRadius: 4),
-                          ),
-                          SizedBox(height: 7),
-                          FractionallySizedBox(
-                            widthFactor: 0.4,
-                            child: SkeletonText(height: 10, borderRadius: 4),
-                          ),
-                          SizedBox(height: 12),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              SkeletonBox(width: 78, height: 30, borderRadius: 8),
-                              SkeletonBox(width: 108, height: 30, borderRadius: 8),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    SizedBox(width: 10),
-                    SkeletonBox(width: 44, height: 26, borderRadius: 999),
-                  ],
-                ),
-              ),
-            ),
-        ],
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: _kLarguraMax + 2 * _kPadH),
+          child: _esqueletoDaColuna(context),
+        ),
       ),
+    );
+  }
+
+  Widget _esqueletoDaColuna(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(_kPadH, 8, _kPadH, 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  SkeletonBox(width: 18, height: 18, borderRadius: 5),
+                  SizedBox(width: 8),
+                  Flexible(
+                    child: SkeletonText(
+                      width: 190,
+                      height: 17,
+                      borderRadius: 5,
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 7),
+              Padding(
+                padding: EdgeInsets.only(left: 26),
+                child: FractionallySizedBox(
+                  widthFactor: 0.8,
+                  child: SkeletonText(height: 11, borderRadius: 4),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+          decoration: BoxDecoration(
+            color: RoletaTinta.banda(context),
+            border: Border(
+              top: BorderSide(color: RoletaTinta.fio(context)),
+              bottom: BorderSide(color: RoletaTinta.fio(context)),
+            ),
+          ),
+          child: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  SkeletonBox(width: 40, height: 34, borderRadius: 8),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        FractionallySizedBox(
+                          widthFactor: 0.7,
+                          child: SkeletonText(height: 13, borderRadius: 4),
+                        ),
+                        SizedBox(height: 6),
+                        FractionallySizedBox(
+                          widthFactor: 0.8,
+                          child: SkeletonText(height: 10, borderRadius: 4),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  SkeletonBox(width: 30, height: 30, borderRadius: 999),
+                  SizedBox(width: 4),
+                  SkeletonBox(width: 30, height: 30, borderRadius: 999),
+                  SizedBox(width: 4),
+                  SkeletonBox(width: 30, height: 30, borderRadius: 999),
+                ],
+              ),
+              SizedBox(height: 14),
+              SkeletonBox(width: double.infinity, height: 6, borderRadius: 999),
+              SizedBox(height: 10),
+              Wrap(
+                spacing: 14,
+                runSpacing: 6,
+                children: [
+                  SkeletonText(width: 74, height: 11, borderRadius: 4),
+                  SkeletonText(width: 70, height: 11, borderRadius: 4),
+                  SkeletonText(width: 80, height: 11, borderRadius: 4),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(_kPadH, 14, _kPadH, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SkeletonBox(height: 42, borderRadius: 12),
+              SizedBox(height: 16),
+              Wrap(
+                spacing: 18,
+                runSpacing: 8,
+                children: [
+                  SkeletonText(width: 52, height: 12, borderRadius: 4),
+                  SkeletonText(width: 74, height: 12, borderRadius: 4),
+                  SkeletonText(width: 70, height: 12, borderRadius: 4),
+                  SkeletonText(width: 68, height: 12, borderRadius: 4),
+                ],
+              ),
+              SizedBox(height: 12),
+            ],
+          ),
+        ),
+        Container(
+          height: 1,
+          margin: const EdgeInsets.symmetric(horizontal: _kPadH),
+          color: RoletaTinta.fioForte(context),
+        ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(18, 16, 18, 10),
+          child: Row(
+            children: [
+              SkeletonBox(width: 7, height: 7, borderRadius: 999),
+              SizedBox(width: 7),
+              SkeletonText(width: 110, height: 10, borderRadius: 4),
+            ],
+          ),
+        ),
+        for (var i = 0; i < 4; i++)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(_kPadH, 0, _kPadH, 8),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+              decoration: BoxDecoration(
+                color: RoletaTinta.painel(context),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: RoletaTinta.bordaDoCartao(context)),
+                boxShadow: RoletaTinta.sombraDoCartao(context),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonBox(width: 38, height: 38, borderRadius: 999),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            FractionallySizedBox(
+                              widthFactor: 0.62,
+                              child: SkeletonText(height: 13, borderRadius: 4),
+                            ),
+                            SizedBox(height: 7),
+                            FractionallySizedBox(
+                              widthFactor: 0.4,
+                              child: SkeletonText(height: 10, borderRadius: 4),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                      SizedBox(
+                        width: 60,
+                        child: Column(
+                          children: [
+                            SkeletonBox(width: 44, height: 26, borderRadius: 999),
+                            SizedBox(height: 5),
+                            SkeletonText(width: 36, height: 8, borderRadius: 3),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Padding(
+                    padding: EdgeInsets.only(
+                      left: MediaQuery.sizeOf(context).width < 360 ? 0 : 50,
+                    ),
+                    child: const Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        SkeletonBox(width: 96, height: 36, borderRadius: 8),
+                        SkeletonBox(width: 118, height: 36, borderRadius: 8),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -987,11 +1082,13 @@ class _CabecaDaSecao extends StatelessWidget {
   final String titulo;
   final int n;
   final Color cor;
+  final double recuo;
 
   const _CabecaDaSecao({
     required this.titulo,
     required this.n,
     required this.cor,
+    required this.recuo,
   });
 
   @override
@@ -1009,7 +1106,7 @@ class _CabecaDaSecao extends StatelessWidget {
         child: ColoredBox(
           color: RoletaTinta.vidro(context),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 16, 18, 10),
+            padding: EdgeInsets.fromLTRB(recuo, 16, recuo, 10),
             child: Row(
               children: [
                 Container(
@@ -1039,6 +1136,64 @@ class _CabecaDaSecao extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Linha da legenda do rodapé: ícone na cor do significado + termo forte +
+/// explicação apagada, quebrando em quantas linhas precisar.
+class _LinhaDaLegenda extends StatelessWidget {
+  final IconData icone;
+  final Color cor;
+  final String? termo;
+  final String texto;
+  final bool ultima;
+
+  const _LinhaDaLegenda({
+    required this.icone,
+    required this.cor,
+    required this.texto,
+    this.termo,
+    this.ultima = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = termo;
+    return Padding(
+      padding: EdgeInsets.only(bottom: ultima ? 0 : 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1.5),
+            child: Icon(icone, size: 14, color: cor),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  if (t != null)
+                    TextSpan(
+                      text: t,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: RoletaTinta.texto(context),
+                      ),
+                    ),
+                  TextSpan(text: texto),
+                ],
+              ),
+              style: TextStyle(
+                fontSize: 11.5,
+                height: 1.45,
+                color: RoletaTinta.textoSecundario(context),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -9,6 +9,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/cep_service.dart';
+import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../services/company_admin_service.dart';
@@ -35,7 +36,10 @@ class EditCompanyPage extends StatefulWidget {
 }
 
 class _EditCompanyPageState extends State<EditCompanyPage> {
-  static const double _padH = 20;
+  static const double _padH = 16;
+
+  /// Em tela larga a coluna do formulário para aqui e centraliza.
+  static const double _maxContentWidth = 720;
   static const int _logoMaxBytes = 5 * 1024 * 1024;
   static const int _watermarkMaxBytes = 2 * 1024 * 1024;
 
@@ -55,6 +59,9 @@ class _EditCompanyPageState extends State<EditCompanyPage> {
 
   bool _loading = true;
   String? _error;
+  // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
+  // "sem permissão" de "servidor fora do ar".
+  int _errorStatus = 0;
   bool _saving = false;
   bool _searchingCep = false;
   bool _geocoding = false;
@@ -121,6 +128,7 @@ class _EditCompanyPageState extends State<EditCompanyPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorStatus = 0;
     });
     final res = await CompanyAdminService.instance.getCompany(widget.companyId);
     if (!mounted) return;
@@ -128,6 +136,7 @@ class _EditCompanyPageState extends State<EditCompanyPage> {
       setState(() {
         _loading = false;
         _error = res.message ?? 'Erro ao carregar empresa';
+        _errorStatus = res.statusCode;
       });
       return;
     }
@@ -497,6 +506,7 @@ class _EditCompanyPageState extends State<EditCompanyPage> {
   }) {
     return showModalBottomSheet<bool>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: ThemeHelpers.cardBackgroundColor(context),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -504,69 +514,99 @@ class _EditCompanyPageState extends State<EditCompanyPage> {
       builder: (ctx) {
         final theme = Theme.of(ctx);
         final tone = destructive ? _danger : _confirm;
+        final mq = MediaQuery.of(ctx);
         return SafeArea(
           top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  title,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    color: ThemeHelpers.textColor(ctx),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  message,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: ThemeHelpers.textSecondaryColor(ctx),
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.of(ctx).pop(false),
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(0, 48),
-                          foregroundColor: ThemeHelpers.textSecondaryColor(ctx),
-                          side: BorderSide(
-                            color: ThemeHelpers.borderColor(ctx),
+          child: ConstrainedBox(
+            // Teto: em landscape/tela baixa o texto rola e os botões ficam.
+            constraints: BoxConstraints(maxHeight: mq.size.height * 0.88),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(_padH, 20, _padH, 14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            title,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              color: ThemeHelpers.textColor(ctx),
+                            ),
                           ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(13),
+                          const SizedBox(height: 6),
+                          Text(
+                            message,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: ThemeHelpers.textSecondaryColor(ctx),
+                              height: 1.4,
+                            ),
                           ),
-                        ),
-                        child: const Text('Cancelar'),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: () => Navigator.of(ctx).pop(true),
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size(0, 48),
-                          backgroundColor: tone,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(13),
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.of(ctx).pop(false),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(0, 48),
+                            foregroundColor:
+                                ThemeHelpers.textSecondaryColor(ctx),
+                            side: BorderSide(
+                              color: ThemeHelpers.borderColor(ctx),
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(13),
+                            ),
+                          ),
+                          child: const FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              'Cancelar',
+                              maxLines: 1,
+                              softWrap: false,
+                              style: TextStyle(fontWeight: FontWeight.w800),
+                            ),
                           ),
                         ),
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Text(confirmLabel, maxLines: 1),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: () => Navigator.of(ctx).pop(true),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(0, 48),
+                            backgroundColor: tone,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(13),
+                            ),
+                          ),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              confirmLabel,
+                              maxLines: 1,
+                              softWrap: false,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -591,6 +631,11 @@ class _EditCompanyPageState extends State<EditCompanyPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Teclado aberto em tela baixa (landscape): a barra sai para o campo em
+    // foco caber; volta sozinha quando o teclado fecha.
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final hideBar = keyboardOpen && MediaQuery.sizeOf(context).height < 520;
+
     return PopScope(
       canPop: !_dirty || _saving,
       onPopInvokedWithResult: (didPop, _) {
@@ -616,7 +661,7 @@ class _EditCompanyPageState extends State<EditCompanyPage> {
                       key: const ValueKey('form'),
                       children: [
                         Expanded(child: _buildForm()),
-                        _buildSaveBar(),
+                        if (!hideBar) _buildSaveBar(),
                       ],
                     ),
         ),
@@ -624,71 +669,111 @@ class _EditCompanyPageState extends State<EditCompanyPage> {
     );
   }
 
+  /// Tablet/landscape largo: a coluna para em [_maxContentWidth] e
+  /// centraliza — campo de 1000dp não é formulário.
+  EdgeInsets _pagePadding({double top = 0, double bottom = 0}) {
+    final w = MediaQuery.sizeOf(context).width;
+    final side = w > _maxContentWidth ? (w - _maxContentWidth) / 2 : 0.0;
+    return EdgeInsets.fromLTRB(side, top, side, bottom);
+  }
+
+  /// Espelha o formulário real: ficha da empresa no topo, capítulo 01 com a
+  /// caixa da logo e os campos, capítulo 02 com endereço. Tudo numa coluna
+  /// alinhada à esquerda (filho direto de ListView esticaria cada linha).
   Widget _buildSkeleton() => ListView(
         physics: const NeverScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(_padH, 18, _padH, 16),
+        padding: _pagePadding(top: 18, bottom: 16) +
+            const EdgeInsets.symmetric(horizontal: _padH),
         children: const [
-          SkeletonText(width: 150, height: 10),
-          SizedBox(height: 10),
-          SkeletonText(width: 200, height: 26),
-          SizedBox(height: 8),
-          SkeletonText(width: 260, height: 12),
-          SizedBox(height: 28),
-          SkeletonText(width: 110, height: 10),
-          SizedBox(height: 14),
-          Row(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SkeletonBox(width: 72, height: 72, borderRadius: 16),
-              SizedBox(width: 14),
-              Expanded(child: SkeletonBox(height: 44, borderRadius: 12)),
+              Row(
+                children: [
+                  SkeletonText(width: 140, height: 10),
+                  Spacer(),
+                  SkeletonBox(width: 84, height: 22, borderRadius: 999),
+                ],
+              ),
+              SizedBox(height: 12),
+              SkeletonText(width: 200, height: 24),
+              SizedBox(height: 8),
+              SkeletonText(width: 230, height: 12),
+              SizedBox(height: 8),
+              SkeletonText(width: 260, height: 11),
+              SizedBox(height: 30),
+              Row(
+                children: [
+                  SkeletonText(width: 24, height: 20),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SkeletonText(width: 100, height: 10),
+                        SizedBox(height: 6),
+                        SkeletonText(width: 150, height: 16),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 16),
+              Row(
+                children: [
+                  SkeletonBox(width: 72, height: 72, borderRadius: 16),
+                  SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SkeletonText(width: 170, height: 11),
+                        SizedBox(height: 10),
+                        SkeletonBox(width: 130, height: 40, borderRadius: 12),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 16),
+              SkeletonBox(height: 56, borderRadius: 12),
+              SizedBox(height: 12),
+              SkeletonBox(height: 56, borderRadius: 12),
+              SizedBox(height: 12),
+              SkeletonBox(height: 56, borderRadius: 12),
+              SizedBox(height: 30),
+              Row(
+                children: [
+                  SkeletonText(width: 24, height: 20),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SkeletonText(width: 100, height: 10),
+                        SizedBox(height: 6),
+                        SkeletonText(width: 170, height: 16),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 16),
+              SkeletonBox(height: 56, borderRadius: 12),
+              SizedBox(height: 12),
+              SkeletonBox(height: 56, borderRadius: 12),
             ],
           ),
-          SizedBox(height: 14),
-          SkeletonBox(height: 56, borderRadius: 12),
-          SizedBox(height: 12),
-          SkeletonBox(height: 56, borderRadius: 12),
-          SizedBox(height: 12),
-          SkeletonBox(height: 56, borderRadius: 12),
-          SizedBox(height: 28),
-          SkeletonText(width: 110, height: 10),
-          SizedBox(height: 14),
-          SkeletonBox(height: 56, borderRadius: 12),
-          SizedBox(height: 12),
-          SkeletonBox(height: 56, borderRadius: 12),
         ],
       );
 
+  /// Erro com a causa real (permissão ≠ servidor fora ≠ sem internet) e
+  /// "Tentar de novo" só quando repetir pode dar certo.
   Widget _buildError() {
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.building2, size: 34, color: _danger),
-            const SizedBox(height: 12),
-            Text(
-              _error ?? 'Erro ao carregar empresa',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: ThemeHelpers.textColor(context),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 14),
-            OutlinedButton.icon(
-              onPressed: _load,
-              icon: const Icon(LucideIcons.rotateCw, size: 16),
-              label: const Text('Tentar novamente'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: ThemeHelpers.textSecondaryColor(context),
-                side: BorderSide(color: ThemeHelpers.borderColor(context)),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return AppErrorState.fromApi(
+      message: _error,
+      statusCode: _errorStatus,
+      onRetry: _load,
     );
   }
 
@@ -698,248 +783,263 @@ class _EditCompanyPageState extends State<EditCompanyPage> {
       autovalidateMode: _autoValidate
           ? AutovalidateMode.onUserInteraction
           : AutovalidateMode.disabled,
-      child: ListView(
-        padding: const EdgeInsets.only(top: 16, bottom: 28),
-        children: [
-          _buildMasthead(),
-          const SizedBox(height: 22),
-          _separator(),
-          const SizedBox(height: 20),
-          _sectionHeader(
-            index: '01',
-            eyebrow: 'IDENTIFICAÇÃO',
-            title: 'Dados da empresa',
-            caption:
-                'Dados cadastrais, logo e contato exibidos no CRM e no site público.',
-          ),
-          const SizedBox(height: 16),
-          _padded(_buildLogoRow()),
-          const SizedBox(height: 16),
-          _padded(
-            _pair(
-              _field(
-                controller: _name,
-                label: 'Nome da empresa *',
-                hint: 'Ex: Intellisys Filial São Paulo',
-                icon: LucideIcons.building2,
-                validator: (v) =>
-                    _required(v, 'Nome da empresa é obrigatório'),
-              ),
-              _field(
-                controller: _cnpj,
-                label: 'CNPJ *',
-                hint: '00.000.000/0000-00',
-                icon: LucideIcons.idCard,
-                inputFormatters: [_CnpjFormatter()],
-                textCapitalization: TextCapitalization.characters,
-                validator: (v) {
-                  if ((v ?? '').trim().isEmpty) return 'CNPJ é obrigatório';
-                  if (!_validCnpj(v!)) return 'CNPJ inválido';
-                  return null;
-                },
-              ),
+      // Coluna inteira construída (não ListView preguiçoso): campo fora
+      // da tela continua registrado no Form e entra na validação do
+      // Salvar — antes, obrigatório rolado para longe passava em branco.
+      child: SingleChildScrollView(
+        padding: _pagePadding(top: 16, bottom: 28),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildMasthead(),
+            const SizedBox(height: 22),
+            _separator(),
+            const SizedBox(height: 20),
+            _sectionHeader(
+              index: '01',
+              eyebrow: 'IDENTIFICAÇÃO',
+              title: 'Dados da empresa',
+              caption:
+                  'Dados cadastrais, logo e contato exibidos no CRM e no site público.',
             ),
-          ),
-          const SizedBox(height: 12),
-          _padded(
-            _field(
-              controller: _corporateName,
-              label: 'Razão social *',
-              hint: 'Ex: Intellisys Imóveis Ltda',
-              icon: LucideIcons.fileText,
-              validator: (v) => _required(v, 'Razão social é obrigatória'),
-            ),
-          ),
-          const SizedBox(height: 12),
-          _padded(
-            _pair(
-              _field(
-                controller: _email,
-                label: 'E-mail',
-                hint: 'contato@empresa.com.br',
-                icon: LucideIcons.mail,
-                keyboardType: TextInputType.emailAddress,
-                validator: (v) {
-                  final s = (v ?? '').trim();
-                  if (s.isEmpty) return null;
-                  return _emailRe.hasMatch(s) ? null : 'E-mail inválido';
-                },
-              ),
-              _field(
-                controller: _phone,
-                label: 'Telefone',
-                hint: '(00) 00000-0000',
-                icon: LucideIcons.phone,
-                keyboardType: TextInputType.phone,
-                inputFormatters: [_PhoneFormatter()],
-                validator: (v) {
-                  final d = (v ?? '').replaceAll(RegExp(r'\D'), '');
-                  if (d.isEmpty) return null;
-                  return (d.length == 10 || d.length == 11)
-                      ? null
-                      : 'Telefone deve estar no formato (XX) XXXXX-XXXX';
-                },
+            const SizedBox(height: 16),
+            _padded(_buildLogoRow()),
+            const SizedBox(height: 16),
+            _padded(
+              _pair(
+                _field(
+                  controller: _name,
+                  label: 'Nome da empresa *',
+                  hint: 'Ex: Intellisys Filial São Paulo',
+                  icon: LucideIcons.building2,
+                  validator: (v) =>
+                      _required(v, 'Nome da empresa é obrigatório'),
+                ),
+                _field(
+                  controller: _cnpj,
+                  label: 'CNPJ *',
+                  hint: '00.000.000/0000-00',
+                  icon: LucideIcons.idCard,
+                  inputFormatters: [_CnpjFormatter()],
+                  textCapitalization: TextCapitalization.characters,
+                  validator: (v) {
+                    if ((v ?? '').trim().isEmpty) return 'CNPJ é obrigatório';
+                    if (!_validCnpj(v!)) return 'CNPJ inválido';
+                    return null;
+                  },
+                ),
+                minWidth: 460.0,
+                aFlex: 5,
+                bFlex: 4,
               ),
             ),
-          ),
-          const SizedBox(height: 12),
-          _padded(
-            _field(
-              controller: _description,
-              label: 'Descrição',
-              hint: 'Breve apresentação exibida no site público',
-              icon: LucideIcons.alignLeft,
-              maxLines: 3,
-            ),
-          ),
-          const SizedBox(height: 26),
-          _separator(),
-          const SizedBox(height: 20),
-          _sectionHeader(
-            index: '02',
-            eyebrow: 'LOCALIZAÇÃO',
-            title: 'Endereço e coordenadas',
-            caption:
-                'As coordenadas definem onde o check-in por localização é permitido.',
-          ),
-          const SizedBox(height: 16),
-          _padded(
-            _pair(
+            const SizedBox(height: 12),
+            _padded(
               _field(
-                controller: _zipCode,
-                label: 'CEP *',
-                hint: '00000-000',
-                icon: LucideIcons.mapPin,
-                keyboardType: TextInputType.number,
-                inputFormatters: [_CepFormatter()],
-                onChanged: _onCepChanged,
-                suffix: _searchingCep
-                    ? Padding(
-                        padding: const EdgeInsets.all(14),
-                        child: SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
+                controller: _corporateName,
+                label: 'Razão social *',
+                hint: 'Ex: Intellisys Imóveis Ltda',
+                icon: LucideIcons.fileText,
+                validator: (v) => _required(v, 'Razão social é obrigatória'),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _padded(
+              _pair(
+                _field(
+                  controller: _email,
+                  label: 'E-mail',
+                  hint: 'contato@empresa.com.br',
+                  icon: LucideIcons.mail,
+                  keyboardType: TextInputType.emailAddress,
+                  validator: (v) {
+                    final s = (v ?? '').trim();
+                    if (s.isEmpty) return null;
+                    return _emailRe.hasMatch(s) ? null : 'E-mail inválido';
+                  },
+                ),
+                _field(
+                  controller: _phone,
+                  label: 'Telefone',
+                  hint: '(00) 00000-0000',
+                  icon: LucideIcons.phone,
+                  keyboardType: TextInputType.phone,
+                  inputFormatters: [_PhoneFormatter()],
+                  validator: (v) {
+                    final d = (v ?? '').replaceAll(RegExp(r'\D'), '');
+                    if (d.isEmpty) return null;
+                    return (d.length == 10 || d.length == 11)
+                        ? null
+                        : 'Telefone deve estar no formato (XX) XXXXX-XXXX';
+                  },
+                ),
+                minWidth: 460.0,
+                aFlex: 5,
+                bFlex: 4,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _padded(
+              _field(
+                controller: _description,
+                label: 'Descrição',
+                hint: 'Breve apresentação exibida no site público',
+                icon: LucideIcons.alignLeft,
+                maxLines: 3,
+              ),
+            ),
+            const SizedBox(height: 26),
+            _separator(),
+            const SizedBox(height: 20),
+            _sectionHeader(
+              index: '02',
+              eyebrow: 'LOCALIZAÇÃO',
+              title: 'Endereço e coordenadas',
+              caption:
+                  'As coordenadas definem onde o check-in por localização é permitido.',
+            ),
+            const SizedBox(height: 16),
+            _padded(
+              _pair(
+                _field(
+                  controller: _zipCode,
+                  label: 'CEP *',
+                  hint: '00000-000',
+                  icon: LucideIcons.mapPin,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [_CepFormatter()],
+                  onChanged: _onCepChanged,
+                  suffix: _searchingCep
+                      ? Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: _brand,
+                            ),
+                          ),
+                        )
+                      : IconButton(
+                          tooltip: 'Buscar CEP',
+                          onPressed: () => _searchCep(),
+                          icon: Icon(
+                            LucideIcons.search,
+                            size: 18,
                             color: _brand,
                           ),
                         ),
-                      )
-                    : IconButton(
-                        tooltip: 'Buscar CEP',
-                        onPressed: () => _searchCep(),
-                        icon: Icon(
-                          LucideIcons.search,
-                          size: 18,
-                          color: _brand,
-                        ),
-                      ),
-                validator: (v) => _required(v, 'CEP é obrigatório'),
+                  validator: (v) => _required(v, 'CEP é obrigatório'),
+                ),
+                _field(
+                  controller: _state,
+                  label: 'Estado (UF) *',
+                  hint: 'SP',
+                  icon: LucideIcons.map,
+                  textCapitalization: TextCapitalization.characters,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z]')),
+                    LengthLimitingTextInputFormatter(2),
+                    _UpperCaseFormatter(),
+                  ],
+                  validator: (v) {
+                    final s = (v ?? '').trim();
+                    if (s.isEmpty) return 'Estado é obrigatório';
+                    if (s.length != 2) return 'Use a sigla do estado (ex: SP)';
+                    return null;
+                  },
+                ),
+                aFlex: 3,
+                bFlex: 2,
               ),
+            ),
+            const SizedBox(height: 12),
+            _padded(
               _field(
-                controller: _state,
-                label: 'Estado (UF) *',
-                hint: 'SP',
-                icon: LucideIcons.map,
-                textCapitalization: TextCapitalization.characters,
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z]')),
-                  LengthLimitingTextInputFormatter(2),
-                  _UpperCaseFormatter(),
+                controller: _address,
+                label: 'Endereço *',
+                hint: 'Rua, número e complemento',
+                icon: LucideIcons.house,
+                validator: (v) => _required(v, 'Endereço é obrigatório'),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _padded(
+              _field(
+                controller: _city,
+                label: 'Cidade *',
+                hint: 'Ex: São Paulo',
+                icon: LucideIcons.building,
+                validator: (v) => _required(v, 'Cidade é obrigatória'),
+              ),
+            ),
+            const SizedBox(height: 18),
+            _padded(_subLabel('Coordenadas (check-in)')),
+            const SizedBox(height: 10),
+            _padded(
+              _pair(
+                _field(
+                  controller: _latitude,
+                  label: 'Latitude',
+                  hint: '-23.5505',
+                  icon: LucideIcons.locateFixed,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                    signed: true,
+                  ),
+                  validator: _coordValidator,
+                ),
+                _field(
+                  controller: _longitude,
+                  label: 'Longitude',
+                  hint: '-46.6333',
+                  icon: LucideIcons.compass,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                    signed: true,
+                  ),
+                  validator: _coordValidator,
+                ),
+                forceRow: true,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _padded(
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  _inlineAction(
+                    icon: LucideIcons.mapPinned,
+                    label: 'Buscar pelo endereço',
+                    busy: _geocoding,
+                    onTap: _fetchCoordinates,
+                  ),
+                  _inlineAction(
+                    icon: LucideIcons.locate,
+                    label: 'Usar minha localização',
+                    busy: _locating,
+                    onTap: _fetchCurrentLocation,
+                  ),
                 ],
-                validator: (v) {
-                  final s = (v ?? '').trim();
-                  if (s.isEmpty) return 'Estado é obrigatório';
-                  if (s.length != 2) return 'Use a sigla do estado (ex: SP)';
-                  return null;
-                },
               ),
             ),
-          ),
-          const SizedBox(height: 12),
-          _padded(
-            _field(
-              controller: _address,
-              label: 'Endereço *',
-              hint: 'Rua, número e complemento',
-              icon: LucideIcons.house,
-              validator: (v) => _required(v, 'Endereço é obrigatório'),
+            const SizedBox(height: 26),
+            _separator(),
+            const SizedBox(height: 20),
+            _sectionHeader(
+              index: '03',
+              eyebrow: 'MARCA D\'ÁGUA',
+              title: 'Marca d\'água',
+              caption:
+                  'Imagem aplicada automaticamente nas fotos dos imóveis. PNG de até 2MB.',
             ),
-          ),
-          const SizedBox(height: 12),
-          _padded(
-            _field(
-              controller: _city,
-              label: 'Cidade *',
-              hint: 'Ex: São Paulo',
-              icon: LucideIcons.building,
-              validator: (v) => _required(v, 'Cidade é obrigatória'),
-            ),
-          ),
-          const SizedBox(height: 18),
-          _padded(_subLabel('Coordenadas (check-in)')),
-          const SizedBox(height: 10),
-          _padded(
-            _pair(
-              _field(
-                controller: _latitude,
-                label: 'Latitude',
-                hint: '-23.5505',
-                icon: LucideIcons.locateFixed,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                  signed: true,
-                ),
-                validator: _coordValidator,
-              ),
-              _field(
-                controller: _longitude,
-                label: 'Longitude',
-                hint: '-46.6333',
-                icon: LucideIcons.compass,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                  signed: true,
-                ),
-                validator: _coordValidator,
-              ),
-              forceRow: true,
-            ),
-          ),
-          const SizedBox(height: 12),
-          _padded(
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                _inlineAction(
-                  icon: LucideIcons.mapPinned,
-                  label: 'Buscar pelo endereço',
-                  busy: _geocoding,
-                  onTap: _fetchCoordinates,
-                ),
-                _inlineAction(
-                  icon: LucideIcons.locate,
-                  label: 'Usar minha localização',
-                  busy: _locating,
-                  onTap: _fetchCurrentLocation,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 26),
-          _separator(),
-          const SizedBox(height: 20),
-          _sectionHeader(
-            index: '03',
-            eyebrow: 'MARCA D\'ÁGUA',
-            title: 'Marca d\'água',
-            caption:
-                'Imagem aplicada automaticamente nas fotos dos imóveis. PNG de até 2MB.',
-          ),
-          const SizedBox(height: 16),
-          _padded(_buildWatermarkRow()),
-        ],
+            const SizedBox(height: 16),
+            _padded(_buildWatermarkRow()),
+          ],
+        ),
       ),
     );
   }
@@ -964,12 +1064,21 @@ class _EditCompanyPageState extends State<EditCompanyPage> {
       );
 
   /// Duas colunas quando cabe (largura e escala de fonte); senão empilha.
-  Widget _pair(Widget a, Widget b, {bool forceRow = false}) {
+  /// [minWidth] é a largura da linha a partir da qual os dois campos cabem
+  /// sem cortar o conteúdo (CNPJ e e-mail pedem mais que CEP | UF).
+  Widget _pair(
+    Widget a,
+    Widget b, {
+    bool forceRow = false,
+    double? minWidth,
+    int aFlex = 1,
+    int bFlex = 1,
+  }) {
     final scale = MediaQuery.textScalerOf(context).scale(1);
     return LayoutBuilder(
       builder: (context, box) {
-        final minWidth = forceRow ? 260.0 : 340.0;
-        final twoCols = scale <= 1.3 && box.maxWidth >= minWidth;
+        final threshold = minWidth ?? (forceRow ? 260.0 : 340.0);
+        final twoCols = scale <= 1.3 && box.maxWidth >= threshold;
         if (!twoCols) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -979,63 +1088,99 @@ class _EditCompanyPageState extends State<EditCompanyPage> {
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(child: a),
+            Expanded(flex: aFlex, child: a),
             const SizedBox(width: 12),
-            Expanded(child: b),
+            Expanded(flex: bFlex, child: b),
           ],
         );
       },
     );
   }
 
+  /// Ficha viva da empresa: o título É o nome digitado, com CNPJ e
+  /// cidade/UF logo abaixo, e um selo dizendo se há alteração sem salvar.
   Widget _buildMasthead() {
     final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
     return _padded(
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      ListenableBuilder(
+        listenable: Listenable.merge([_name, _cnpj, _city, _state]),
+        builder: (context, _) {
+          final name = _name.text.trim();
+          final cnpj = _cnpj.text.trim();
+          final place = [
+            _city.text.trim(),
+            _state.text.trim().toUpperCase(),
+          ].where((s) => s.isNotEmpty).join('/');
+          final meta = [
+            if (cnpj.isNotEmpty) 'CNPJ $cnpj',
+            if (place.isNotEmpty) place,
+          ].join('  ·  ');
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(LucideIcons.building2, size: 13, color: _brand),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  'CONFIGURAÇÕES DA EMPRESA',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: _brand,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.8,
-                    fontSize: 10,
+              Row(
+                children: [
+                  Icon(LucideIcons.building2, size: 13, color: _brand),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'FICHA DA EMPRESA',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: _brand,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.8,
+                        fontSize: 10,
+                      ),
+                    ),
                   ),
+                  const SizedBox(width: 8),
+                  _SaveStateChip(dirty: _dirty),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                name.isEmpty ? 'Empresa sem nome' : name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.6,
+                  height: 1.08,
+                  color: name.isEmpty
+                      ? secondary
+                      : ThemeHelpers.textColor(context),
+                ),
+              ),
+              if (meta.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  meta,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textColor(context),
+                    fontWeight: FontWeight.w700,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 6),
+              Text(
+                'Dados, logo e endereço aparecem no CRM, nos documentos e no '
+                'site público. As coordenadas definem onde o check-in por '
+                'localização vale.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: secondary,
+                  height: 1.4,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _name.text.trim().isEmpty ? 'Editar empresa' : _name.text.trim(),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w900,
-              letterSpacing: -0.6,
-              height: 1.08,
-              color: ThemeHelpers.textColor(context),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Atualize identificação, endereço e marca d\'água. As coordenadas '
-            'definem onde o check-in por localização é permitido.',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-              height: 1.4,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -1191,19 +1336,23 @@ class _EditCompanyPageState extends State<EditCompanyPage> {
     );
   }
 
+  /// Ação de apoio (buscar, localizar, trocar imagem): contorno NEUTRO com o
+  /// ícone na cor da marca — não compete com o Salvar verde nem se confunde
+  /// com o "Remover" vermelho ao lado.
   Widget _inlineAction({
     required IconData icon,
     required String label,
     required bool busy,
     required VoidCallback onTap,
   }) {
+    final enabled = !(busy || _saving);
     return OutlinedButton(
-      onPressed: (busy || _saving) ? null : onTap,
+      onPressed: enabled ? onTap : null,
       style: OutlinedButton.styleFrom(
-        foregroundColor: _brand,
+        foregroundColor: ThemeHelpers.textColor(context),
         minimumSize: const Size(0, 42),
         padding: const EdgeInsets.symmetric(horizontal: 14),
-        side: BorderSide(color: _brand.withValues(alpha: 0.45)),
+        side: BorderSide(color: ThemeHelpers.borderColor(context)),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
         ),
@@ -1218,7 +1367,7 @@ class _EditCompanyPageState extends State<EditCompanyPage> {
               child: CircularProgressIndicator(strokeWidth: 2, color: _brand),
             )
           else
-            Icon(icon, size: 16),
+            Icon(icon, size: 16, color: enabled ? _brand : null),
           const SizedBox(width: 8),
           Flexible(
             child: Text(
@@ -1412,85 +1561,143 @@ class _EditCompanyPageState extends State<EditCompanyPage> {
   }
 
   Widget _buildSaveBar() {
-    final onConfirm = _isDark ? const Color(0xFF0B2314) : Colors.white;
+    // Texto sobre o verde de confirmação: branco no claro, grafite no escuro
+    // (o verde do tema escuro é claro demais para letra branca).
+    final onConfirm = ThemeHelpers.onPrimaryColor(context);
+    // Com teclado aberto a barra encolhe um degrau: sobra mais formulário.
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final height = keyboardOpen ? 46.0 : 52.0;
+    final vPad = keyboardOpen ? 8.0 : 10.0;
+
     return Container(
       padding: EdgeInsets.fromLTRB(
         16,
-        10,
+        vPad,
         16,
-        10 + MediaQuery.paddingOf(context).bottom,
+        vPad + MediaQuery.paddingOf(context).bottom,
       ),
       decoration: BoxDecoration(
         color: ThemeHelpers.cardBackgroundColor(context),
         border: Border(
-          top: BorderSide(
-            color: ThemeHelpers.borderLightColor(context).withValues(alpha: 0.5),
+          top: BorderSide(color: ThemeHelpers.borderColor(context)),
+        ),
+      ),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: _maxContentWidth),
+          child: Row(
+            children: [
+              OutlinedButton(
+                onPressed:
+                    _saving ? null : () => Navigator.of(context).maybePop(),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: Size(0, height),
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  foregroundColor: ThemeHelpers.textSecondaryColor(context),
+                  side: BorderSide(color: ThemeHelpers.borderColor(context)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: const Text(
+                  'Cancelar',
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton(
+                  onPressed: _saving ? null : _save,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _confirm,
+                    foregroundColor: onConfirm,
+                    disabledBackgroundColor: _confirm.withValues(alpha: 0.55),
+                    disabledForegroundColor: onConfirm,
+                    minimumSize: Size(0, height),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: _saving
+                      ? SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.2,
+                            color: onConfirm,
+                          ),
+                        )
+                      : const FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(LucideIcons.check, size: 17),
+                              SizedBox(width: 8),
+                              Text(
+                                'Salvar alterações',
+                                maxLines: 1,
+                                softWrap: false,
+                                style: TextStyle(
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Selo do estado da edição no topo da ficha: "Não salvo" em âmbar quando
+/// há alteração pendente; "Tudo salvo" neutro quando está como veio.
+class _SaveStateChip extends StatelessWidget {
+  const _SaveStateChip({required this.dirty});
+
+  final bool dirty;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final color = dirty
+        ? (isDark
+            ? AppColors.message.warningTextDarkMode
+            : AppColors.message.warningText)
+        : ThemeHelpers.textSecondaryColor(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: dirty ? color.withValues(alpha: 0.12) : Colors.transparent,
+        border: Border.all(color: color.withValues(alpha: dirty ? 0.45 : 0.35)),
+      ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          OutlinedButton(
-            onPressed: _saving ? null : () => Navigator.of(context).maybePop(),
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size(0, 52),
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              foregroundColor: ThemeHelpers.textSecondaryColor(context),
-              side: BorderSide(
-                color: ThemeHelpers.borderColor(context).withValues(alpha: 0.75),
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
-            child: const Text(
-              'Cancelar',
-              maxLines: 1,
-              softWrap: false,
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
-            ),
+          Icon(
+            dirty ? LucideIcons.pencilLine : LucideIcons.check,
+            size: 12,
+            color: color,
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: FilledButton(
-              onPressed: _saving ? null : _save,
-              style: FilledButton.styleFrom(
-                backgroundColor: _confirm,
-                foregroundColor: onConfirm,
-                minimumSize: const Size(0, 52),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-              child: _saving
-                  ? SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.2,
-                        color: onConfirm,
-                      ),
-                    )
-                  : const FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(LucideIcons.check, size: 17),
-                          SizedBox(width: 8),
-                          Text(
-                            'Salvar alterações',
-                            maxLines: 1,
-                            softWrap: false,
-                            style: TextStyle(
-                              fontSize: 14.5,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+          const SizedBox(width: 4),
+          Text(
+            dirty ? 'Não salvo' : 'Tudo salvo',
+            maxLines: 1,
+            softWrap: false,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: color,
             ),
           ),
         ],

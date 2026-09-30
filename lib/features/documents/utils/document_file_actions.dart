@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -18,21 +19,66 @@ import '../../../core/theme/app_colors.dart';
 class DocumentFileActions {
   DocumentFileActions._();
 
+  /// Aviso no snackbar do tema (cartão com borda): o significado vem do
+  /// ícone colorido. Fundo verde/vermelho com o texto escuro do tema perdia
+  /// contraste — no modo escuro, texto claro sobre verde claro.
   static void _snack(BuildContext context, String text, {bool ok = false}) {
     if (!context.mounted) return;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final Color tone;
+    if (ok) {
+      tone = dark ? AppColors.status.successDarkMode : AppColors.status.success;
+    } else {
+      tone = dark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(text),
-        backgroundColor: ok ? AppColors.status.success : AppColors.status.error,
+        content: Row(
+          children: [
+            Icon(
+              ok ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+              size: 20,
+              color: tone,
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: Text(text)),
+          ],
+        ),
       ),
     );
+  }
+
+  /// Motivo legível de uma falha de rede/arquivo. O `toString()` da exceção
+  /// (jargão para quem usa) vai só para o log.
+  static String _failureText(Object e, String what) {
+    if (e is TimeoutException) {
+      return 'Demorou demais para $what e a operação foi interrompida. '
+          'Confira a conexão e tente de novo.';
+    }
+    if (e is SocketException || e is http.ClientException) {
+      return 'Sem conexão para $what. Confira a internet e tente de novo.';
+    }
+    return 'Não foi possível $what. Tente de novo em instantes.';
+  }
+
+  /// Motivo legível de uma resposta HTTP recusada no download.
+  static String _httpFailureText(int status) {
+    if (status == 401 || status == 403 || status == 404 || status == 410) {
+      return 'O arquivo não está mais disponível no servidor (link expirado '
+          'ou removido). Atualize a tela e tente de novo.';
+    }
+    if (status >= 500) {
+      return 'O servidor de arquivos falhou ao entregar o download. Tente de '
+          'novo em instantes.';
+    }
+    return 'O servidor recusou o download do arquivo (código $status).';
   }
 
   /// Abre o arquivo no aplicativo externo (navegador / leitor de PDF).
   static Future<void> open(BuildContext context, String? url) async {
     final u = url?.trim() ?? '';
     if (u.isEmpty) {
-      _snack(context, 'Arquivo indisponível para visualização.');
+      _snack(context, 'Este documento está sem arquivo para visualizar.');
       return;
     }
     try {
@@ -41,11 +87,20 @@ class DocumentFileActions {
         mode: LaunchMode.externalApplication,
       );
       if (!ok && context.mounted) {
-        _snack(context, 'Não foi possível abrir o arquivo.');
+        _snack(
+          context,
+          'O aparelho não conseguiu abrir o arquivo. Tente "Baixar" e abrir '
+          'pelo app de arquivos.',
+        );
       }
     } catch (e) {
+      debugPrint('[DocumentFileActions] open: $e');
       if (!context.mounted) return;
-      _snack(context, 'Erro ao abrir o arquivo: $e');
+      _snack(
+        context,
+        'O aparelho não conseguiu abrir o arquivo. Tente "Baixar" e abrir '
+        'pelo app de arquivos.',
+      );
     }
   }
 
@@ -64,11 +119,20 @@ class DocumentFileActions {
     try {
       final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
       if (!ok && context.mounted) {
-        _snack(context, 'Não foi possível abrir o link de assinatura.');
+        _snack(
+          context,
+          'Não foi possível abrir o link de assinatura no navegador. Use '
+          '"Copiar link" e cole no navegador.',
+        );
       }
     } catch (e) {
+      debugPrint('[DocumentFileActions] openSignatureLink: $e');
       if (!context.mounted) return;
-      _snack(context, 'Erro ao abrir o link de assinatura: $e');
+      _snack(
+        context,
+        'Não foi possível abrir o link de assinatura no navegador. Use '
+        '"Copiar link" e cole no navegador.',
+      );
     }
   }
 
@@ -80,7 +144,7 @@ class DocumentFileActions {
   ) async {
     final u = url?.trim() ?? '';
     if (u.isEmpty) {
-      _snack(context, 'Arquivo indisponível para download.');
+      _snack(context, 'Este documento está sem arquivo para baixar.');
       return false;
     }
     try {
@@ -89,7 +153,7 @@ class DocumentFileActions {
           .timeout(const Duration(seconds: 120));
       if (res.statusCode < 200 || res.statusCode >= 300) {
         if (!context.mounted) return false;
-        _snack(context, 'Erro ao baixar o arquivo (${res.statusCode}).');
+        _snack(context, _httpFailureText(res.statusCode));
         return false;
       }
       final path = await saveBytes(res.bodyBytes, fileName);
@@ -99,8 +163,9 @@ class DocumentFileActions {
       );
       return true;
     } catch (e) {
+      debugPrint('[DocumentFileActions] download: $e');
       if (!context.mounted) return false;
-      _snack(context, 'Erro ao baixar o arquivo: $e');
+      _snack(context, _failureText(e, 'baixar o arquivo'));
       return false;
     }
   }
@@ -127,7 +192,10 @@ class DocumentFileActions {
     }
     if (!context.mounted) return files.length;
     if (files.isEmpty) {
-      _snack(context, 'Nenhum arquivo pôde ser baixado.');
+      _snack(
+        context,
+        'Nenhum arquivo pôde ser baixado. Confira a conexão e tente de novo.',
+      );
       return 0;
     }
     await SharePlus.instance.share(ShareParams(files: files));
@@ -162,7 +230,7 @@ class DocumentFileActions {
   }) async {
     final u = url?.trim() ?? '';
     if (u.isEmpty) {
-      _snack(context, 'Link indisponível.');
+      _snack(context, 'Este item está sem link para copiar.');
       return;
     }
     await Clipboard.setData(ClipboardData(text: u));

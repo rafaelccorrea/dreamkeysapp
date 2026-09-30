@@ -4,18 +4,21 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/purchase_proposals_service.dart';
 import '../../../shared/utils/input_formatters.dart';
+import '../../../shared/widgets/app_error_state.dart';
+import '../../../shared/widgets/skeleton_box.dart';
 import '../services/sale_form_proposal_link_service.dart';
 
 // ─── Rótulos (mesmos dados do card do `SelectPropostaModal` do web) ─────────
 
-/// Web: `proposalNumber ?? id.slice(0, 8)`.
+/// Número da proposta para a tela. Sem número cadastrado: "sem número" — o
+/// id interno não vai para a tela (a busca ainda casa pelo começo do id).
 String propostaNumeroLabel(PurchaseProposal p) {
   final n = p.proposalNumber.trim();
-  if (n.isNotEmpty) return n;
-  return p.id.length > 8 ? p.id.substring(0, 8) : p.id;
+  return n.isNotEmpty ? n : 'sem número';
 }
 
 /// Valor proposto em reais ("R$ 1.250.000,00") ou `null` sem valor.
@@ -66,6 +69,7 @@ Future<PurchaseProposal?> showSaleFormProposalPicker(
   return showModalBottomSheet<PurchaseProposal>(
     context: context,
     isScrollControlled: true,
+    useSafeArea: true,
     backgroundColor: Colors.transparent,
     builder: (_) => _ProposalPickerSheet(accent: accent, selectedId: selectedId),
   );
@@ -87,6 +91,7 @@ class _ProposalPickerSheetState extends State<_ProposalPickerSheet> {
   List<PurchaseProposal> _base = const [];
   bool _loading = true;
   String? _erro;
+  int _erroStatus = 0;
 
   /// Busca no back (alcança além das 100 da carga inicial).
   String _q = '';
@@ -120,6 +125,7 @@ class _ProposalPickerSheetState extends State<_ProposalPickerSheet> {
         _base = res.data!;
       } else {
         _erro = res.message ?? 'Erro ao carregar propostas.';
+        _erroStatus = res.statusCode;
       }
     });
   }
@@ -158,8 +164,11 @@ class _ProposalPickerSheetState extends State<_ProposalPickerSheet> {
 
   bool _casa(PurchaseProposal p, String q) {
     final nq = _norm(q);
+    // Sem número, a busca continua casando pelo começo do id (como antes).
+    final semNumero = p.proposalNumber.trim().isEmpty;
     final campos = [
       propostaNumeroLabel(p),
+      if (semNumero) p.id.length > 8 ? p.id.substring(0, 8) : p.id,
       p.proponentName ?? '',
       p.ownerName ?? '',
       propostaImovelLabel(p),
@@ -190,46 +199,58 @@ class _ProposalPickerSheetState extends State<_ProposalPickerSheet> {
     final muted = ThemeHelpers.textSecondaryColor(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final accent = widget.accent;
+    final hair = ThemeHelpers.borderLightColor(context);
+    final teclado = mq.viewInsets.bottom > 0;
+    // Pouca altura útil (teclado aberto em paisagem, tela baixa): sem alça.
+    final apertado = mq.size.height - mq.viewInsets.bottom < 420;
+    OutlineInputBorder borda(Color c, [double w = 1]) => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: c, width: w),
+        );
+
     return Padding(
       padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
-      child: Container(
+      child: ConstrainedBox(
         constraints: BoxConstraints(maxHeight: mq.size.height * 0.88),
-        decoration: BoxDecoration(
-          color: ThemeHelpers.cardBackgroundColor(context),
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        padding: EdgeInsets.fromLTRB(18, 10, 18, 10 + mq.padding.bottom),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 38,
-              height: 4,
-              decoration: BoxDecoration(
-                color: ThemeHelpers.borderColor(context),
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-            const SizedBox(height: 14),
-            // Cabeçalho: título à esquerda, fechar à direita.
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: isDark ? 0.22 : 0.14),
-                    borderRadius: BorderRadius.circular(12),
+        child: Container(
+          decoration: BoxDecoration(
+            color: ThemeHelpers.cardBackgroundColor(context),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (!apertado)
+                Center(
+                  child: Container(
+                    width: 38,
+                    height: 4,
+                    margin: const EdgeInsets.only(top: 10),
+                    decoration: BoxDecoration(
+                      color: ThemeHelpers.borderColor(context),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
                   ),
-                  child: Icon(LucideIcons.handshake, size: 18, color: accent),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
+              // Cabeçalho fixo e enxuto: título à esquerda, fechar à direita.
+              Padding(
+                padding: EdgeInsets.fromLTRB(18, apertado ? 8 : 12, 10, 6),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: accent.withValues(alpha: isDark ? 0.22 : 0.14),
+                        borderRadius: BorderRadius.circular(11),
+                      ),
+                      child:
+                          Icon(LucideIcons.handshake, size: 17, color: accent),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
                         'Preencher a partir de uma proposta',
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
@@ -241,117 +262,164 @@ class _ProposalPickerSheetState extends State<_ProposalPickerSheet> {
                           color: text,
                         ),
                       ),
-                      const SizedBox(height: 3),
-                      Text(
-                        'Comprador, vendedor, imóvel e valor entram na ficha. '
-                        'Ao criar, a ficha fica vinculada à proposta.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          height: 1.3,
-                          fontWeight: FontWeight.w500,
-                          color: muted,
+                    ),
+                    const SizedBox(width: 4),
+                    IconButton(
+                      tooltip: 'Fechar',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: Icon(LucideIcons.x, size: 18, color: muted),
+                    ),
+                  ],
+                ),
+              ),
+              // Um corpo rolável só: explicação, busca e lista juntas — com
+              // o teclado aberto em paisagem nada fica espremido fora da tela.
+              Flexible(
+                child: CustomScrollView(
+                  shrinkWrap: true,
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  slivers: [
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(18, 0, 18, 0),
+                      sliver: SliverToBoxAdapter(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              'Comprador, vendedor, imóvel e valor entram na '
+                              'ficha. Ao criar, a ficha fica vinculada à '
+                              'proposta.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                height: 1.3,
+                                fontWeight: FontWeight.w500,
+                                color: muted,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: _searchCtrl,
+                              textInputAction: TextInputAction.search,
+                              onChanged: _onBusca,
+                              cursorColor: accent,
+                              decoration: InputDecoration(
+                                hintText:
+                                    'Buscar por número, proponente ou imóvel…',
+                                prefixIcon: Icon(
+                                  LucideIcons.search,
+                                  size: 18,
+                                  color: accent,
+                                ),
+                                suffixIcon: _q.isEmpty
+                                    ? null
+                                    : IconButton(
+                                        tooltip: 'Limpar busca',
+                                        visualDensity: VisualDensity.compact,
+                                        onPressed: () {
+                                          _searchCtrl.clear();
+                                          _onBusca('');
+                                        },
+                                        icon: Icon(
+                                          LucideIcons.x,
+                                          size: 16,
+                                          color: muted,
+                                        ),
+                                      ),
+                                isDense: true,
+                                filled: true,
+                                fillColor: isDark
+                                    ? AppColors
+                                        .background.backgroundTertiaryDarkMode
+                                    : AppColors.background.backgroundTertiary,
+                                contentPadding:
+                                    const EdgeInsets.symmetric(vertical: 13),
+                                border: borda(hair),
+                                enabledBorder: borda(hair),
+                                focusedBorder: borda(accent, 1.6),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                          ],
                         ),
                       ),
-                    ],
+                    ),
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+                      sliver: _corpo(context),
+                    ),
+                  ],
+                ),
+              ),
+              // "Criar ficha sem proposta" = fechar. Some com o teclado aberto
+              // (o "x" do topo faz o mesmo) para não roubar a altura da lista.
+              if (!teclado)
+                Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    18,
+                    0,
+                    18,
+                    6 + mq.padding.bottom,
+                  ),
+                  child: TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    style: TextButton.styleFrom(
+                      foregroundColor: muted,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: const Text(
+                      'Criar ficha sem proposta',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
                   ),
                 ),
-                const SizedBox(width: 4),
-                IconButton(
-                  tooltip: 'Fechar',
-                  visualDensity: VisualDensity.compact,
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: Icon(LucideIcons.x, size: 18, color: muted),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _searchCtrl,
-              textInputAction: TextInputAction.search,
-              onChanged: _onBusca,
-              cursorColor: accent,
-              decoration: InputDecoration(
-                hintText: 'Buscar por número, proponente ou imóvel…',
-                prefixIcon: Icon(LucideIcons.search, size: 18, color: muted),
-                suffixIcon: _q.isEmpty
-                    ? null
-                    : IconButton(
-                        tooltip: 'Limpar busca',
-                        visualDensity: VisualDensity.compact,
-                        onPressed: () {
-                          _searchCtrl.clear();
-                          _onBusca('');
-                        },
-                        icon: Icon(LucideIcons.x, size: 16, color: muted),
-                      ),
-                isDense: true,
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: accent, width: 1.6),
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Flexible(child: _corpo(context)),
-            const SizedBox(height: 6),
-            SizedBox(
-              width: double.infinity,
-              child: TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                style: TextButton.styleFrom(
-                  foregroundColor: muted,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-                child: const Text(
-                  'Criar ficha sem proposta',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
+  /// Corpo como sliver: esqueleto, erro (causa + tentar de novo), vazio
+  /// (sem candidatas × busca sem resultado) ou a lista.
   Widget _corpo(BuildContext context) {
     final muted = ThemeHelpers.textSecondaryColor(context);
-    if (_loading) return const _SkeletonList();
+    if (_loading) return const SliverToBoxAdapter(child: _SkeletonList());
     if (_erro != null) {
-      return _Aviso(
-        icon: LucideIcons.refreshCw,
-        titulo: 'Não foi possível carregar as propostas.',
-        texto: _erro!,
-        acao: 'Tentar de novo',
-        accent: widget.accent,
-        onAcao: _carregar,
+      return SliverToBoxAdapter(
+        child: AppErrorState.fromApi(
+          message: _erro,
+          statusCode: _erroStatus,
+          onRetry: _carregar,
+          dense: true,
+        ),
       );
     }
     final lista = _visiveis;
     if (lista.isEmpty) {
-      if (_q.isNotEmpty && _buscando) return const _SkeletonList(linhas: 2);
-      return _q.isEmpty
-          ? const _Aviso(
-              icon: LucideIcons.inbox,
-              titulo: 'Nenhuma proposta disponível para vincular.',
-              texto: 'Só entram propostas finalizadas. Propostas já '
-                  'vinculadas a fichas de venda não aparecem aqui.',
-            )
-          : _Aviso(
-              icon: LucideIcons.searchX,
-              titulo: 'Nenhuma proposta encontrada.',
-              texto: 'Nada casa com "$_q" entre as propostas finalizadas '
-                  'sem ficha de venda.',
-            );
+      if (_q.isNotEmpty && _buscando) {
+        return const SliverToBoxAdapter(child: _SkeletonList(linhas: 2));
+      }
+      return SliverToBoxAdapter(
+        child: _q.isEmpty
+            ? const _Aviso(
+                icon: LucideIcons.inbox,
+                titulo: 'Nenhuma proposta disponível para vincular.',
+                texto: 'Só entram propostas finalizadas. Propostas já '
+                    'vinculadas a fichas de venda não aparecem aqui.',
+              )
+            : _Aviso(
+                icon: LucideIcons.searchX,
+                titulo: 'Nenhuma proposta encontrada.',
+                texto: 'Nada casa com "$_q" entre as propostas finalizadas '
+                    'sem ficha de venda.',
+              ),
+      );
     }
-    return ListView.separated(
-      shrinkWrap: true,
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      padding: const EdgeInsets.only(top: 2, bottom: 4),
+    return SliverList.separated(
       itemCount: lista.length + (_buscando ? 1 : 0),
       separatorBuilder: (_, _) => const SizedBox(height: 8),
       itemBuilder: (_, i) {
@@ -463,7 +531,7 @@ class _ProposalTile extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      p.proponentName ?? 'Proponente',
+                      p.proponentName ?? 'Proponente não informado',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -509,7 +577,7 @@ class _ProposalTile extends StatelessWidget {
                   Icon(LucideIcons.calendar, size: 13, color: muted),
                   const SizedBox(width: 6),
                   Text(
-                    data ?? '—',
+                    data ?? 'Sem data',
                     maxLines: 1,
                     style: TextStyle(
                       fontSize: 12,
@@ -518,17 +586,27 @@ class _ProposalTile extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 12),
+                  // Valor nunca vira reticências: encolhe para caber.
                   Expanded(
-                    child: Text(
-                      valor ?? 'Sem valor',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.right,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.2,
-                        color: valor == null ? muted : text,
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          valor ?? 'Sem valor',
+                          maxLines: 1,
+                          softWrap: false,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.2,
+                            color: valor == null ? muted : text,
+                            fontFeatures: const [
+                              FontFeature.tabularFigures(),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -543,88 +621,56 @@ class _ProposalTile extends StatelessWidget {
 }
 
 /// Esqueleto da lista enquanto carrega (mesma silhueta do cartão).
-class _SkeletonList extends StatefulWidget {
+class _SkeletonList extends StatelessWidget {
   const _SkeletonList({this.linhas = 4});
   final int linhas;
-  @override
-  State<_SkeletonList> createState() => _SkeletonListState();
-}
-
-class _SkeletonListState extends State<_SkeletonList>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 900),
-    lowerBound: 0.45,
-    upperBound: 1,
-  )..repeat(reverse: true);
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
-    final bone = ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.14);
-    Widget bar(double w, double h) => Container(
-          width: w,
-          height: h,
-          decoration: BoxDecoration(
-            color: bone,
-            borderRadius: BorderRadius.circular(6),
-          ),
-        );
-    return FadeTransition(
-      opacity: _ctrl,
-      child: ListView.separated(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        padding: const EdgeInsets.only(top: 2, bottom: 4),
-        itemCount: widget.linhas,
-        separatorBuilder: (_, _) => const SizedBox(height: 8),
-        itemBuilder: (_, _) => Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < linhas; i++) ...[
+          if (i > 0) const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Row(
+                  children: [
+                    SkeletonBox(width: 54, height: 16, borderRadius: 6),
+                    SizedBox(width: 8),
+                    Expanded(child: SkeletonText(height: 14)),
+                    SizedBox(width: 40),
+                  ],
+                ),
+                SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(child: SkeletonText(height: 11)),
+                    SizedBox(width: 30),
+                  ],
+                ),
+                SizedBox(height: 10),
+                Row(
+                  children: [
+                    SkeletonBox(width: 70, height: 11, borderRadius: 6),
+                    Spacer(),
+                    SkeletonBox(width: 90, height: 14, borderRadius: 6),
+                  ],
+                ),
+              ],
             ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  bar(54, 16),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: FractionallySizedBox(
-                      alignment: Alignment.centerLeft,
-                      widthFactor: 0.7,
-                      child: bar(double.infinity, 14),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              FractionallySizedBox(
-                widthFactor: 0.85,
-                child: bar(double.infinity, 11),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  bar(70, 11),
-                  const Spacer(),
-                  bar(90, 14),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
+        ],
+      ],
     );
   }
 }
@@ -635,21 +681,15 @@ class _Aviso extends StatelessWidget {
     required this.icon,
     required this.titulo,
     required this.texto,
-    this.acao,
-    this.onAcao,
-    this.accent,
   });
   final IconData icon;
   final String titulo;
   final String texto;
-  final String? acao;
-  final VoidCallback? onAcao;
-  final Color? accent;
 
   @override
   Widget build(BuildContext context) {
     final muted = ThemeHelpers.textSecondaryColor(context);
-    return SingleChildScrollView(
+    return Padding(
       padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 8),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -676,22 +716,6 @@ class _Aviso extends StatelessWidget {
               color: muted,
             ),
           ),
-          if (acao != null && onAcao != null) ...[
-            const SizedBox(height: 12),
-            OutlinedButton(
-              onPressed: onAcao,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: accent,
-                side: BorderSide(
-                  color: (accent ?? muted).withValues(alpha: 0.5),
-                ),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
-              child: Text(acao!,
-                  style: const TextStyle(fontWeight: FontWeight.w800)),
-            ),
-          ],
         ],
       ),
     );
@@ -804,7 +828,7 @@ class SaleFormProposalPrefillBar extends StatelessWidget {
 
     final valor = propostaValorLabel(p);
     final detalhe = [
-      p.proponentName ?? 'Proponente',
+      p.proponentName ?? 'Proponente não informado',
       if (valor != null) valor,
     ].join(' · ');
     return Padding(

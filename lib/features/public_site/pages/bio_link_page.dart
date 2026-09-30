@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -20,15 +22,24 @@ import '../widgets/public_site_shared.dart';
 
 enum _BioTab { profile, links, analytics }
 
-/// Tela **Link in Bio** — a própria bio page é a heroína: um mock compacto
-/// de telefone (moldura tingida pela cor da bio) mostra avatar, nome,
-/// @handle e os botões de link reais em miniatura; ao lado, o painel de
-/// identidade: status rico, URL como chip com ações e mini-stats. O acento
-/// da tela inteira é o VIOLETA (identidade de bio/criador) — o vermelho da
-/// marca só existe no confirmar dos diálogos destrutivos e no erro de slug
-/// em uso. Abaixo, edição em abas com sublinhado, conteúdo flush e ações no
-/// próprio item. Paridade com `BioLinkConfigPage.tsx` (as etapas viáveis em
-/// mobile — templates/customização Premium ficam no painel web; devolvemos
+/// Tela **Link in Bio** — o topo responde de cara às quatro perguntas de
+/// quem abre: a página está no ar? em qual endereço? quantos links aparecem?
+/// o que o visitante vê? À esquerda, a prévia do celular (com o rascunho ao
+/// vivo, nas cores que o cliente escolheu para os botões); ao lado, o estado
+/// (No ar / Rascunho, com "Publicar" à mão), a contagem de links e, embaixo,
+/// o endereço com Copiar / Abrir / Compartilhar. Abaixo, edição em abas com
+/// sublinhado, listas flush e ações no próprio item.
+///
+/// Revisão 30/09/2026: o acento da tela INTEIRA é o violeta (token
+/// `status.purple`, identidade de "bio/criador") — a paleta por aba
+/// (azul/rosa/violeta) virou arco-íris e saiu. Verde = no ar / confirmar,
+/// âmbar = rascunho / não salvo, vermelho só no confirmar destrutivo. Cores
+/// escolhidas pelo cliente (botões da bio) são DADO: aparecem como ele
+/// configurou, com texto legível por [siteOnColor]. Coluna de até
+/// [_kMaxContent] no tablet; barra de salvar presa embaixo quando há altura.
+///
+/// Paridade com `BioLinkConfigPage.tsx` (as etapas viáveis em mobile —
+/// templates/customização Premium ficam no painel web; devolvemos
 /// `customization` intacta para não apagar nada).
 class BioLinkPage extends StatefulWidget {
   const BioLinkPage({super.key});
@@ -40,8 +51,19 @@ class BioLinkPage extends StatefulWidget {
 class _BioLinkPageState extends State<BioLinkPage> {
   static const double _kPagePadH = 16;
   static const double _kPagePadTop = 10;
-  static const double _kPagePadBottom = 88;
+
+  /// Folga no fim da rolagem: a bolha do chat fica 80dp acima da borda e
+  /// tem 56 de altura — com 88, ela cobria o "Salvar" no fim do painel.
+  static const double _kPagePadBottom = 148;
   static const double _kSectionGap = 12;
+
+  /// Largura máxima da coluna (tablet / paisagem larga).
+  static const double _kMaxContent = 720;
+
+  /// Altura útil (tela menos teclado) a partir da qual a barra de salvar
+  /// fica presa embaixo. Abaixo disso (paisagem, teclado aberto) ela volta
+  /// para o fim do painel e não come a área de edição.
+  static const double _kDockMinHeight = 560;
 
   static const List<int> _kAnalyticsPeriods = [7, 30, 90];
 
@@ -81,6 +103,11 @@ class _BioLinkPageState extends State<BioLinkPage> {
   bool _analyticsLoading = false;
   bool _analyticsLoaded = false;
   int _analyticsDays = 30;
+  // Falha ao carregar as métricas — antes ela aparecia como "Sem métricas
+  // ainda" (erro pintado de vazio). Agora vira estado de erro com a causa e
+  // "Tentar de novo".
+  String? _analyticsError;
+  int _analyticsErrorStatus = 0;
 
   bool get _canView =>
       ModuleAccessService.instance.hasPermission(PublicSiteAccess.permView);
@@ -108,36 +135,34 @@ class _BioLinkPageState extends State<BioLinkPage> {
   //
   // O acento desta tela INTEIRA é o violeta — identidade de "bio/criador".
   // O vermelho da marca não entra aqui: ele ficou reservado ao botão
-  // confirmar dos diálogos destrutivos e ao erro de slug já em uso. Assim,
-  // violeta (identidade) + verde (publicada) + âmbar (rascunho) convivem
-  // sem nunca encostar verde em vermelho.
+  // confirmar dos diálogos destrutivos e ao erro de endereço já em uso.
+  // Assim, violeta (identidade) + verde (no ar / confirmar) + âmbar
+  // (rascunho / não salvo) convivem sem nunca encostar verde em vermelho.
+  // Texto e ícone pequenos passam por [siteInk] (contraste AA no claro);
+  // fundo cheio com rótulo branco, por [siteSolid].
 
-  /// Acento do STEP ativo — cada aba tem sua própria cor (paleta por step):
-  /// Perfil = azul (informacional), Links = rosa (ação), Métricas = violeta.
-  /// Como só um painel é visível por vez, tudo dentro dele recolore sozinho.
-  Color _accent(BuildContext context) => _stepAccent(context, _activeTab);
-
-  /// Cor identitária fixa da tela (violeta de "bio/criador") — usada só no
-  /// hero, que fica estável independentemente da aba ativa.
+  /// Cor identitária da tela (violeta de "bio/criador") — a mesma em todas
+  /// as abas, no hero, nos campos e na folha de edição.
   Color _identity(BuildContext context) {
     return Theme.of(context).brightness == Brightness.dark
         ? AppColors.status.purpleDarkMode
         : AppColors.status.purple;
   }
 
-  Color _stepAccent(BuildContext context, _BioTab tab) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    switch (tab) {
-      case _BioTab.profile:
-        return isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
-      case _BioTab.links:
-        return isDark ? AppColors.status.roseDarkMode : AppColors.status.rose;
-      case _BioTab.analytics:
-        return isDark
-            ? AppColors.status.purpleDarkMode
-            : AppColors.status.purple;
-    }
-  }
+  Color _green(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+      ? AppColors.status.greenDarkMode
+      : AppColors.status.green;
+
+  Color _amber(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+      ? AppColors.status.warningDarkMode
+      : AppColors.status.warning;
+
+  Color _red(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+      ? AppColors.status.errorDarkMode
+      : AppColors.status.error;
 
   /// Tinta do hero — a cor custom da própria bio quando existir (primeiro
   /// link ativo com cor definida); caso contrário, o violeta da tela.
@@ -203,26 +228,36 @@ class _BioLinkPageState extends State<BioLinkPage> {
       _analyticsLoading = false;
       _analyticsLoaded = true;
       _analytics = res.success ? res.data : null;
+      // A falha fica na própria aba (causa + "Tentar de novo"), no lugar
+      // do aviso rápido que sumia e deixava "Sem métricas ainda" na tela.
+      _analyticsError = res.success
+          ? null
+          : (res.message ?? 'Não foi possível carregar as métricas.');
+      _analyticsErrorStatus = res.success ? 0 : res.statusCode;
     });
-    if (!res.success) {
-      _showSnack(res.message ?? 'Erro ao carregar as métricas');
-    }
   }
 
   // ─── Ações ────────────────────────────────────────────────────────────────
 
-  void _showSnack(String message) {
+  /// Aviso rápido no cartão do tema — o ícone diz se deu certo ou falhou, e
+  /// o aviso novo troca o anterior (copiar três vezes não enfileira três).
+  void _showSnack(String message, {SiteSnackTone tone = SiteSnackTone.info}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(behavior: SnackBarBehavior.floating, content: Text(message)),
-    );
+    siteShowSnack(context, message, tone: tone);
   }
+
+  /// Causa da falha em português do dia a dia (nunca a exceção crua).
+  String _failure(String? message, int statusCode, String fallback) =>
+      siteFailureMessage(message, statusCode, fallback: fallback);
 
   Future<void> _copyUrl() async {
     final url = _page?.bestPublicUrl;
     if (url == null) return;
     await Clipboard.setData(ClipboardData(text: url));
-    _showSnack('URL copiada');
+    _showSnack(
+      'Link copiado — é só colar na bio do Instagram.',
+      tone: SiteSnackTone.success,
+    );
   }
 
   Future<void> _openPage() async {
@@ -231,7 +266,31 @@ class _BioLinkPageState extends State<BioLinkPage> {
     final uri = Uri.tryParse(url);
     if (uri == null) return;
     final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok) _showSnack('Não foi possível abrir a página');
+    if (!ok) {
+      _showSnack('Não foi possível abrir a página.', tone: SiteSnackTone.error);
+    }
+  }
+
+  /// Folha de compartilhar do sistema (WhatsApp, Instagram, e-mail…) com o
+  /// endereço da página. [anchor] é o contexto do botão: no iPad a folha
+  /// abre ancorada nele. Se o sistema recusar, o link vai para a área de
+  /// transferência.
+  Future<void> _shareUrl(BuildContext anchor) async {
+    final url = _page?.bestPublicUrl;
+    if (url == null) return;
+    Rect? origin;
+    final box = anchor.findRenderObject();
+    if (box is RenderBox && box.hasSize) {
+      origin = box.localToGlobal(Offset.zero) & box.size;
+    }
+    try {
+      await SharePlus.instance.share(
+        ShareParams(text: url, sharePositionOrigin: origin),
+      );
+    } catch (_) {
+      await Clipboard.setData(ClipboardData(text: url));
+      _showSnack('Não deu para abrir o compartilhamento — o link foi copiado.');
+    }
   }
 
   Future<void> _togglePublish() async {
@@ -242,13 +301,16 @@ class _BioLinkPageState extends State<BioLinkPage> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
+          // Rola em paisagem / fonte grande em vez de estourar.
+          scrollable: true,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
-          title: const Text('Despublicar página?'),
+          title: const Text('Tirar a página do ar?'),
           content: const Text(
-            'Sua página sai do ar imediatamente e o link da bio deixa de '
-            'funcionar. Você pode publicá-la novamente quando quiser.',
+            'Quem abrir o link da bio deixa de ver a página na hora. Seus '
+            'links e textos continuam guardados — dá para publicar de novo '
+            'quando quiser.',
           ),
           actions: [
             // Cancelar é neutro — o tema pinta TextButton com o vermelho da
@@ -260,22 +322,24 @@ class _BioLinkPageState extends State<BioLinkPage> {
               ),
               child: const Text('Cancelar'),
             ),
+            // Destrutivo: vermelho escurecido até o branco passar de 4,5:1
+            // (o vermelho do escuro, cru, dava 3,4:1).
             FilledButton(
               onPressed: () => Navigator.of(ctx).pop(true),
               style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(ctx).brightness == Brightness.dark
-                    ? AppColors.status.errorDarkMode
-                    : AppColors.status.error,
+                backgroundColor: siteSolid(_red(ctx)),
                 foregroundColor: Colors.white,
               ),
-              child: const Text('Despublicar'),
+              child: const Text('Tirar do ar'),
             ),
           ],
         ),
       );
       if (confirmed != true) return;
     } else if ((page.slug ?? '').trim().isEmpty) {
-      _showSnack('Defina a URL pública na aba Perfil antes de publicar');
+      _showSnack(
+        'Escolha o endereço da página (aba Perfil) antes de publicar.',
+      );
       setState(() => _activeTab = _BioTab.profile);
       return;
     }
@@ -291,10 +355,20 @@ class _BioLinkPageState extends State<BioLinkPage> {
     });
     if (res.success) {
       _showSnack(
-        res.data!.isPublished ? 'Página no ar' : 'Página despublicada',
+        res.data!.isPublished
+            ? 'Página no ar — quem abrir o link já vê.'
+            : 'Página fora do ar.',
+        tone: SiteSnackTone.success,
       );
     } else {
-      _showSnack(res.message ?? 'Erro ao alterar a publicação');
+      _showSnack(
+        _failure(
+          res.message,
+          res.statusCode,
+          'Não foi possível mudar a publicação — tente de novo.',
+        ),
+        tone: SiteSnackTone.error,
+      );
     }
   }
 
@@ -314,12 +388,38 @@ class _BioLinkPageState extends State<BioLinkPage> {
       _profileSaving = false;
       if (res.success && res.data != null) {
         _profileDirty = false;
-        _applyPage(res.data!, resetDrafts: true);
+        // Sem `resetDrafts`: os campos do perfil voltam do servidor (o dirty
+        // acabou de zerar), mas links e endereço ainda não salvos ficam
+        // como estavam — antes, salvar o perfil apagava esses rascunhos.
+        _applyPage(res.data!);
       }
     });
-    _showSnack(
-      res.success ? 'Perfil salvo' : (res.message ?? 'Erro ao salvar o perfil'),
-    );
+    if (res.success) {
+      _showSnack('Perfil salvo', tone: SiteSnackTone.success);
+    } else {
+      _showSnack(
+        _failure(
+          res.message,
+          res.statusCode,
+          'Não foi possível salvar o perfil — tente de novo.',
+        ),
+        tone: SiteSnackTone.error,
+      );
+    }
+  }
+
+  /// Descarta SÓ o rascunho do perfil. Antes o "Descartar" chamava
+  /// `_applyPage(resetDrafts: true)` e levava junto os links e o endereço
+  /// ainda não salvos.
+  void _discardProfile() {
+    final page = _page;
+    if (page == null) return;
+    setState(() {
+      _titleController.text = page.title ?? '';
+      _instagramController.text = page.instagramHandle ?? '';
+      _bioController.text = page.bio ?? '';
+      _profileDirty = false;
+    });
   }
 
   // ── Slug ──
@@ -358,11 +458,17 @@ class _BioLinkPageState extends State<BioLinkPage> {
   Future<void> _saveSlug() async {
     final slug = _slugController.text.trim();
     if (slug.length < 3) {
-      _showSnack('O endereço precisa de pelo menos 3 caracteres');
+      _showSnack(
+        'O endereço precisa de pelo menos 3 caracteres.',
+        tone: SiteSnackTone.error,
+      );
       return;
     }
     if (_slugAvailable == false) {
-      _showSnack('Este endereço já está em uso — escolha outro');
+      _showSnack(
+        'Este endereço já está em uso — escolha outro.',
+        tone: SiteSnackTone.error,
+      );
       return;
     }
     if (_slugSaving) return;
@@ -379,11 +485,22 @@ class _BioLinkPageState extends State<BioLinkPage> {
         _slugAvailable = false;
       }
     });
-    _showSnack(
-      res.success
-          ? 'URL atualizada'
-          : (res.message ?? 'Endereço inválido ou reservado'),
-    );
+    if (res.success) {
+      _showSnack('Endereço atualizado', tone: SiteSnackTone.success);
+    } else {
+      // O 409 do serviço fala em "slug" — aqui é "endereço".
+      _showSnack(
+        res.statusCode == 409
+            ? 'Este endereço já está em uso por outra empresa — escolha '
+                  'outro.'
+            : _failure(
+                res.message,
+                res.statusCode,
+                'Endereço inválido ou reservado — tente outro.',
+              ),
+        tone: SiteSnackTone.error,
+      );
+    }
   }
 
   // ── Links ──
@@ -422,13 +539,15 @@ class _BioLinkPageState extends State<BioLinkPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        scrollable: true,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Remover link?'),
         content: Text(
           link.label.trim().isEmpty
-              ? 'O link sai da página quando você salvar.'
-              : '"${link.label.trim()}" sai da página quando você salvar. '
-                    'Para ocultar sem excluir, desative o interruptor do link.',
+              ? 'O link sai da página quando você salvar os links.'
+              : '“${link.label.trim()}” sai da página quando você salvar os '
+                    'links. Para esconder sem apagar, desligue o interruptor '
+                    'do link.',
         ),
         actions: [
           // Cancelar é neutro — nunca no vermelho padrão do tema.
@@ -442,9 +561,7 @@ class _BioLinkPageState extends State<BioLinkPage> {
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(ctx).brightness == Brightness.dark
-                  ? AppColors.status.errorDarkMode
-                  : AppColors.status.error,
+              backgroundColor: siteSolid(_red(ctx)),
               foregroundColor: Colors.white,
             ),
             child: const Text('Remover'),
@@ -481,12 +598,70 @@ class _BioLinkPageState extends State<BioLinkPage> {
         _linksDraft = List.of(res.data!.links);
       }
     });
-    _showSnack(
-      res.success ? 'Links salvos' : (res.message ?? 'Erro ao salvar os links'),
-    );
+    if (res.success) {
+      _showSnack('Links salvos', tone: SiteSnackTone.success);
+    } else {
+      _showSnack(
+        _failure(
+          res.message,
+          res.statusCode,
+          'Não foi possível salvar os links — tente de novo.',
+        ),
+        tone: SiteSnackTone.error,
+      );
+    }
+  }
+
+  /// Volta a lista para o que está salvo (só os links).
+  void _discardLinks() {
+    final page = _page;
+    if (page == null) return;
+    setState(() {
+      _linksDraft = List.of(page.links);
+      _linksDirty = false;
+    });
   }
 
   // ─── Build ────────────────────────────────────────────────────────────────
+
+  /// Recuo lateral da coluna: 16 no celular (mais o entalhe em paisagem) e,
+  /// no tablet, o que sobra para a coluna ficar em [_kMaxContent] centrada.
+  /// Vem da largura da tela — sem LayoutBuilder entre o RefreshIndicator e
+  /// a lista (ali ele quebra o puxar-para-atualizar).
+  EdgeInsets _columnInsets(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    final safe = MediaQuery.paddingOf(context);
+    final spare = (width - _kMaxContent) / 2;
+    return EdgeInsets.only(
+      left: math.max(_kPagePadH + safe.left, spare),
+      right: math.max(_kPagePadH + safe.right, spare),
+    );
+  }
+
+  /// Há altura para a barra de salvar ficar presa embaixo?
+  bool _dockFits(BuildContext context) {
+    final height = MediaQuery.sizeOf(context).height;
+    return height - MediaQuery.viewInsetsOf(context).bottom >= _kDockMinHeight;
+  }
+
+  /// Endereço digitado e ainda não salvo (acende o ponto da aba Perfil).
+  bool get _slugDraftDirty {
+    final draft = _slugController.text.trim();
+    return draft.isNotEmpty && draft != (_page?.slug ?? '').trim();
+  }
+
+  /// O que a barra de salvar da aba ativa salva (o endereço tem botão
+  /// próprio, logo abaixo do campo).
+  bool get _activeTabDirty {
+    switch (_activeTab) {
+      case _BioTab.profile:
+        return _profileDirty;
+      case _BioTab.links:
+        return _linksDirty;
+      case _BioTab.analytics:
+        return false;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -500,588 +675,570 @@ class _BioLinkPageState extends State<BioLinkPage> {
         ),
       );
     }
+
+    final insets = _columnInsets(context);
+    final ready = !_loading && _error == null && _page != null;
+    final showDock =
+        ready && _canManage && _activeTabDirty && _dockFits(context);
+
+    final List<Widget> children;
+    if (_loading) {
+      children = [_buildPageSkeleton(context, insets)];
+    } else if (!ready) {
+      children = [
+        Padding(
+          padding: insets.copyWith(top: 48, bottom: _kPagePadBottom),
+          child: SiteErrorState(
+            message:
+                _error ?? 'Não foi possível carregar a página Link in Bio.',
+            statusCode: _errorStatus,
+            onRetry: _load,
+          ),
+        ),
+      ];
+    } else {
+      children = [
+        Padding(
+          padding: insets.copyWith(top: _kPagePadTop),
+          child: _buildHero(context),
+        ),
+        const SizedBox(height: _kSectionGap + 10),
+        _buildTabsRail(context, insets),
+        Padding(
+          padding: insets.copyWith(
+            top: _kSectionGap + 6,
+            bottom: _kPagePadBottom,
+          ),
+          child: _buildActivePanel(context),
+        ),
+      ];
+    }
+
     return AppScaffold(
       title: 'Link in Bio',
       showBottomNavigation: false,
-      body: RefreshIndicator(
-        color: _identity(context),
-        onRefresh: () async {
-          await _load();
-          if (_analyticsLoaded) await _loadAnalytics();
-        },
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: EdgeInsets.zero,
-          children: _loading
-              ? [_buildPageSkeleton(context)]
-              : _error != null
-              ? [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      _kPagePadH,
-                      48,
-                      _kPagePadH,
-                      _kPagePadBottom,
-                    ),
-                    child: SiteErrorState(
-                      message: _error!,
-                      statusCode: _errorStatus,
-                      onRetry: _load,
-                    ),
-                  ),
-                ]
-              : [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      _kPagePadH,
-                      _kPagePadTop,
-                      _kPagePadH,
-                      0,
-                    ),
-                    child: _buildPhoneHero(context),
-                  ),
-                  const SizedBox(height: _kSectionGap + 2),
-                  _buildTabsRail(context),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      _kPagePadH,
-                      _kSectionGap,
-                      _kPagePadH,
-                      _kPagePadBottom,
-                    ),
-                    child: _buildActivePanel(context),
-                  ),
-                ],
-        ),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: RefreshIndicator(
+              color: _identity(context),
+              onRefresh: () async {
+                await _load();
+                if (_analyticsLoaded) await _loadAnalytics();
+              },
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: EdgeInsets.zero,
+                children: children,
+              ),
+            ),
+          ),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: showDock
+                ? _buildSaveDock(context, insets)
+                : const SizedBox(width: double.infinity),
+          ),
+        ],
       ),
     );
   }
 
-  // ─── Hero: a bio page é a protagonista (mock de telefone) ────────────────
+  // ─── Hero: no ar? em qual endereço? quantos links? o que o visitante vê? ──
 
-  Widget _buildPhoneHero(BuildContext context) {
-    final activeLinks = _linksDraft
-        .where((l) => l.isActive)
-        .toList(growable: false);
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildPhoneMock(context, activeLinks),
-        const SizedBox(width: 18),
-        // Painel de identidade — flush, sem card em volta: status rico,
-        // URL como chip e o par de mini-stats, em cascata.
-        Expanded(
-          child: Column(
+  Widget _buildHero(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final wide = width >= 560;
+        // Prévia: ~42% da coluna no celular (121dp em 320, 138 em 360) e 176
+        // no tablet — o bloco ao lado nunca fica abaixo de ~150dp. Antes o
+        // celular tinha 168 fixos e sobravam ~24dp para o endereço em 320.
+        final phoneWidth = wide
+            ? 176.0
+            : (width * 0.42).clamp(118.0, 168.0).toDouble();
+        final phone = _buildPhoneMock(context, phoneWidth);
+        final status = _buildHeroStatus(context);
+        final counts = _buildHeroCounts(context);
+        final address = _buildHeroAddress(context);
+        if (wide) {
+          return Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 4),
-              _buildHeroStatus(context)
-                  .animate()
-                  .fadeIn(delay: 60.ms, duration: 280.ms)
-                  .moveY(begin: 6, end: 0, curve: Curves.easeOut),
-              const SizedBox(height: 16),
-              _buildHeroUrl(context)
-                  .animate()
-                  .fadeIn(delay: 130.ms, duration: 280.ms)
-                  .moveY(begin: 6, end: 0, curve: Curves.easeOut),
-              const SizedBox(height: 16),
-              _buildHeroMiniStats(context)
-                  .animate()
-                  .fadeIn(delay: 200.ms, duration: 280.ms)
-                  .moveY(begin: 6, end: 0, curve: Curves.easeOut),
+              phone,
+              const SizedBox(width: 24),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    status,
+                    const SizedBox(height: 18),
+                    counts,
+                    const SizedBox(height: 18),
+                    address,
+                  ],
+                ),
+              ),
             ],
-          ),
-        ),
-      ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                phone,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [status, const SizedBox(height: 16), counts],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            address,
+          ],
+        );
+      },
     );
   }
 
-  /// Status da página — tira flush entre hairlines: roundel semântico com
-  /// ícone (globo no ar / lápis em rascunho), título forte com dot de halo e
-  /// linha viva do endereço. Sem caixa, sem pill solta.
+  /// Estado da página em palavra grande — No ar (verde) / Rascunho (âmbar)
+  /// —, a frase do que isso quer dizer e, em rascunho, o "Publicar" à mão
+  /// (travado com o motivo para quem não gerencia).
   Widget _buildHeroStatus(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final hairline =
-        ThemeHelpers.borderLightColor(context).withValues(alpha: 0.55);
-    final emerald = isDark
-        ? AppColors.status.greenDarkMode
-        : AppColors.status.green;
-    final amber = isDark
-        ? AppColors.status.warningDarkMode
-        : AppColors.status.warning;
-    final published = _page!.isPublished;
-    final tone = published ? emerald : amber;
+    final page = _page!;
+    final published = page.isPublished;
+    final tone = published ? _green(context) : _amber(context);
+    final ink = siteInk(context, tone);
+    final dateFmt = DateFormat('dd/MM/yyyy', 'pt_BR');
+    final String sub;
+    if (published) {
+      sub = page.publishedAt != null
+          ? 'Publicada em ${dateFmt.format(page.publishedAt!.toLocal())}'
+          : 'Quem abrir o link vê a página.';
+    } else {
+      sub = 'Só você vê — ninguém abre a página até ela ser publicada.';
+    }
 
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 9),
-      decoration: BoxDecoration(
-        border: Border(
-          top: BorderSide(color: hairline),
-          bottom: BorderSide(color: hairline),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: tone.withValues(alpha: isDark ? 0.18 : 0.12),
+                border: Border.all(color: tone.withValues(alpha: 0.4)),
+              ),
+              child: Icon(
+                published ? LucideIcons.globe : LucideIcons.pencilLine,
+                size: 15,
+                color: ink,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                published ? 'No ar' : 'Rascunho',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: ink,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.3,
+                ),
+              ),
+            ),
+          ],
         ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: tone.withValues(alpha: isDark ? 0.16 : 0.12),
-              border: Border.all(color: tone.withValues(alpha: 0.35)),
-            ),
-            child: Icon(
-              published ? LucideIcons.globe : LucideIcons.pencilLine,
-              size: 14,
-              color: tone,
-            ),
+        const SizedBox(height: 6),
+        Text(
+          sub,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: secondary,
+            height: 1.35,
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        ),
+        if (!published) ...[
+          const SizedBox(height: 10),
+          if (_canManage)
+            _heroPublishButton(context)
+          else
+            const SiteReadOnlyNotice(
+              dense: true,
+              text: 'Só quem gerencia o Link in Bio pode publicar.',
+            ),
+        ],
+        if (_linksDirty || _profileDirty) ...[
+          const SizedBox(height: 10),
+          _noteLine(
+            context,
+            LucideIcons.pencilLine,
+            'A prévia mostra alterações ainda não salvas.',
+            color: siteInk(context, _amber(context)),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// "Publicar" no próprio estado — mesma ação (e mesmas checagens) do
+  /// controle de publicação da aba Perfil.
+  Widget _heroPublishButton(BuildContext context) {
+    final green = siteSolid(_green(context));
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: FilledButton.icon(
+        onPressed: _publishing ? null : _togglePublish,
+        style: FilledButton.styleFrom(
+          backgroundColor: green,
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: green.withValues(alpha: 0.6),
+          disabledForegroundColor: Colors.white,
+          minimumSize: const Size(0, 40),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(11),
+          ),
+        ),
+        icon: _publishing
+            ? const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : const Icon(LucideIcons.rocket, size: 16),
+        label: SiteButtonLabel(_publishing ? 'Publicando…' : 'Publicar'),
+      ),
+    );
+  }
+
+  /// Quantos links aparecem na página — o número que importa, grande, com o
+  /// rótulo curto embaixo; captação e visitas (quando já carregadas) depois.
+  Widget _buildHeroCounts(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final numberFmt = NumberFormat.decimalPattern('pt_BR');
+    final total = _linksDraft.length;
+    final active = _linksDraft.where((l) => l.isActive).length;
+    final leadActive = _linksDraft.any((l) => l.isActive && l.isLeadForm);
+    // Enquanto outro período carrega, o número antigo não vai com o rótulo
+    // do período novo.
+    final views = _analyticsLoading ? null : _analytics?.pageViews;
+
+    final String caption;
+    if (total == 0) {
+      caption = 'links na página — comece pela aba Links';
+    } else if (active == 1) {
+      caption = 'link aparece na página';
+    } else {
+      caption = 'links aparecem na página';
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text.rich(
+            TextSpan(
               children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        published ? 'Página publicada' : 'Rascunho',
-                        softWrap: false,
-                        overflow: TextOverflow.fade,
-                        style: TextStyle(
-                          color: tone,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 12.5,
-                          letterSpacing: -0.15,
+                TextSpan(
+                  text: numberFmt.format(active),
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    color: ThemeHelpers.textColor(context),
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.6,
+                    height: 1.0,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                if (active != total)
+                  TextSpan(
+                    text: ' de ${numberFmt.format(total)}',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: secondary,
+                      fontWeight: FontWeight.w800,
+                      height: 1.0,
+                    ),
+                  ),
+              ],
+            ),
+            maxLines: 1,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          caption,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: secondary,
+            fontWeight: FontWeight.w600,
+            height: 1.3,
+          ),
+        ),
+        if (leadActive) ...[
+          const SizedBox(height: 8),
+          _noteLine(
+            context,
+            LucideIcons.userRoundPlus,
+            'Com botão de captação ativo',
+            color: siteInk(context, _identity(context)),
+          ),
+        ],
+        if (views != null) ...[
+          const SizedBox(height: 6),
+          _noteLine(
+            context,
+            LucideIcons.eye,
+            '${numberFmt.format(views)} ${views == 1 ? 'visita' : 'visitas'} '
+            'nos últimos $_analyticsDays dias',
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Endereço como barra de navegador (domínio esmaecido, final forte) e
+  /// Copiar / Abrir / Compartilhar logo embaixo. Sem endereço: o que fazer.
+  Widget _buildHeroAddress(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final violetInk = siteInk(context, _identity(context));
+    final page = _page!;
+    final url = page.bestPublicUrl;
+    final barDecoration = BoxDecoration(
+      color: siteFieldFill(context),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: ThemeHelpers.borderLightColor(context)),
+    );
+
+    if (url == null) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(12, 11, 8, 11),
+        decoration: barDecoration,
+        child: Row(
+          children: [
+            Icon(LucideIcons.globe, size: 16, color: secondary),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Endereço ainda não definido',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: ThemeHelpers.textColor(context),
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _canManage
+                        ? 'Escolha o final do link na aba Perfil — é ele que '
+                              'vai na bio do Instagram.'
+                        : 'Quem gerencia o Link in Bio escolhe o endereço.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: secondary,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (_canManage) ...[
+              const SizedBox(width: 6),
+              TextButton(
+                onPressed: () => setState(() => _activeTab = _BioTab.profile),
+                style: TextButton.styleFrom(
+                  foregroundColor: violetInk,
+                  minimumSize: const Size(0, 36),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                ),
+                child: const Text(
+                  'Definir',
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+
+    // "https://bio.intellisysbr.com/minha-imobiliaria" → domínio esmaecido
+    // + o final forte (o que a pessoa escolheu), sem o esquema.
+    final display = url.replaceFirst(RegExp(r'^https?://'), '');
+    final cut = display.lastIndexOf('/');
+    final hasTail = cut > 0 && cut < display.length - 1;
+    final head = hasTail ? display.substring(0, cut + 1) : '';
+    final tail = hasTail ? display.substring(cut + 1) : display;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Semantics(
+          label: 'Endereço da página: $display',
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 11),
+            decoration: barDecoration,
+            child: Row(
+              children: [
+                Icon(
+                  page.isPublished ? LucideIcons.globe : LucideIcons.globeLock,
+                  size: 16,
+                  color: secondary,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (head.isNotEmpty)
+                        Text(
+                          head,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: secondary,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      // Final em até 2 linhas (quebra no hífen) — nunca
+                      // encolhido até ficar ilegível.
+                      Text(
+                        tail,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: violetInk,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.2,
+                          height: 1.25,
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 6),
-                    Container(
-                      width: 5,
-                      height: 5,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: tone,
-                        boxShadow: [
-                          BoxShadow(
-                            color:
-                                tone.withValues(alpha: isDark ? 0.55 : 0.45),
-                            blurRadius: 5,
-                            spreadRadius: 1.2,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  published
-                      ? 'Recebendo visitas em $kBioPublicBase'
-                      : 'Só você vê — publique quando estiver pronta',
-                  maxLines: 2,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: published ? secondary : amber,
-                    fontWeight: published ? FontWeight.w600 : FontWeight.w700,
-                    fontSize: 10.5,
-                    height: 1.3,
+                    ],
                   ),
                 ),
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  /// Controle de publicação (aba Perfil) — painel de superfície refinado:
-  /// roundel de status, título + microcopy, checklist de prontidão (endereço
-  /// e links) e a ação principal (publicar verde / despublicar neutro).
-  Widget _buildPublishControl(
-    BuildContext context, {
-    required BioPageConfig page,
-    required Color statusTone,
-    required Color emerald,
-    required Color amber,
-    required Color secondary,
-    required bool isDark,
-    required ThemeData theme,
-    required DateFormat dateFmt,
-    required bool hasSlug,
-  }) {
-    final published = page.isPublished;
-    final linkCount = _linksDraft.where((l) => l.isActive).length;
-    final title = published ? 'Sua página está no ar' : 'Pronta para publicar?';
-    final sub = published
-        ? (page.publishedAt != null
-              ? 'Publicada em ${dateFmt.format(page.publishedAt!.toLocal())}'
-              : 'Visível para qualquer visitante do seu link')
-        : 'Revise os links e publique quando quiser';
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 15, 16, 16),
-      decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: ThemeHelpers.cardShadow(context),
-        border: Border.all(
-          color: statusTone.withValues(alpha: isDark ? 0.28 : 0.20),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      statusTone.withValues(alpha: isDark ? 0.26 : 0.18),
-                      statusTone.withValues(alpha: isDark ? 0.12 : 0.08),
-                    ],
-                  ),
-                  border: Border.all(
-                    color: statusTone.withValues(alpha: 0.4),
-                  ),
-                ),
-                child: Icon(
-                  published ? LucideIcons.globe : LucideIcons.rocket,
-                  size: 18,
-                  color: statusTone,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.3,
-                        color: ThemeHelpers.textColor(context),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      sub,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: secondary,
-                        height: 1.3,
-                        fontSize: 11.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 13),
-          // Prontidão — dois selos que "acendem" verdes quando prontos.
-          Row(
-            children: [
-              _readyChip(
-                context,
-                label: hasSlug ? 'Endereço definido' : 'Falta o endereço',
-                ok: hasSlug,
-                emerald: emerald,
-                amber: amber,
-              ),
-              const SizedBox(width: 8),
-              _readyChip(
-                context,
-                label: linkCount == 0
-                    ? 'Nenhum link ativo'
-                    : '$linkCount ${linkCount == 1 ? 'link ativo' : 'links ativos'}',
-                ok: linkCount > 0,
-                emerald: emerald,
-                amber: amber,
-              ),
-            ],
-          ),
-          if (_canManage) ...[
-            const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              child: published
-                  ? OutlinedButton.icon(
-                      onPressed: _publishing ? null : _togglePublish,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: secondary,
-                        side: BorderSide(
-                          color: ThemeHelpers.borderColor(context),
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                      icon: _publishing
-                          ? SizedBox(
-                              width: 15,
-                              height: 15,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: secondary,
-                              ),
-                            )
-                          : const Icon(LucideIcons.eyeOff, size: 17),
-                      label: Text(
-                        _publishing ? 'Aguarde…' : 'Despublicar página',
-                        softWrap: false,
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                    )
-                  : FilledButton.icon(
-                      onPressed: _publishing ? null : _togglePublish,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: emerald,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                      ),
-                      icon: _publishing
-                          ? const SizedBox(
-                              width: 15,
-                              height: 15,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(LucideIcons.rocket, size: 17),
-                      label: Text(
-                        _publishing ? 'Aguarde…' : 'Publicar página',
-                        softWrap: false,
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                    ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  /// Selo de prontidão — check verde quando ok, alerta âmbar quando falta.
-  Widget _readyChip(
-    BuildContext context, {
-    required String label,
-    required bool ok,
-    required Color emerald,
-    required Color amber,
-  }) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final tone = ok ? emerald : amber;
-    return Flexible(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-        decoration: BoxDecoration(
-          color: tone.withValues(alpha: isDark ? 0.13 : 0.09),
-          borderRadius: BorderRadius.circular(9),
-          border: Border.all(color: tone.withValues(alpha: 0.25)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              ok ? LucideIcons.circleCheck : LucideIcons.circleAlert,
-              size: 12.5,
-              color: tone,
-            ),
-            const SizedBox(width: 5),
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                softWrap: false,
-                overflow: TextOverflow.fade,
-                style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w700,
-                  color: tone,
-                  letterSpacing: -0.1,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Microlinha de apoio sob um campo — ícone 12px + texto de uma linha.
-  Widget _fieldMeta(
-    BuildContext context, {
-    required IconData icon,
-    required String text,
-    bool highlight = false,
-  }) {
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final tone =
-        highlight ? _accent(context) : secondary.withValues(alpha: 0.85);
-    return Row(
-      children: [
-        Icon(icon, size: 11.5, color: tone),
-        const SizedBox(width: 5),
-        Expanded(
-          child: Text(
-            text,
-            maxLines: 1,
-            softWrap: false,
-            overflow: TextOverflow.fade,
-            style: TextStyle(
-              fontSize: 10.5,
-              fontWeight: highlight ? FontWeight.w700 : FontWeight.w600,
-              color: tone,
-              letterSpacing: -0.05,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// Contador vivo da bio — esquenta para âmbar perto do limite.
-  Widget _bioCounter(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final amber = isDark
-        ? AppColors.status.warningDarkMode
-        : AppColors.status.warning;
-    final len = _bioController.text.length;
-    final tone = len >= 260 ? amber : secondary.withValues(alpha: 0.8);
-    return Text(
-      '$len/280',
-      style: TextStyle(
-        fontSize: 10.5,
-        fontWeight: FontWeight.w800,
-        color: tone,
-        fontFeatures: const [FontFeature.tabularFigures()],
-      ),
-    );
-  }
-
-  /// URL como chip elegante — /slug em destaque, domínio esmaecido e as
-  /// ações Copiar/Abrir como icon-chips neutros 32px lado a lado.
-  Widget _buildHeroUrl(BuildContext context) {
-    final theme = Theme.of(context);
-    final violet = _identity(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final page = _page!;
-    final slug = (page.slug ?? '').trim();
-    final hasUrl = page.bestPublicUrl != null;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          kBioPublicBase,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: secondary.withValues(alpha: 0.85),
-            fontWeight: FontWeight.w700,
-            fontSize: 9.5,
-            letterSpacing: 0.3,
-          ),
-        ),
-        const SizedBox(height: 3),
+        const SizedBox(height: 10),
         Row(
           children: [
             Expanded(
-              // FittedBox em vez de reticências — a URL nunca trunca.
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  slug.isEmpty ? 'URL não definida' : '/$slug',
-                  maxLines: 1,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.4,
-                    color: slug.isEmpty ? secondary : violet,
-                  ),
-                ),
+              child: _addressAction(
+                context,
+                icon: LucideIcons.copy,
+                label: 'Copiar',
+                onTap: _copyUrl,
               ),
             ),
             const SizedBox(width: 8),
-            _heroIconChip(
-              context,
-              icon: LucideIcons.copy,
-              tooltip: 'Copiar URL',
-              onTap: hasUrl ? _copyUrl : null,
+            Expanded(
+              child: _addressAction(
+                context,
+                icon: LucideIcons.externalLink,
+                label: 'Abrir',
+                onTap: _openPage,
+              ),
             ),
-            const SizedBox(width: 6),
-            _heroIconChip(
-              context,
-              icon: LucideIcons.externalLink,
-              tooltip: 'Abrir página',
-              onTap: hasUrl ? _openPage : null,
+            const SizedBox(width: 8),
+            Expanded(
+              child: Builder(
+                builder: (anchor) => _addressAction(
+                  anchor,
+                  icon: LucideIcons.share2,
+                  label: 'Compartilhar',
+                  onTap: () => _shareUrl(anchor),
+                ),
+              ),
             ),
           ],
         ),
-        if (slug.isEmpty) ...[
-          const SizedBox(height: 3),
-          Text(
-            'Defina o endereço na aba Perfil',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: secondary,
-              fontSize: 10.5,
-              fontWeight: FontWeight.w600,
-            ),
+        if (!page.isPublished) ...[
+          const SizedBox(height: 10),
+          _noteLine(
+            context,
+            LucideIcons.circleAlert,
+            'Fora do ar: quem abrir este link ainda não vê a página.',
+            color: siteInk(context, _amber(context)),
           ),
         ],
       ],
     );
   }
 
-  /// Icon-chip neutro 32px — ação rápida ao lado da URL.
-  Widget _heroIconChip(
+  /// Ação do endereço: ícone em cima, rótulo embaixo — as três lado a lado
+  /// cabem em 320dp com fonte a 130% (o rótulo encolhe, não estoura).
+  Widget _addressAction(
     BuildContext context, {
     required IconData icon,
-    required String tooltip,
-    VoidCallback? onTap,
+    required String label,
+    required VoidCallback onTap,
   }) {
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final disabled = onTap == null;
-    return Tooltip(
-      message: tooltip,
+    final violetInk = siteInk(context, _identity(context));
+    // O nó de acessibilidade leva o rótulo E a ação (excluir os filhos sem
+    // repassar o toque deixava o botão mudo para o leitor de tela).
+    return Semantics(
+      button: true,
+      label: label,
+      onTap: onTap,
+      excludeSemantics: true,
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(10),
           onTap: onTap,
-          child: Container(
-            width: 32,
-            height: 32,
+          borderRadius: BorderRadius.circular(12),
+          child: Ink(
+            padding: const EdgeInsets.fromLTRB(6, 9, 6, 8),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: ThemeHelpers.borderColor(
-                  context,
-                ).withValues(alpha: disabled ? 0.5 : 1),
-              ),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: siteHairline(context)),
             ),
-            child: Icon(
-              icon,
-              size: 15,
-              color: disabled ? secondary.withValues(alpha: 0.4) : secondary,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 18, color: violetInk),
+                const SizedBox(height: 5),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: TextStyle(
+                      color: ThemeHelpers.textColor(context),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -1089,167 +1246,87 @@ class _BioLinkPageState extends State<BioLinkPage> {
     );
   }
 
-  /// Par de mini-stats — número tabular w800 + label overline.
-  Widget _buildHeroMiniStats(BuildContext context) {
-    final violet = _identity(context);
-    final numberFmt = NumberFormat.decimalPattern('pt_BR');
-    final visible = _linksDraft.where((l) => l.isActive).length;
-    final views = _analytics?.pageViews;
-
-    return Row(
-      children: [
-        Expanded(
-          child: _heroMiniStat(
-            context,
-            value: numberFmt.format(visible),
-            label: visible == 1 ? 'Link visível' : 'Links visíveis',
-            valueColor: violet,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          // Views entram quando as métricas já foram carregadas; antes
-          // disso, o total de links mantém o par sempre completo.
-          child: views != null
-              ? _heroMiniStat(
-                  context,
-                  value: numberFmt.format(views),
-                  label: 'Views · ${_analyticsDays}d',
-                  valueColor: ThemeHelpers.textColor(context),
-                )
-              : _heroMiniStat(
-                  context,
-                  value: numberFmt.format(_linksDraft.length),
-                  label: 'No total',
-                  valueColor: ThemeHelpers.textColor(context),
-                ),
-        ),
-      ],
-    );
-  }
-
-  Widget _heroMiniStat(
-    BuildContext context, {
-    required String value,
-    required String label,
-    required Color valueColor,
-  }) {
-    final theme = Theme.of(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          value,
-          softWrap: false,
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.3,
-            color: valueColor,
-            fontFeatures: const [FontFeature.tabularFigures()],
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          label.toUpperCase(),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: secondary,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1.1,
-            fontSize: 8.5,
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// Mock de "telefone" com a bio page em miniatura — avatar, nome, @handle,
-  /// bio e os primeiros botões de link reais (cores customizadas incluídas).
-  Widget _buildPhoneMock(BuildContext context, List<BioPageLink> activeLinks) {
+  /// Prévia do celular — o que o visitante vê: foto, nome, @, bio e os
+  /// primeiros links ativos nas cores que o cliente escolheu. Mostra o
+  /// RASCUNHO (campos e lista), então acompanha a edição. Moldura: o cinza
+  /// dos campos com um véu da cor da bio — tudo por token, sem brilho
+  /// colorido atrás. Miniatura: o texto cresce até 110%, senão a proporção
+  /// do aparelho se perde (a informação real está ao lado e na lista).
+  Widget _buildPhoneMock(BuildContext context, double width) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final tint = _heroTint(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final page = _page!;
-
-    final title = (page.title ?? '').trim();
-    final handle = (page.instagramHandle ?? '').trim().replaceFirst(
+    final title = _titleController.text.trim();
+    final handle = _instagramController.text.trim().replaceFirst(
       RegExp(r'^@+'),
       '',
     );
-    final bio = (page.bio ?? '').trim();
-    final shown = activeLinks.take(3).toList(growable: false);
-    final extra = activeLinks.length - shown.length;
+    final bio = _bioController.text.trim();
+    final active = _linksDraft.where((l) => l.isActive).toList(growable: false);
+    final shown = active.take(3).toList(growable: false);
+    final extra = active.length - shown.length;
+    final compact = width < 150;
+    final pad = compact ? 8.0 : 10.0;
+    final frame = Color.alphaBlend(
+      tint.withValues(alpha: isDark ? 0.22 : 0.16),
+      siteFieldFill(context),
+    );
 
-    final screenBase = isDark
-        ? AppColors.background.backgroundSecondaryDarkMode
-        : Colors.white;
-
-    return Container(
-          width: 168,
-          padding: const EdgeInsets.all(8),
+    return Semantics(
+      label: 'Prévia da página como o visitante vê',
+      child: MediaQuery.withClampedTextScaling(
+        maxScaleFactor: 1.1,
+        child: Container(
+          width: width,
+          padding: const EdgeInsets.all(7),
           decoration: BoxDecoration(
-            // Moldura tingida pela cor da própria bio (nunca o vermelho da
-            // marca), com um brilho suave da mesma tinta atrás do aparelho.
-            color: Color.alphaBlend(
-              tint.withValues(alpha: isDark ? 0.30 : 0.24),
-              isDark ? const Color(0xFF191627) : const Color(0xFF201C2E),
+            color: frame,
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(
+              color: tint.withValues(alpha: isDark ? 0.4 : 0.3),
             ),
-            borderRadius: BorderRadius.circular(28),
-            boxShadow: [
-              BoxShadow(
-                color: tint.withValues(alpha: isDark ? 0.28 : 0.20),
-                blurRadius: 26,
-                spreadRadius: -4,
-                offset: const Offset(0, 10),
-              ),
-              ...ThemeHelpers.cardShadow(context),
-            ],
+            boxShadow: ThemeHelpers.cardShadow(context),
           ),
           child: Container(
-            padding: const EdgeInsets.fromLTRB(10, 10, 10, 14),
+            padding: EdgeInsets.fromLTRB(pad, 9, pad, 12),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(21),
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Color.alphaBlend(
-                    tint.withValues(alpha: isDark ? 0.16 : 0.09),
-                    screenBase,
-                  ),
-                  screenBase,
-                ],
-              ),
+              color: ThemeHelpers.cardBackgroundColor(context),
+              borderRadius: BorderRadius.circular(20),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // "Câmera" do aparelho
                 Center(
                   child: Container(
-                    width: 42,
+                    width: 34,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: secondary.withValues(alpha: 0.35),
+                      color: secondary.withValues(alpha: 0.3),
                       borderRadius: BorderRadius.circular(999),
                     ),
                   ),
                 ),
-                const SizedBox(height: 14),
-                Center(child: _mockAvatar(context, tint, title)),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
+                Center(
+                  child: _mockAvatar(
+                    context,
+                    tint,
+                    title,
+                    compact ? 40.0 : 46.0,
+                  ),
+                ),
+                const SizedBox(height: 7),
                 Text(
                   title.isEmpty ? 'Sua página' : title,
                   textAlign: TextAlign.center,
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w900,
                     letterSpacing: -0.2,
+                    height: 1.2,
                     color: title.isEmpty
                         ? secondary
                         : ThemeHelpers.textColor(context),
@@ -1270,7 +1347,7 @@ class _BioLinkPageState extends State<BioLinkPage> {
                   ),
                 ],
                 if (bio.isNotEmpty) ...[
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 5),
                   Text(
                     bio,
                     textAlign: TextAlign.center,
@@ -1284,11 +1361,11 @@ class _BioLinkPageState extends State<BioLinkPage> {
                     ),
                   ),
                 ],
-                const SizedBox(height: 12),
+                const SizedBox(height: 11),
                 if (shown.isEmpty)
                   Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
+                      horizontal: 6,
                       vertical: 8,
                     ),
                     decoration: BoxDecoration(
@@ -1300,6 +1377,8 @@ class _BioLinkPageState extends State<BioLinkPage> {
                     child: Text(
                       'Seus links aparecem aqui',
                       textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 8.5,
                         fontWeight: FontWeight.w700,
@@ -1310,10 +1389,10 @@ class _BioLinkPageState extends State<BioLinkPage> {
                 else
                   for (var i = 0; i < shown.length; i++) ...[
                     if (i > 0) const SizedBox(height: 6),
-                    _mockLinkButton(context, shown[i], tint, isDark),
+                    _mockLinkButton(context, shown[i], tint),
                   ],
                 if (extra > 0) ...[
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 7),
                   Text(
                     '+$extra ${extra == 1 ? 'link' : 'links'}',
                     textAlign: TextAlign.center,
@@ -1327,19 +1406,26 @@ class _BioLinkPageState extends State<BioLinkPage> {
               ],
             ),
           ),
-        )
-        .animate()
-        .fadeIn(duration: 300.ms)
-        .moveY(begin: 8, end: 0, curve: Curves.easeOut);
+        ),
+      ),
+    );
   }
 
-  Widget _mockAvatar(BuildContext context, Color accent, String title) {
+  Widget _mockAvatar(
+    BuildContext context,
+    Color accent,
+    String title,
+    double size,
+  ) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final avatarUrl = (_page!.avatarUrl ?? '').trim();
-    final initial = title.isNotEmpty ? title[0].toUpperCase() : null;
+    final initial = title.isNotEmpty
+        ? title.characters.first.toUpperCase()
+        : null;
+    final ink = siteInk(context, accent);
     return Container(
-      width: 46,
-      height: 46,
+      width: size,
+      height: size,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
@@ -1350,14 +1436,13 @@ class _BioLinkPageState extends State<BioLinkPage> {
           ? Image.network(
               avatarUrl,
               fit: BoxFit.cover,
-              errorBuilder: (_, _, _) =>
-                  _mockAvatarFallback(accent, initial),
+              errorBuilder: (_, _, _) => _mockAvatarFallback(ink, initial),
             )
-          : _mockAvatarFallback(accent, initial),
+          : _mockAvatarFallback(ink, initial),
     );
   }
 
-  Widget _mockAvatarFallback(Color accent, String? initial) {
+  Widget _mockAvatarFallback(Color ink, String? initial) {
     return Center(
       child: initial != null
           ? Text(
@@ -1365,45 +1450,43 @@ class _BioLinkPageState extends State<BioLinkPage> {
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w900,
-                color: accent,
+                color: ink,
               ),
             )
-          : Icon(LucideIcons.userRound, size: 18, color: accent),
+          : Icon(LucideIcons.userRound, size: 18, color: ink),
     );
   }
 
-  Widget _mockLinkButton(
-    BuildContext context,
-    BioPageLink link,
-    Color accent,
-    bool isDark,
-  ) {
-    final Color? c1 = siteParseHexColor(link.color);
-    final Color c2 = siteParseHexColor(link.color2) ?? c1 ?? accent;
-    final fg = c1 != null
-        ? (ThemeData.estimateBrightnessForColor(c1) == Brightness.dark
-              ? Colors.white
-              : const Color(0xFF1F2937))
-        : accent;
+  /// Botão da bio em miniatura. Cor escolhida pelo cliente = DADO: pinta o
+  /// botão como na página (degradê quando há segunda cor) e o texto vem de
+  /// [siteOnColor] sobre o meio do degradê. Sem cor, o violeta da tela.
+  Widget _mockLinkButton(BuildContext context, BioPageLink link, Color accent) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final c1 = siteParseHexColor(link.color);
+    final c2 = siteParseHexColor(link.color2);
+    final List<Color>? paint = c1 == null ? null : [c1, c2 ?? c1];
+    final fg = paint != null
+        ? siteOnColor(Color.lerp(paint.first, paint.last, 0.5)!)
+        : siteInk(context, accent);
     final label = link.label.trim().isEmpty ? 'Sem texto' : link.label.trim();
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 7),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        gradient: c1 != null ? LinearGradient(colors: [c1, c2]) : null,
-        color: c1 != null
-            ? null
-            : accent.withValues(alpha: isDark ? 0.2 : 0.12),
-        border: c1 != null
-            ? null
-            : Border.all(color: accent.withValues(alpha: 0.3)),
+        gradient: paint == null ? null : LinearGradient(colors: paint),
+        color: paint == null
+            ? accent.withValues(alpha: isDark ? 0.2 : 0.12)
+            : null,
+        border: paint == null
+            ? Border.all(color: accent.withValues(alpha: 0.3))
+            : null,
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(_iconForLink(link), size: 10, color: fg),
-          const SizedBox(width: 5),
+          Icon(bioLinkIcon(link), size: 10, color: fg),
+          const SizedBox(width: 4),
           Flexible(
             child: Text(
               label,
@@ -1424,35 +1507,56 @@ class _BioLinkPageState extends State<BioLinkPage> {
 
   // ─── Abas flush ───────────────────────────────────────────────────────────
 
-  Widget _buildTabsRail(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
+  Widget _buildTabsRail(BuildContext context, EdgeInsets insets) {
+    final tone = _identity(context);
+    return Padding(
+      padding: EdgeInsets.only(
+        left: math.max(0.0, insets.left - 8),
+        right: math.max(0.0, insets.right - 8),
+      ),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
+          ),
+        ),
+        child: Row(
+          children: [
+            for (final tab in _BioTab.values)
+              Expanded(
+                child: SiteFlushTab(
+                  icon: _tabIcon(tab),
+                  label: _tabLabel(tab),
+                  count: tab == _BioTab.links ? _linksDraft.length : null,
+                  tone: tone,
+                  selected: _activeTab == tab,
+                  // Ponto âmbar estático: há rascunho nesta aba.
+                  dirty: _tabDirty(tab),
+                  onTap: () {
+                    setState(() => _activeTab = tab);
+                    if (tab == _BioTab.analytics &&
+                        !_analyticsLoaded &&
+                        !_analyticsLoading) {
+                      _loadAnalytics();
+                    }
+                  },
+                ),
+              ),
+          ],
         ),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: _kPagePadH - 8),
-      child: Row(
-        children: [
-          for (final tab in _BioTab.values)
-            Expanded(
-              child: SiteFlushTab(
-                icon: _tabIcon(tab),
-                label: _tabLabel(tab),
-                count: tab == _BioTab.links ? _linksDraft.length : null,
-                tone: _stepAccent(context, tab),
-                selected: _activeTab == tab,
-                onTap: () {
-                  setState(() => _activeTab = tab);
-                  if (tab == _BioTab.analytics && !_analyticsLoaded) {
-                    _loadAnalytics();
-                  }
-                },
-              ),
-            ),
-        ],
-      ),
     );
+  }
+
+  bool _tabDirty(_BioTab tab) {
+    switch (tab) {
+      case _BioTab.profile:
+        return _profileDirty || _slugDraftDirty;
+      case _BioTab.links:
+        return _linksDirty;
+      case _BioTab.analytics:
+        return false;
+    }
   }
 
   IconData _tabIcon(_BioTab tab) {
@@ -1498,387 +1602,712 @@ class _BioLinkPageState extends State<BioLinkPage> {
     );
   }
 
-  ({String eyebrow, String title, String hint}) _panelMeta(_BioTab tab) {
+  ({IconData icon, String title, String hint}) _panelMeta(_BioTab tab) {
     switch (tab) {
       case _BioTab.profile:
         return (
-          eyebrow: 'Perfil',
-          title: 'Como sua página se apresenta',
-          hint: 'Nome, bio, Instagram e o endereço público da página.',
+          icon: LucideIcons.idCard,
+          title: 'Como a página se apresenta',
+          hint: 'Publicação, endereço, nome, bio e Instagram.',
         );
       case _BioTab.links:
         return (
-          eyebrow: 'Links',
-          title: 'Monte a lista de botões',
-          hint: 'A ordem da lista é a ordem na página. Oculte sem excluir.',
+          icon: LucideIcons.link,
+          title: 'Links da página',
+          hint:
+              'Cada link vira um botão, na ordem desta lista. Toque para '
+              'editar; arraste pela alça para mudar a ordem.',
         );
       case _BioTab.analytics:
         return (
-          eyebrow: 'Métricas',
+          icon: LucideIcons.chartLine,
           title: 'Desempenho da página',
-          hint: 'Visualizações, cliques e conversão no período escolhido.',
+          hint: 'Visitas e cliques em cada link no período escolhido.',
         );
     }
   }
 
-  /// Cabeçalho de seção — barra tonal violeta 18×2.5 + eyebrow + título
-  /// w900. Mesma anatomia em TODAS as seções da tela.
-  Widget _sectionHeader(
-    BuildContext context, {
-    required String eyebrow,
-    required String title,
-    String? hint,
-  }) {
-    final theme = Theme.of(context);
-    final violet = _accent(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 18,
-          height: 2.5,
-          decoration: BoxDecoration(
-            color: violet,
-            borderRadius: BorderRadius.circular(999),
-          ),
-        ),
-        const SizedBox(height: 7),
-        Text(
-          eyebrow.toUpperCase(),
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: violet,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1.3,
-            fontSize: 9.5,
-          ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          title,
-          // Sem maxLines de propósito — título nunca trunca, quebra linha.
-          style: theme.textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w900,
-            color: ThemeHelpers.textColor(context),
-            letterSpacing: -0.3,
-          ),
-        ),
-        if (hint != null) ...[
-          const SizedBox(height: 4),
-          Text(
-            hint,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-              height: 1.32,
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
+  /// Cabeçalho do painel (barra de acento + título + dica, o mesmo do Meu
+  /// Site) e o corpo, com entrada suave ao trocar de aba.
   Widget _panelShell(BuildContext context, _BioTab tab, List<Widget> body) {
     final meta = _panelMeta(tab);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Entrada em cascata: cabeçalho primeiro, corpo logo atrás.
-        _sectionHeader(
-              context,
-              eyebrow: meta.eyebrow,
-              title: meta.title,
-              hint: meta.hint,
-            )
-            .animate()
-            .fadeIn(duration: 240.ms)
-            .moveY(begin: 8, end: 0, curve: Curves.easeOut),
+        SitePanelHeader(
+          icon: meta.icon,
+          title: meta.title,
+          hint: meta.hint,
+          tone: _identity(context),
+        ),
         const SizedBox(height: 16),
-        Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: body)
-            .animate()
-            .fadeIn(delay: 70.ms, duration: 260.ms)
-            .moveY(begin: 10, end: 0, curve: Curves.easeOut),
+        ...body,
+      ],
+    ).animate().fadeIn(duration: 220.ms);
+  }
+
+  /// Quem só pode ver: campos travados e o porquê, com quem libera.
+  Widget _readOnlyNotice() => const SiteReadOnlyNotice(
+    text:
+        'Somente leitura — para editar, peça ao administrador a permissão '
+        '“Gerenciar o Meu Site e o Link in Bio”.',
+  );
+
+  /// Linha de apoio: ícone 13 + texto que quebra em quantas linhas precisar.
+  /// Com [color], ícone e texto vão na tinta do significado.
+  Widget _noteLine(
+    BuildContext context,
+    IconData icon,
+    String text, {
+    Color? color,
+  }) {
+    final tint = color ?? ThemeHelpers.textSecondaryColor(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: Icon(icon, size: 13, color: tint),
+        ),
+        const SizedBox(width: 7),
+        Expanded(
+          child: Text(
+            text,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: tint,
+              fontSize: 11.5,
+              fontWeight: color == null ? FontWeight.w500 : FontWeight.w700,
+              height: 1.35,
+            ),
+          ),
+        ),
       ],
     );
   }
 
-  Widget _readOnlyNotice(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final amber = isDark
-        ? AppColors.status.warningDarkMode
-        : AppColors.status.warning;
+  // ─── Barra de salvar presa embaixo ───────────────────────────────────────
+
+  /// Com altura sobrando, "Descartar" e "Salvar" ficam presos embaixo
+  /// enquanto a aba tiver alteração — ligar um link no topo de uma lista
+  /// longa não deixa mais o botão escondido no fim da rolagem. Com teclado
+  /// aberto ou em paisagem, volta a ser o [SiteSaveBar] no fim do painel.
+  Widget _buildSaveDock(BuildContext context, EdgeInsets insets) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    // Salvar = confirmar → verde escurecido até o branco passar de 4,5:1.
+    final green = siteSolid(_green(context));
+    final amber = siteInk(context, _amber(context));
+    final links = _activeTab == _BioTab.links;
+    final saving = links ? _linksSaving : _profileSaving;
+    final VoidCallback onSave = links ? _saveLinks : _saveProfile;
+    final VoidCallback onDiscard = links ? _discardLinks : _discardProfile;
+    final label = links ? 'Salvar links' : 'Salvar perfil';
+    final pending = links
+        ? 'Links alterados — a página só muda depois de salvar.'
+        : 'Perfil alterado — a página só muda depois de salvar.';
+    final safeBottom = MediaQuery.paddingOf(context).bottom;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        color: amber.withValues(alpha: isDark ? 0.12 : 0.08),
-        border: Border.all(color: amber.withValues(alpha: 0.3)),
+        color: ThemeHelpers.cardBackgroundColor(context),
+        border: Border(top: BorderSide(color: siteHairline(context))),
       ),
-      child: Row(
+      padding: EdgeInsets.fromLTRB(
+        insets.left,
+        10,
+        insets.right,
+        10 + safeBottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Icon(LucideIcons.lock, size: 14, color: amber),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'Somente leitura — para editar, solicite ao administrador a '
-              'permissão de gerenciar o Link in Bio.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context),
-                height: 1.3,
-                fontSize: 11.5,
-              ),
+          Padding(
+            // Folga à direita para a bolha do chat (canto, 80dp acima).
+            padding: const EdgeInsets.only(right: 56),
+            child: Row(
+              children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: amber,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    pending,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: secondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+              ],
             ),
+          ),
+          const SizedBox(height: 9),
+          Row(
+            children: [
+              // Descartar no tamanho do rótulo; Salvar leva o resto — em
+              // 320dp a 130% ficam lado a lado (o par empilhado dobrava a
+              // altura da barra).
+              OutlinedButton.icon(
+                onPressed: saving ? null : onDiscard,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: secondary,
+                  side: BorderSide(color: ThemeHelpers.borderColor(context)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 13,
+                  ),
+                ),
+                icon: const Icon(LucideIcons.undo2, size: 15),
+                label: const Text(
+                  'Descartar',
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: saving ? null : onSave,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: green,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: green.withValues(alpha: 0.6),
+                    disabledForegroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 13,
+                    ),
+                  ),
+                  icon: saving
+                      ? const SizedBox(
+                          width: 15,
+                          height: 15,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(LucideIcons.check, size: 17),
+                  label: SiteButtonLabel(saving ? 'Salvando…' : label),
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  // ── Perfil & URL ──
+  // ── Perfil & endereço ──
 
-  Widget _buildProfilePanel(BuildContext context) {
+  /// Publicação (aba Perfil) — controle com corpo: estado, o que falta
+  /// (endereço e links) e a ação: Publicar verde / Tirar do ar neutro (o
+  /// vermelho fica no confirmar do diálogo). Sem permissão: botão travado
+  /// com cadeado e o motivo, em vez de sumir.
+  Widget _buildPublishControl(
+    BuildContext context, {
+    required BioPageConfig page,
+    required bool hasSlug,
+  }) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final page = _page!;
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final emerald = isDark
-        ? AppColors.status.greenDarkMode
-        : AppColors.status.green;
-    final amber = isDark
-        ? AppColors.status.warningDarkMode
-        : AppColors.status.warning;
-    final danger = isDark
-        ? AppColors.status.errorDarkMode
-        : AppColors.status.error;
-    final statusTone = page.isPublished ? emerald : amber;
+    final published = page.isPublished;
+    final tone = published ? _green(context) : _amber(context);
     final dateFmt = DateFormat("dd/MM/yyyy 'às' HH:mm", 'pt_BR');
+    final activeCount = _linksDraft.where((l) => l.isActive).length;
+    final address = page.bestPublicUrl?.replaceFirst(RegExp(r'^https?://'), '');
+
+    final String title;
+    final String sub;
+    if (published) {
+      title = 'Sua página está no ar';
+      sub = page.publishedAt != null
+          ? 'Publicada em ${dateFmt.format(page.publishedAt!.toLocal())}. '
+                'Quem abrir o link vê a página.'
+          : 'Quem abrir o link vê a página.';
+    } else if (hasSlug) {
+      title = 'Pronta para publicar';
+      sub = 'Enquanto for rascunho, só você vê a página.';
+    } else {
+      title = 'Falta o endereço para publicar';
+      sub = 'Escolha o final do endereço logo abaixo e depois publique.';
+    }
+
+    final Widget action;
+    if (!_canManage) {
+      action = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          OutlinedButton.icon(
+            onPressed: null,
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: ThemeHelpers.borderLightColor(context)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            ),
+            icon: const Icon(LucideIcons.lock, size: 15),
+            label: SiteButtonLabel(
+              published ? 'Tirar do ar' : 'Publicar página',
+            ),
+          ),
+          const SizedBox(height: 8),
+          const SiteReadOnlyNotice(
+            dense: true,
+            text:
+                'Só quem gerencia o Link in Bio publica ou tira a página do ar.',
+          ),
+        ],
+      );
+    } else if (published) {
+      action = OutlinedButton.icon(
+        onPressed: _publishing ? null : _togglePublish,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: secondary,
+          side: BorderSide(color: ThemeHelpers.borderColor(context)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        ),
+        icon: _publishing
+            ? SizedBox(
+                width: 15,
+                height: 15,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: secondary,
+                ),
+              )
+            : const Icon(LucideIcons.eyeOff, size: 16),
+        label: SiteButtonLabel(_publishing ? 'Aguarde…' : 'Tirar do ar'),
+      );
+    } else {
+      final green = siteSolid(_green(context));
+      action = FilledButton.icon(
+        onPressed: _publishing ? null : _togglePublish,
+        style: FilledButton.styleFrom(
+          backgroundColor: green,
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: green.withValues(alpha: 0.6),
+          disabledForegroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        ),
+        icon: _publishing
+            ? const SizedBox(
+                width: 15,
+                height: 15,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : const Icon(LucideIcons.rocket, size: 17),
+        label: SiteButtonLabel(_publishing ? 'Publicando…' : 'Publicar página'),
+      );
+    }
+
+    return SiteCard(
+      padding: const EdgeInsets.fromLTRB(16, 15, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: tone.withValues(alpha: isDark ? 0.18 : 0.12),
+                  border: Border.all(color: tone.withValues(alpha: 0.4)),
+                ),
+                child: Icon(
+                  published ? LucideIcons.globe : LucideIcons.rocket,
+                  size: 18,
+                  color: siteInk(context, tone),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.3,
+                        color: ThemeHelpers.textColor(context),
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      sub,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: secondary,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // O que falta para ir ao ar — a mesma linha de checklist do Meu
+          // Site (antes eram dois chips lado a lado que cortavam o texto em
+          // 320dp). Sem link ativo, a seta leva à aba Links.
+          SiteCheckRow(
+            label: 'Endereço',
+            value: hasSlug && address != null
+                ? address
+                : 'Falta escolher — é logo abaixo.',
+            state: hasSlug ? SiteCheckState.done : SiteCheckState.missing,
+          ),
+          SiteCheckRow(
+            label: 'Links na página',
+            value: activeCount == 0
+                ? 'Nenhum link aparece — adicione na aba Links.'
+                : '$activeCount '
+                      '${activeCount == 1 ? 'link aparece' : 'links aparecem'} '
+                      'para o visitante.',
+            state: activeCount > 0
+                ? SiteCheckState.done
+                : SiteCheckState.missing,
+            divider: false,
+            onTap: activeCount == 0
+                ? () => setState(() => _activeTab = _BioTab.links)
+                : null,
+          ),
+          const SizedBox(height: 10),
+          action,
+        ],
+      ),
+    );
+  }
+
+  /// Microlinha sob um campo — ícone 12 + texto em até 2 linhas.
+  Widget _fieldMeta(
+    BuildContext context, {
+    required IconData icon,
+    required String text,
+    bool highlight = false,
+  }) {
+    final tone = highlight
+        ? siteInk(context, _identity(context))
+        : ThemeHelpers.textSecondaryColor(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: Icon(icon, size: 12, color: tone),
+        ),
+        const SizedBox(width: 5),
+        Expanded(
+          child: Text(
+            text,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: highlight ? FontWeight.w700 : FontWeight.w600,
+              color: tone,
+              height: 1.3,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Contador vivo da bio — esquenta para âmbar perto do limite.
+  Widget _bioCounter(BuildContext context) {
+    final len = _bioController.text.length;
+    final tone = len >= 260
+        ? siteInk(context, _amber(context))
+        : ThemeHelpers.textSecondaryColor(context);
+    return Text(
+      '$len/280',
+      style: TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w800,
+        color: tone,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      ),
+    );
+  }
+
+  /// O endereço inteiro, ao vivo, sob o campo — o campo só pede o final
+  /// (antes o prefixo "bio.intellisysbr.com/" comia 2/3 do campo em 320dp).
+  Widget _slugPreviewLine(BuildContext context, String draftSlug) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final violetInk = siteInk(context, _identity(context));
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: Icon(LucideIcons.globe, size: 13, color: secondary),
+        ),
+        const SizedBox(width: 7),
+        Expanded(
+          child: Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: '$kBioPublicBase/',
+                  style: TextStyle(
+                    color: secondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                TextSpan(
+                  text: draftSlug.isEmpty ? 'seu-endereco' : draftSlug,
+                  style: TextStyle(
+                    color: draftSlug.isEmpty
+                        ? secondary.withValues(alpha: 0.7)
+                        : violetInk,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12, height: 1.35),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Disponibilidade do endereço digitado (só quando ele mudou).
+  Widget _slugStatusLine(BuildContext context, String draftSlug) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final Widget lead;
+    final String text;
+    final Color color;
+    if (_slugChecking) {
+      color = secondary;
+      text = 'Conferindo se o endereço está livre…';
+      lead = SizedBox(
+        width: 12,
+        height: 12,
+        child: CircularProgressIndicator(strokeWidth: 1.6, color: secondary),
+      );
+    } else if (draftSlug.length < 3) {
+      color = siteInk(context, _amber(context));
+      text = 'Use pelo menos 3 caracteres.';
+      lead = Icon(LucideIcons.circleAlert, size: 13, color: color);
+    } else if (_slugAvailable == true) {
+      color = siteInk(context, _green(context));
+      text = 'Livre — toque em Salvar endereço.';
+      lead = Icon(LucideIcons.circleCheckBig, size: 13, color: color);
+    } else if (_slugAvailable == false) {
+      color = siteInk(context, _red(context));
+      text = 'Este endereço já está em uso por outra empresa — escolha outro.';
+      lead = Icon(LucideIcons.circleX, size: 13, color: color);
+    } else {
+      return const SizedBox.shrink();
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(padding: const EdgeInsets.only(top: 1), child: lead),
+        const SizedBox(width: 7),
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(
+              color: color,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+              height: 1.35,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProfilePanel(BuildContext context) {
+    final page = _page!;
+    final violet = _identity(context);
+    final green = siteSolid(_green(context));
 
     final currentSlug = (page.slug ?? '').trim();
     final draftSlug = _slugController.text.trim();
     final slugChanged = draftSlug != currentSlug;
+    final canSaveSlug =
+        _canManage &&
+        !_slugSaving &&
+        slugChanged &&
+        draftSlug.length >= 3 &&
+        _slugAvailable != false;
+    final slugLabel = _slugSaving
+        ? 'Salvando…'
+        : (slugChanged || currentSlug.isEmpty
+              ? 'Salvar endereço'
+              : 'Endereço salvo');
+    final instagram = _instagramController.text.trim().replaceAll('@', '');
 
     void markDirty(String _) {
       if (!_profileDirty) setState(() => _profileDirty = true);
     }
 
     return _panelShell(context, _BioTab.profile, [
-      if (!_canManage)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: _readOnlyNotice(context),
-        ),
-      // Controle de publicação — superfície neutra (não caixa tingida), com
-      // roundel de status, checklist de prontidão e a ação principal.
+      if (!_canManage) ...[_readOnlyNotice(), const SizedBox(height: 12)],
       _buildPublishControl(
         context,
         page: page,
-        statusTone: statusTone,
-        emerald: emerald,
-        amber: amber,
-        secondary: secondary,
-        isDark: isDark,
-        theme: theme,
-        dateFmt: dateFmt,
         hasSlug: currentSlug.isNotEmpty,
       ),
-      const SizedBox(height: 22),
-      _sectionHeader(context, eyebrow: 'Endereço', title: 'URL pública'),
+      const SizedBox(height: 26),
+      const SiteSubsectionHeader(
+        label: 'Endereço da página',
+        icon: LucideIcons.globe,
+        hint:
+            'É o link que vai na bio do Instagram. Não precisa configurar '
+            'nada: você só escolhe o final.',
+      ),
       const SizedBox(height: 12),
       SiteFilledField(
         controller: _slugController,
-        label: 'Endereço da página',
+        label: 'Final do endereço',
         hint: 'minha-imobiliaria',
-        prefixText: '$kBioPublicBase/',
+        prefixText: '/',
+        icon: LucideIcons.link2,
         keyboardType: TextInputType.url,
         enabled: _canManage,
         onChanged: _onSlugChanged,
-        accent: _accent(context),
+        accent: violet,
       ),
+      const SizedBox(height: 7),
+      _slugPreviewLine(context, draftSlug),
       if (slugChanged && draftSlug.isNotEmpty) ...[
-        const SizedBox(height: 7),
-        Row(
-          children: [
-            if (_slugChecking) ...[
-              SizedBox(
-                width: 12,
-                height: 12,
-                child: CircularProgressIndicator(
-                  strokeWidth: 1.6,
-                  color: secondary,
-                ),
-              ),
-              const SizedBox(width: 7),
-              Text(
-                'Verificando disponibilidade…',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: secondary,
-                  fontSize: 11.5,
-                ),
-              ),
-            ] else if (draftSlug.length < 3) ...[
-              Icon(LucideIcons.circleAlert, size: 13, color: amber),
-              const SizedBox(width: 6),
-              Text(
-                'Mínimo de 3 caracteres',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: amber,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 11.5,
-                ),
-              ),
-            ] else if (_slugAvailable == true) ...[
-              Icon(LucideIcons.circleCheckBig, size: 13, color: emerald),
-              const SizedBox(width: 6),
-              Text(
-                'Disponível — toque em Salvar URL',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: emerald,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 11.5,
-                ),
-              ),
-            ] else if (_slugAvailable == false) ...[
-              Icon(LucideIcons.circleX, size: 13, color: danger),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  'Este endereço já está em uso por outra empresa',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: danger,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 11.5,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
+        const SizedBox(height: 6),
+        _slugStatusLine(context, draftSlug),
       ],
-      const SizedBox(height: 10),
-      SizedBox(
-        width: double.infinity,
-        child: FilledButton.icon(
-          onPressed:
-              _canManage &&
-                  !_slugSaving &&
-                  slugChanged &&
-                  draftSlug.length >= 3 &&
-                  _slugAvailable != false
-              ? _saveSlug
+      const SizedBox(height: 12),
+      FilledButton.icon(
+        onPressed: canSaveSlug ? _saveSlug : null,
+        style: FilledButton.styleFrom(
+          backgroundColor: green,
+          foregroundColor: Colors.white,
+          // Salvando: segue verde com o spinner branco à vista. Sem
+          // mudança: o desabilitado neutro diz "nada a salvar".
+          disabledBackgroundColor: _slugSaving
+              ? green.withValues(alpha: 0.6)
               : null,
-          style: FilledButton.styleFrom(
-            backgroundColor: emerald,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            padding: const EdgeInsets.symmetric(vertical: 12),
+          disabledForegroundColor: _slugSaving ? Colors.white : null,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
           ),
-          icon: _slugSaving
-              ? const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : const Icon(LucideIcons.save, size: 16),
-          label: Text(
-            _slugSaving
-                ? 'Salvando…'
-                : (slugChanged || currentSlug.isEmpty
-                      ? 'Salvar URL'
-                      : 'URL salva'),
-            softWrap: false,
-            style: const TextStyle(fontWeight: FontWeight.w800),
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         ),
-      ),
-      const SizedBox(height: 8),
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(LucideIcons.info, size: 13, color: secondary),
-          const SizedBox(width: 7),
-          Expanded(
-            child: Text(
-              'Sem DNS e sem configuração — a Intellisys hospeda em '
-              '$kBioPublicBase e você só escolhe a parte final do endereço.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: secondary,
-                height: 1.35,
-                fontSize: 11.5,
+        icon: _slugSaving
+            ? const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : Icon(
+                slugChanged || currentSlug.isEmpty
+                    ? LucideIcons.save
+                    : LucideIcons.check,
+                size: 16,
               ),
-            ),
-          ),
-        ],
+        label: SiteButtonLabel(slugLabel),
       ),
-      const SizedBox(height: 20),
-      _sectionHeader(
-        context,
-        eyebrow: 'Apresentação',
-        title: 'Nome, bio e Instagram',
+      const SizedBox(height: 26),
+      const SiteSubsectionHeader(
+        label: 'Nome, bio e Instagram',
+        icon: LucideIcons.userRound,
+        hint: 'O que aparece no topo da página, acima dos links.',
       ),
       const SizedBox(height: 12),
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SiteFilledField(
-                  controller: _titleController,
-                  label: 'Nome ou título',
-                  hint: 'Sua imobiliária',
-                  icon: LucideIcons.store,
-                  enabled: _canManage,
-                  onChanged: (v) {
-                    markDirty(v);
-                    setState(() {});
-                  },
-                  accent: _accent(context),
-                ),
-                const SizedBox(height: 5),
-                _fieldMeta(
-                  context,
-                  icon: LucideIcons.type,
-                  text: 'Título no topo da sua página',
-                ),
-              ],
+      // Duas colunas só quando cada uma tem folga (≥170dp × escala do
+      // texto) — em 320dp, ou a 130%, empilham.
+      SiteRow2(
+        minColumnWidth: 170,
+        left: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SiteFilledField(
+              controller: _titleController,
+              label: 'Nome ou título',
+              hint: 'Sua imobiliária',
+              icon: LucideIcons.store,
+              enabled: _canManage,
+              textCapitalization: TextCapitalization.words,
+              onChanged: (v) {
+                markDirty(v);
+                setState(() {});
+              },
+              accent: violet,
             ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SiteFilledField(
-                  controller: _instagramController,
-                  label: 'Instagram',
-                  hint: 'sua_imobiliaria',
-                  icon: LucideIcons.atSign,
-                  enabled: _canManage,
-                  onChanged: (v) {
-                    markDirty(v);
-                    setState(() {});
-                  },
-                  accent: _accent(context),
-                ),
-                const SizedBox(height: 5),
-                _fieldMeta(
-                  context,
-                  icon: LucideIcons.link2,
-                  text: _instagramController.text.trim().isEmpty
-                      ? 'Vira o botão do seu perfil'
-                      : 'instagram.com/'
-                          '${_instagramController.text.trim().replaceAll('@', '')}',
-                  highlight: _instagramController.text.trim().isNotEmpty,
-                ),
-              ],
+            const SizedBox(height: 5),
+            _fieldMeta(
+              context,
+              icon: LucideIcons.type,
+              text: 'Título no topo da página',
             ),
-          ),
-        ],
+          ],
+        ),
+        right: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SiteFilledField(
+              controller: _instagramController,
+              label: 'Instagram',
+              hint: 'sua_imobiliaria',
+              icon: LucideIcons.atSign,
+              enabled: _canManage,
+              onChanged: (v) {
+                markDirty(v);
+                setState(() {});
+              },
+              accent: violet,
+            ),
+            const SizedBox(height: 5),
+            _fieldMeta(
+              context,
+              icon: LucideIcons.link2,
+              text: instagram.isEmpty
+                  ? 'Vira o botão do seu perfil'
+                  : 'instagram.com/$instagram',
+              highlight: instagram.isNotEmpty,
+            ),
+          ],
+        ),
       ),
       const SizedBox(height: 12),
       SiteFilledField(
@@ -1888,198 +2317,79 @@ class _BioLinkPageState extends State<BioLinkPage> {
         maxLines: 3,
         maxLength: 280,
         enabled: _canManage,
+        textCapitalization: TextCapitalization.sentences,
         onChanged: (v) {
           markDirty(v);
           setState(() {});
         },
-        accent: _accent(context),
+        accent: violet,
       ),
       const SizedBox(height: 5),
       Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
             child: _fieldMeta(
               context,
               icon: LucideIcons.alignLeft,
-              text: 'Aparece logo abaixo do seu nome',
+              text: 'Aparece logo abaixo do nome',
             ),
           ),
+          const SizedBox(width: 8),
           _bioCounter(context),
         ],
       ),
-      const SizedBox(height: 8),
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(LucideIcons.image, size: 13, color: secondary),
-          const SizedBox(width: 7),
-          Expanded(
-            child: Text(
-              'Foto de perfil, template e customização Premium são ajustados '
-              'no painel web — aqui você cuida do texto, da URL e dos links.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: secondary,
-                height: 1.35,
-                fontSize: 11.5,
-              ),
-            ),
-          ),
-        ],
+      const SizedBox(height: 12),
+      _noteLine(
+        context,
+        LucideIcons.image,
+        'Foto de perfil, modelo e cores da página são ajustados no painel '
+        'web — aqui você cuida do texto, do endereço e dos links.',
       ),
       SiteSaveBar(
-        visible: _canManage && _profileDirty,
+        visible: _canManage && _profileDirty && !_dockFits(context),
         saving: _profileSaving,
         label: 'Salvar perfil',
         onSave: _saveProfile,
-        onDiscard: () {
-          setState(() {
-            _profileDirty = false;
-            _applyPage(_page!, resetDrafts: true);
-          });
-        },
+        onDiscard: _discardProfile,
+        pendingText: 'Perfil alterado — a página só muda depois de salvar.',
       ),
     ]);
   }
 
   // ── Links ──
 
-  /// Barra-resumo viva do topo da lista de links — total, visíveis, cliques
-  /// no período (quando há métrica) e a dica de reordenar.
-  Widget _buildLinksResumo(
-    BuildContext context,
-    Color tone,
-    Color secondary,
-  ) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final total = _linksDraft.length;
-    final visible = _linksDraft.where((l) => l.isActive).length;
-    final hidden = total - visible;
-    final totalClicks = (_analytics?.links ?? const <BioPageLinkAnalytics>[])
-        .fold<int>(0, (s, l) => s + l.clicks);
-    final numberFmt = NumberFormat.decimalPattern('pt_BR');
-
-    Widget stat(IconData icon, String value, String label, Color c) {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: c),
-          const SizedBox(width: 6),
-          Text.rich(
-            TextSpan(
-              children: [
-                TextSpan(
-                  text: value,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w900,
-                    color: ThemeHelpers.textColor(context),
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                    letterSpacing: -0.2,
-                  ),
-                ),
-                TextSpan(
-                  text: '  $label',
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w700,
-                    color: secondary,
-                    letterSpacing: -0.1,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
-      decoration: BoxDecoration(
-        color: tone.withValues(alpha: isDark ? 0.10 : 0.06),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: tone.withValues(alpha: 0.22)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Wrap(
-            spacing: 16,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              stat(LucideIcons.link, '$total',
-                  total == 1 ? 'link' : 'links', tone),
-              stat(LucideIcons.eye, '$visible', 'visíveis',
-                  const Color(0xFF3FA66B)),
-              if (hidden > 0)
-                stat(LucideIcons.eyeOff, '$hidden', 'ocultos', secondary),
-              if (totalClicks > 0)
-                stat(LucideIcons.mousePointerClick,
-                    numberFmt.format(totalClicks), 'cliques', tone),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Container(height: 1, color: tone.withValues(alpha: 0.16)),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Icon(LucideIcons.gripVertical, size: 12, color: tone),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  'Arraste pela alça para reordenar — a ordem aqui é a ordem na página.',
-                  maxLines: 2,
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w600,
-                    color: secondary,
-                    height: 1.3,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildLinksPanel(BuildContext context) {
-    final theme = Theme.of(context);
-    final tone = _accent(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    // Cliques por link (quando as métricas já foram carregadas) — entram
-    // como microlinha na própria linha do link.
+    final violet = _identity(context);
+    final violetInk = siteInk(context, violet);
+    final hairline = ThemeHelpers.borderLightColor(context);
+    // Cliques por link (quando as métricas já foram carregadas) — entram na
+    // própria linha do link.
     final clicksByLink = <String, int>{
       for (final item in _analytics?.links ?? const <BioPageLinkAnalytics>[])
         item.linkId: item.clicks,
     };
 
     return _panelShell(context, _BioTab.links, [
-      if (!_canManage)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: _readOnlyNotice(context),
-        ),
-      if (_linksDraft.isNotEmpty) ...[
-        _buildLinksResumo(context, tone, secondary),
-        const SizedBox(height: 14),
-      ],
+      if (!_canManage) ...[_readOnlyNotice(), const SizedBox(height: 12)],
       if (_linksDraft.isEmpty)
         SiteEmptyState(
           icon: LucideIcons.link,
-          title: 'Nenhum link ainda',
-          body:
-              'Adicione WhatsApp, site, catálogo de imóveis ou formulário — '
-              'os botões aparecem na página na ordem da lista.',
-          tone: tone,
+          title: 'Sua página ainda não tem links',
+          body: _canManage
+              ? 'Cada link vira um botão na página, na ordem desta lista. '
+                    'Comece pelo WhatsApp (wa.me/55 + DDD + número) e depois '
+                    'o Instagram, o site ou o catálogo de imóveis.'
+              : 'Quem gerencia o Link in Bio adiciona os links — cada um '
+                    'vira um botão na página.',
+          tone: violet,
+          // Criar é o CTA principal da tela vazia: o violeta da tela,
+          // escurecido até o rótulo branco passar de 4,5:1.
           action: _canManage
               ? FilledButton.icon(
                   onPressed: _addLink,
                   style: FilledButton.styleFrom(
-                    backgroundColor: tone,
+                    backgroundColor: siteSolid(violet),
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -2090,141 +2400,101 @@ class _BioLinkPageState extends State<BioLinkPage> {
                     ),
                   ),
                   icon: const Icon(LucideIcons.plus, size: 16),
-                  label: const Text(
-                    'Adicionar o primeiro link',
-                    softWrap: false,
-                    style: TextStyle(fontWeight: FontWeight.w800),
-                  ),
+                  label: const SiteButtonLabel('Adicionar o primeiro link'),
                 )
               : null,
         )
       else ...[
-        ReorderableListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          buildDefaultDragHandles: false,
-          itemCount: _linksDraft.length,
-          // Linha arrastada ganha chão de card para descolar da lista flush.
-          proxyDecorator: (child, index, animation) => Material(
-            color: ThemeHelpers.cardBackgroundColor(context),
-            borderRadius: BorderRadius.circular(14),
-            elevation: 3,
-            shadowColor: Colors.black.withValues(alpha: 0.3),
-            child: child,
+        DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(color: hairline),
+              bottom: BorderSide(color: hairline),
+            ),
           ),
-          onReorder: !_canManage
-              ? (_, _) {}
-              : (oldIndex, newIndex) {
-                  setState(() {
-                    if (newIndex > oldIndex) newIndex -= 1;
-                    final item = _linksDraft.removeAt(oldIndex);
-                    _linksDraft.insert(newIndex, item);
-                    _reindexLinks();
-                    _linksDirty = true;
-                  });
-                },
-          itemBuilder: (context, index) {
-            final link = _linksDraft[index];
-            return KeyedSubtree(
-              key: ValueKey('bio-link-${link.id}'),
-              child: _buildLinkTile(
-                context,
-                link,
-                index,
-                clicksByLink[link.id],
-                isLast: index == _linksDraft.length - 1,
+          child: ReorderableListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            buildDefaultDragHandles: false,
+            itemCount: _linksDraft.length,
+            // Linha arrastada ganha chão de card (com filete) para descolar
+            // da lista flush.
+            proxyDecorator: (child, index, animation) => Material(
+              color: ThemeHelpers.cardBackgroundColor(context),
+              elevation: 3,
+              shadowColor: ThemeHelpers.shadowColor(context),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: BorderSide(color: siteHairline(context)),
               ),
-            );
-          },
+              child: child,
+            ),
+            onReorder: !_canManage
+                ? (_, _) {}
+                : (oldIndex, newIndex) {
+                    setState(() {
+                      if (newIndex > oldIndex) newIndex -= 1;
+                      final item = _linksDraft.removeAt(oldIndex);
+                      _linksDraft.insert(newIndex, item);
+                      _reindexLinks();
+                      _linksDirty = true;
+                    });
+                  },
+            itemBuilder: (context, index) {
+              final link = _linksDraft[index];
+              return KeyedSubtree(
+                key: ValueKey('bio-link-${link.id}'),
+                child: _buildLinkTile(
+                  context,
+                  link,
+                  index,
+                  clicksByLink[link.id],
+                  isLast: index == _linksDraft.length - 1,
+                ),
+              );
+            },
+          ),
         ),
         if (_canManage) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           OutlinedButton.icon(
             onPressed: _addLink,
             style: OutlinedButton.styleFrom(
-              foregroundColor: tone,
-              side: BorderSide(color: tone.withValues(alpha: 0.45)),
+              foregroundColor: violetInk,
+              side: BorderSide(color: violet.withValues(alpha: 0.45)),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
-              padding: const EdgeInsets.symmetric(vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             ),
             icon: const Icon(LucideIcons.plus, size: 16),
-            label: const Text(
-              'Adicionar link',
-              softWrap: false,
-              style: TextStyle(fontWeight: FontWeight.w800),
-            ),
+            label: const SiteButtonLabel('Adicionar link'),
           ),
         ],
-        Padding(
-          padding: const EdgeInsets.only(top: 12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(LucideIcons.info, size: 13, color: secondary),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(
-                  'Toque no link para editar — o ícone do botão é detectado '
-                  'pela URL. As alterações só vão ao ar depois de salvar.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: secondary,
-                    height: 1.35,
-                    fontSize: 11.5,
-                  ),
-                ),
-              ),
-            ],
-          ),
+        const SizedBox(height: 12),
+        _noteLine(
+          context,
+          LucideIcons.info,
+          'Oculto = continua na lista, mas some da página. Nada vai ao ar '
+          'antes de salvar os links.',
         ),
       ],
       SiteSaveBar(
-        visible: _canManage && _linksDirty,
+        visible: _canManage && _linksDirty && !_dockFits(context),
         saving: _linksSaving,
         label: 'Salvar links',
         onSave: _saveLinks,
-        onDiscard: () {
-          setState(() {
-            _linksDraft = List.of(_page!.links);
-            _linksDirty = false;
-          });
-        },
+        onDiscard: _discardLinks,
+        pendingText: 'Links alterados — a página só muda depois de salvar.',
       ),
     ]);
   }
 
-  /// Botão de captação não tem URL — ganha ícone próprio (o web marca com a
-  /// tag "Captação"); os demais seguem a detecção pela URL.
-  IconData _iconForLink(BioPageLink link) =>
-      link.isLeadForm ? LucideIcons.userRoundPlus : _linkIcon(link.url);
-
-  IconData _linkIcon(String url) {
-    final u = url.toLowerCase();
-    if (u.contains('wa.me') || u.contains('whatsapp')) {
-      return LucideIcons.messageCircle;
-    }
-    // Lucide removeu os ícones de marca — usamos equivalentes semânticos.
-    if (u.contains('instagram.com')) return LucideIcons.camera;
-    if (u.contains('youtube.com') || u.contains('youtu.be')) {
-      return LucideIcons.circlePlay;
-    }
-    if (u.contains('facebook.com') || u.contains('fb.com')) {
-      return LucideIcons.thumbsUp;
-    }
-    if (u.contains('linkedin.com')) return LucideIcons.briefcaseBusiness;
-    if (u.contains('tiktok.com')) return LucideIcons.music2;
-    if (u.contains('t.me') || u.contains('telegram')) return LucideIcons.send;
-    if (u.startsWith('mailto:')) return LucideIcons.mail;
-    if (u.startsWith('tel:')) return LucideIcons.phone;
-    return LucideIcons.globe;
-  }
-
-  /// Linha de link flush — plate 40px pintado com a cor custom do link
-  /// (gradiente quando houver `color2`; fallback violeta tonal), título
-  /// w700, URL esmaecida, cliques quando houver métrica, switch violeta e
-  /// alça de arraste discreta à direita. Hairline indentado na régua do
-  /// texto separa as linhas.
+  /// Linha de link flush: alça de arrastar (à esquerda, longe do
+  /// interruptor), plaquinha com o ícone nas cores do cliente, o texto do
+  /// botão, o tipo — endereço do link ou selo CAPTAÇÃO —, oculto e cliques;
+  /// à direita, o interruptor "aparece na página" e remover. Toque na linha
+  /// = editar.
   Widget _buildLinkTile(
     BuildContext context,
     BioPageLink link,
@@ -2234,19 +2504,34 @@ class _BioLinkPageState extends State<BioLinkPage> {
   }) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final violet = _accent(context);
+    final violet = _identity(context);
+    final violetInk = siteInk(context, violet);
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final active = link.isActive;
+    final label = link.label.trim().isEmpty ? 'Sem texto' : link.label.trim();
     final displayUrl = link.url.replaceFirst(RegExp(r'^https?://'), '').trim();
     final numberFmt = NumberFormat.decimalPattern('pt_BR');
 
-    final Color? c1 = active ? siteParseHexColor(link.color) : null;
-    final Color? c2 = active ? siteParseHexColor(link.color2) : null;
-    final plateFg = c1 != null
-        ? (ThemeData.estimateBrightnessForColor(c1) == Brightness.dark
-              ? Colors.white
-              : const Color(0xFF1F2937))
-        : (active ? violet : secondary.withValues(alpha: 0.75));
+    // Cores do cliente = dado (como na página); só no link ativo — o oculto
+    // fica cinza para ler "fora da página" de relance.
+    final c1 = active ? siteParseHexColor(link.color) : null;
+    final c2 = active ? siteParseHexColor(link.color2) : null;
+    final List<Color>? paint = c1 == null ? null : [c1, c2 ?? c1];
+    final plateFg = paint != null
+        ? siteOnColor(Color.lerp(paint.first, paint.last, 0.5)!)
+        : (active ? violetInk : secondary);
+    final plateTone = active ? violet : secondary;
+
+    final String detail;
+    var detailColor = secondary;
+    if (link.isLeadForm) {
+      detail = 'abre o formulário de nome e telefone';
+    } else if (displayUrl.isEmpty) {
+      detail = 'sem endereço — toque para completar';
+      detailColor = siteInk(context, _amber(context));
+    } else {
+      detail = displayUrl;
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2254,7 +2539,6 @@ class _BioLinkPageState extends State<BioLinkPage> {
         Material(
           color: Colors.transparent,
           child: InkWell(
-            borderRadius: BorderRadius.circular(12),
             splashColor: violet.withValues(alpha: 0.08),
             highlightColor: violet.withValues(alpha: 0.04),
             onTap: _canManage ? () => _editLink(index) : null,
@@ -2262,160 +2546,158 @@ class _BioLinkPageState extends State<BioLinkPage> {
               padding: const EdgeInsets.symmetric(vertical: 10),
               child: Row(
                 children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(13),
-                      gradient: c1 != null
-                          ? LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [c1, c2 ?? c1],
-                            )
-                          : null,
-                      color: c1 != null
-                          ? null
-                          : (active
-                                ? violet.withValues(
-                                    alpha: isDark ? 0.18 : 0.10,
-                                  )
-                                : secondary.withValues(
-                                    alpha: isDark ? 0.14 : 0.09,
-                                  )),
-                    ),
-                    child: Icon(_iconForLink(link), size: 18, color: plateFg),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                link.label.trim().isEmpty
-                                    ? 'Sem texto'
-                                    : link.label.trim(),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                  color: active
-                                      ? ThemeHelpers.textColor(context)
-                                      : secondary,
-                                  letterSpacing: -0.1,
-                                ),
+                  // O toque na alça não abre a edição (o GestureDetector
+                  // segura o toque; o arraste segue com o listener).
+                  ReorderableDragStartListener(
+                    index: index,
+                    enabled: _canManage,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {},
+                      child: Semantics(
+                        label: 'Arrastar para mudar a ordem',
+                        child: SizedBox(
+                          width: 28,
+                          height: 44,
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Icon(
+                              LucideIcons.gripVertical,
+                              size: 18,
+                              color: secondary.withValues(
+                                alpha: _canManage ? 0.75 : 0.3,
                               ),
                             ),
-                            if (!active) ...[
-                              const SizedBox(width: 7),
-                              SiteMiniPill(
-                                label: 'Oculto',
-                                tone: secondary,
-                                icon: LucideIcons.eyeOff,
-                              ),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 2),
-                        // Botão de captação não tem URL: a segunda linha diz
-                        // o que ele faz (em vez de "—", que parecia link
-                        // quebrado e convidava a apagar o botão).
-                        Text(
-                          link.isLeadForm
-                              ? 'Captação · formulário de nome e telefone'
-                              : (displayUrl.isEmpty ? '—' : displayUrl),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            // No claro, o acento escurecido segura o
-                            // contraste do texto pequeno sobre o branco.
-                            color: link.isLeadForm && active
-                                ? (isDark
-                                      ? violet
-                                      : Color.lerp(violet, Colors.black, 0.28)!)
-                                : secondary,
-                            fontSize: 11.5,
-                            fontWeight: link.isLeadForm
-                                ? FontWeight.w700
-                                : null,
-                          ),
-                        ),
-                        if (clicks != null) ...[
-                          const SizedBox(height: 3),
-                          Text.rich(
-                            TextSpan(
-                              text: numberFmt.format(clicks),
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w800,
-                                color: active ? violet : secondary,
-                                fontFeatures: const [
-                                  FontFeature.tabularFigures(),
-                                ],
-                              ),
-                              children: [
-                                TextSpan(
-                                  text: clicks == 1 ? ' clique' : ' cliques',
-                                  style: TextStyle(
-                                    fontSize: 10.5,
-                                    fontWeight: FontWeight.w600,
-                                    color: secondary,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Switch.adaptive(
-                    value: active,
-                    activeThumbColor: violet,
-                    onChanged: !_canManage
-                        ? null
-                        : (v) {
-                            setState(() {
-                              _linksDraft = List.of(_linksDraft)
-                                ..[index] = link.copyWith(isActive: v);
-                              _linksDirty = true;
-                            });
-                          },
-                  ),
-                  // Remover é neutro — o vermelho fica só no botão confirmar
-                  // do diálogo de remoção.
-                  Tooltip(
-                    message: 'Remover link',
-                    child: InkResponse(
-                      radius: 18,
-                      onTap: _canManage ? () => _removeLink(index) : null,
-                      child: Padding(
-                        padding: const EdgeInsets.all(6),
-                        child: Icon(
-                          LucideIcons.trash2,
-                          size: 16,
-                          color: secondary.withValues(
-                            alpha: _canManage ? 0.75 : 0.35,
                           ),
                         ),
                       ),
                     ),
                   ),
-                  // Alça de arraste discreta à direita.
-                  ReorderableDragStartListener(
-                    index: index,
-                    enabled: _canManage,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(4, 6, 0, 6),
-                      child: Icon(
-                        LucideIcons.gripVertical,
-                        size: 16,
-                        color: secondary.withValues(
-                          alpha: _canManage ? 0.55 : 0.3,
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      gradient: paint == null
+                          ? null
+                          : LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: paint,
+                            ),
+                      color: paint == null
+                          ? plateTone.withValues(alpha: isDark ? 0.16 : 0.1)
+                          : null,
+                      border: paint == null
+                          ? Border.all(color: plateTone.withValues(alpha: 0.25))
+                          : null,
+                    ),
+                    child: Icon(bioLinkIcon(link), size: 18, color: plateFg),
+                  ),
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          label,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: active
+                                ? ThemeHelpers.textColor(context)
+                                : secondary,
+                            letterSpacing: -0.1,
+                            height: 1.25,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        // Selos e detalhe em Wrap: com texto grande, o
+                        // detalhe desce para a linha de baixo em vez de
+                        // espremer os selos.
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            if (link.isLeadForm)
+                              SiteMiniPill(
+                                label: 'Captação',
+                                tone: violet,
+                                icon: LucideIcons.userRoundPlus,
+                              ),
+                            if (!active)
+                              SiteMiniPill(
+                                label: 'Oculto',
+                                tone: secondary,
+                                icon: LucideIcons.eyeOff,
+                              ),
+                            Text(
+                              detail,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: detailColor,
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            if (clicks != null)
+                              Text(
+                                '${numberFmt.format(clicks)} '
+                                '${clicks == 1 ? 'clique' : 'cliques'}',
+                                maxLines: 1,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: ThemeHelpers.textColor(context),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  // Ligado = aparece na página: verde, como "no ar" (antes
+                  // era polegar violeta sobre a trilha vermelha do tema).
+                  Semantics(
+                    label: active ? 'Aparece na página' : 'Oculto da página',
+                    child: Switch.adaptive(
+                      value: active,
+                      activeThumbColor: Colors.white,
+                      activeTrackColor: _green(context),
+                      onChanged: !_canManage
+                          ? null
+                          : (v) {
+                              setState(() {
+                                _linksDraft = List.of(_linksDraft)
+                                  ..[index] = link.copyWith(isActive: v);
+                                _linksDirty = true;
+                              });
+                            },
+                    ),
+                  ),
+                  // Remover é neutro — o vermelho fica só no confirmar do
+                  // diálogo de remoção.
+                  Tooltip(
+                    message: 'Remover link',
+                    child: InkResponse(
+                      radius: 20,
+                      onTap: _canManage ? () => _removeLink(index) : null,
+                      child: SizedBox(
+                        width: 34,
+                        height: 40,
+                        child: Icon(
+                          LucideIcons.trash2,
+                          size: 16,
+                          color: secondary.withValues(
+                            alpha: _canManage ? 0.8 : 0.35,
+                          ),
                         ),
                       ),
                     ),
@@ -2427,112 +2709,112 @@ class _BioLinkPageState extends State<BioLinkPage> {
         ),
         if (!isLast)
           Container(
-            margin: const EdgeInsets.only(left: 52),
+            margin: const EdgeInsets.only(left: 77),
             height: 1,
-            color: ThemeHelpers.borderLightColor(
-              context,
-            ).withValues(alpha: 0.55),
+            color: ThemeHelpers.borderLightColor(context),
           ),
       ],
     );
   }
 
-  // ── Analytics ──
+  // ── Métricas ──
 
   Widget _buildAnalyticsPanel(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final tone = _accent(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final page = _page!;
-
+    final Widget body;
+    if (_analyticsLoading || !_analyticsLoaded) {
+      body = _buildAnalyticsSkeleton(context);
+    } else if (_analyticsError != null) {
+      body = Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: SiteErrorState(
+          message: _analyticsError!,
+          statusCode: _analyticsErrorStatus,
+          onRetry: () => _loadAnalytics(),
+        ),
+      );
+    } else {
+      body = _buildAnalyticsBody(context, _analytics ?? BioPageAnalytics.empty);
+    }
     return _panelShell(context, _BioTab.analytics, [
-      // Chips de período — grid alinhado, ação de atualizar na própria linha.
-      Row(
-        children: [
-          for (final days in _kAnalyticsPeriods) ...[
-            Expanded(child: _periodChip(context, days, tone)),
-            const SizedBox(width: 8),
-          ],
-          SiteRowAction(
-            icon: LucideIcons.refreshCw,
-            tooltip: 'Atualizar',
-            tone: tone,
-            onTap: _analyticsLoading ? null : () => _loadAnalytics(),
-          ),
-        ],
-      ),
+      _buildPeriodSelector(context),
       const SizedBox(height: 14),
-      if (_analyticsLoading)
-        _buildAnalyticsSkeleton(context)
-      else if (_analytics == null)
-        SiteEmptyState(
-          icon: LucideIcons.chartLine,
-          title: page.isPublished ? 'Sem métricas ainda' : 'Página fora do ar',
-          body: page.isPublished
-              ? 'Assim que alguém visitar sua página, as métricas '
-                    'aparecem aqui.'
-              : 'Publique a página para começar a coletar visualizações e '
-                    'cliques.',
-          tone: tone,
-          action: OutlinedButton.icon(
-            onPressed: () => _loadAnalytics(),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: tone,
-              side: BorderSide(color: tone.withValues(alpha: 0.45)),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 18,
-                vertical: 11,
-              ),
-            ),
-            icon: const Icon(LucideIcons.refreshCw, size: 15),
-            label: const Text(
-              'Atualizar',
-              softWrap: false,
-              style: TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ),
-        )
-      else
-        ..._buildAnalyticsBody(context, theme, isDark, tone, secondary),
+      body,
     ]);
   }
 
-  Widget _periodChip(BuildContext context, int days, Color tone) {
-    final selected = _analyticsDays == days;
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Material(
-      color: selected
-          ? tone.withValues(alpha: isDark ? 0.2 : 0.12)
-          : Colors.transparent,
-      borderRadius: BorderRadius.circular(11),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(11),
-        onTap: _analyticsLoading || selected
-            ? null
-            : () => _loadAnalytics(days: days),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 9),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(11),
-            border: Border.all(
-              color: selected
-                  ? tone.withValues(alpha: 0.45)
-                  : ThemeHelpers.borderColor(context),
+  /// Período em controle segmentado (7 / 30 / 90 dias) + atualizar.
+  Widget _buildPeriodSelector(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              color: siteFieldFill(context),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: ThemeHelpers.borderLightColor(context)),
+            ),
+            child: Row(
+              children: [
+                for (final days in _kAnalyticsPeriods)
+                  Expanded(child: _periodSegment(context, days)),
+              ],
             ),
           ),
-          child: Center(
-            child: Text(
-              '$days dias',
-              style: TextStyle(
-                color: selected ? tone : secondary,
-                fontWeight: selected ? FontWeight.w900 : FontWeight.w600,
-                fontSize: 12.5,
-                letterSpacing: -0.1,
+        ),
+        SiteRowAction(
+          icon: LucideIcons.refreshCw,
+          tooltip: 'Atualizar métricas',
+          tone: _identity(context),
+          onTap: _analyticsLoading ? null : () => _loadAnalytics(),
+        ),
+      ],
+    );
+  }
+
+  Widget _periodSegment(BuildContext context, int days) {
+    final selected = _analyticsDays == days;
+    final violet = _identity(context);
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(9),
+      side: selected
+          ? BorderSide(color: violet.withValues(alpha: 0.4))
+          : BorderSide.none,
+    );
+    final VoidCallback? onTap = _analyticsLoading || selected
+        ? null
+        : () => _loadAnalytics(days: days);
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: 'Últimos $days dias',
+      onTap: onTap,
+      excludeSemantics: true,
+      child: Material(
+        color: selected
+            ? ThemeHelpers.cardBackgroundColor(context)
+            : Colors.transparent,
+        shape: shape,
+        child: InkWell(
+          customBorder: shape,
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  '$days dias',
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(
+                    color: selected
+                        ? siteInk(context, violet)
+                        : ThemeHelpers.textSecondaryColor(context),
+                    fontWeight: selected ? FontWeight.w900 : FontWeight.w600,
+                    fontSize: 12.5,
+                  ),
+                ),
               ),
             ),
           ),
@@ -2541,178 +2823,188 @@ class _BioLinkPageState extends State<BioLinkPage> {
     );
   }
 
-  List<Widget> _buildAnalyticsBody(
-    BuildContext context,
-    ThemeData theme,
-    bool isDark,
-    Color tone,
-    Color secondary,
-  ) {
-    final data = _analytics!;
+  List<Widget> _tilesRow(List<Widget> tiles) => [
+    for (var i = 0; i < tiles.length; i++) ...[
+      if (i > 0) const SizedBox(width: 10),
+      Expanded(child: tiles[i]),
+    ],
+  ];
+
+  Widget _buildAnalyticsBody(BuildContext context, BioPageAnalytics data) {
     final numberFmt = NumberFormat.decimalPattern('pt_BR');
     final ctrFmt = NumberFormat('#,##0.0', 'pt_BR');
-    final emerald = isDark
-        ? AppColors.status.greenDarkMode
-        : AppColors.status.green;
-    final blue = isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
-    // Âmbar categórico para o Instagram — vermelho de status é só erro.
-    final amber = isDark
-        ? AppColors.status.warningDarkMode
-        : AppColors.status.warning;
-    final maxClicks = data.links.isEmpty
-        ? 0
-        : data.links.map((l) => l.clicks).reduce((a, b) => a > b ? a : b);
+    final published = _page!.isPublished;
+    final hasViews = data.viewsByDay.any((d) => d.views > 0);
+    final totalClicks = data.links.fold<int>(0, (s, l) => s + l.clicks);
+    final maxClicks = data.links.fold<int>(
+      0,
+      (m, l) => l.clicks > m ? l.clicks : m,
+    );
 
-    return [
-      // Grade 2×2 de estatísticas — cor por significado: views no violeta
-      // da tela, cliques em azul, Instagram em âmbar, conversão em verde.
-      Row(
-        children: [
-          Expanded(
-            child: _statTile(
-              context,
-              LucideIcons.eye,
-              'Visualizações',
-              numberFmt.format(data.pageViews),
-              tone,
-            ),
+    // Número em tinta de texto, cor só no ícone e no medidor — o arco-íris
+    // de antes (violeta/azul/âmbar/verde) não dizia nada.
+    final tiles = <Widget>[
+      _statTile(
+        context,
+        icon: LucideIcons.eye,
+        label: 'Visitas à página',
+        value: numberFmt.format(data.pageViews),
+      ),
+      _statTile(
+        context,
+        icon: LucideIcons.mousePointerClick,
+        label: 'Cliques nos links',
+        value: numberFmt.format(data.linkClicks),
+      ),
+      _statTile(
+        context,
+        icon: LucideIcons.atSign,
+        label: 'Cliques no Instagram',
+        value: numberFmt.format(data.instagramClicks),
+      ),
+      _statTile(
+        context,
+        icon: LucideIcons.trendingUp,
+        label: 'Taxa de cliques',
+        value: '${ctrFmt.format(data.clickThroughRate)}%',
+        meter: (data.clickThroughRate / 100).clamp(0.0, 1.0).toDouble(),
+      ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (!published) ...[
+          _noteLine(
+            context,
+            LucideIcons.circleAlert,
+            'A página está fora do ar — as visitas só contam depois de '
+            'publicar.',
+            color: siteInk(context, _amber(context)),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _statTile(
+          const SizedBox(height: 12),
+        ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            // 4 lado a lado no tablet; 2×2 no celular. Altura igual por
+            // linha: rótulo de 2 linhas não desalinha o número do vizinho.
+            if (constraints.maxWidth >= 560) {
+              return IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: _tilesRow(tiles),
+                ),
+              );
+            }
+            return Column(
+              children: [
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: _tilesRow(tiles.sublist(0, 2)),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: _tilesRow(tiles.sublist(2)),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+        if (published && data.pageViews == 0) ...[
+          const SizedBox(height: 12),
+          _noteLine(
+            context,
+            LucideIcons.info,
+            'Ninguém visitou a página neste período. Coloque o link na bio '
+            'do Instagram e mande no WhatsApp para começar.',
+          ),
+        ],
+        if (hasViews) ...[
+          const SizedBox(height: 24),
+          const SiteSubsectionHeader(
+            label: 'Visitas por dia',
+            icon: LucideIcons.chartNoAxesColumn,
+          ),
+          const SizedBox(height: 12),
+          _buildViewsChart(context, data),
+        ],
+        const SizedBox(height: 24),
+        const SiteSubsectionHeader(
+          label: 'Cliques por link',
+          icon: LucideIcons.mousePointerClick,
+        ),
+        const SizedBox(height: 4),
+        if (data.links.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: _noteLine(
               context,
               LucideIcons.mousePointerClick,
-              'Cliques',
-              numberFmt.format(data.linkClicks),
-              blue,
+              'Nenhum clique nos links neste período.',
             ),
-          ),
-        ],
-      ),
-      const SizedBox(height: 10),
-      Row(
-        children: [
-          Expanded(
-            child: _statTile(
-              context,
-              LucideIcons.camera,
-              'Instagram',
-              numberFmt.format(data.instagramClicks),
-              amber,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _statTile(
-              context,
-              LucideIcons.trendingUp,
-              'Taxa de cliques',
-              '${ctrFmt.format(data.clickThroughRate)}%',
-              emerald,
-              meter: (data.clickThroughRate / 100).clamp(0.0, 1.0),
-            ),
-          ),
-        ],
-      ),
-      if (data.viewsByDay.any((d) => d.views > 0 || d.clicks > 0)) ...[
-        const SizedBox(height: 20),
-        _sectionHeader(
-          context,
-          eyebrow: 'Tendência',
-          title: 'Visualizações por dia',
-        ),
-        const SizedBox(height: 12),
-        _buildViewsChart(context, data, tone, secondary),
-      ],
-      const SizedBox(height: 20),
-      _sectionHeader(context, eyebrow: 'Ranking', title: 'Cliques por link'),
-      const SizedBox(height: 12),
-      if (data.links.isEmpty)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Row(
-            children: [
-              Icon(LucideIcons.mousePointerClick, size: 14, color: secondary),
-              const SizedBox(width: 8),
-              Text(
-                'Nenhum clique no período',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: secondary,
-                  fontWeight: FontWeight.w600,
-                ),
+          )
+        else
+          for (var i = 0; i < data.links.length; i++) ...[
+            if (i > 0)
+              Container(
+                height: 1,
+                color: ThemeHelpers.borderLightColor(context),
               ),
-            ],
-          ),
-        )
-      else
-        SiteCard(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Column(
-            children: [
-              for (var i = 0; i < data.links.length; i++) ...[
-                if (i > 0)
-                  Divider(
-                    height: 16,
-                    color: ThemeHelpers.borderLightColor(
-                      context,
-                    ).withValues(alpha: 0.5),
-                  ),
-                _clicksRow(context, data.links[i], maxClicks, tone, numberFmt),
-              ],
-            ],
-          ),
-        ),
-    ];
+            _clicksRow(
+              context,
+              data.links[i],
+              maxClicks,
+              totalClicks,
+              numberFmt,
+            ),
+          ],
+      ],
+    );
   }
 
   Widget _statTile(
-    BuildContext context,
-    IconData icon,
-    String label,
-    String value,
-    Color tone, {
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required String value,
     double? meter,
   }) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final violet = _identity(context);
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.fromLTRB(13, 12, 13, 13),
       decoration: BoxDecoration(
         color: ThemeHelpers.cardBackgroundColor(context),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.06)
-              : Colors.black.withValues(alpha: 0.05),
-        ),
-        boxShadow: ThemeHelpers.cardShadow(context, strength: 0.7),
+        border: Border.all(color: siteHairline(context)),
+        boxShadow: ThemeHelpers.cardShadow(context),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 26,
-                height: 26,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  color: tone.withValues(alpha: isDark ? 0.18 : 0.1),
-                ),
-                child: Icon(icon, size: 14, color: tone),
+              Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: Icon(icon, size: 14, color: siteInk(context, violet)),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 7),
               Expanded(
                 child: Text(
-                  label.toUpperCase(),
-                  maxLines: 1,
+                  label,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: secondary,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.1,
-                    fontSize: 9.5,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    height: 1.25,
                   ),
                 ),
               ),
@@ -2724,9 +3016,10 @@ class _BioLinkPageState extends State<BioLinkPage> {
             alignment: Alignment.centerLeft,
             child: Text(
               value,
+              maxLines: 1,
               style: theme.textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.w900,
-                color: tone,
+                color: ThemeHelpers.textColor(context),
                 letterSpacing: -0.6,
                 height: 1.0,
                 fontFeatures: const [FontFeature.tabularFigures()],
@@ -2738,10 +3031,10 @@ class _BioLinkPageState extends State<BioLinkPage> {
             ClipRRect(
               borderRadius: BorderRadius.circular(999),
               child: LinearProgressIndicator(
-                value: meter.clamp(0.0, 1.0),
+                value: meter.clamp(0.0, 1.0).toDouble(),
                 minHeight: 4,
-                backgroundColor: tone.withValues(alpha: 0.14),
-                valueColor: AlwaysStoppedAnimation<Color>(tone),
+                backgroundColor: violet.withValues(alpha: 0.14),
+                valueColor: AlwaysStoppedAnimation<Color>(violet),
               ),
             ),
           ],
@@ -2750,18 +3043,16 @@ class _BioLinkPageState extends State<BioLinkPage> {
     );
   }
 
-  Widget _buildViewsChart(
-    BuildContext context,
-    BioPageAnalytics data,
-    Color tone,
-    Color secondary,
-  ) {
+  Widget _buildViewsChart(BuildContext context, BioPageAnalytics data) {
     final days = data.viewsByDay;
-    final maxViews = days
-        .map((d) => d.views)
-        .fold<int>(0, (m, v) => v > m ? v : m);
-    if (maxViews == 0) return const SizedBox.shrink();
+    final maxViews = days.fold<int>(0, (m, d) => d.views > m ? d.views : m);
+    if (days.isEmpty || maxViews == 0) return const SizedBox.shrink();
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final violet = _identity(context);
+    final numberFmt = NumberFormat.decimalPattern('pt_BR');
+    // 90 barras em 288dp: sem vão entre elas; com poucos dias, 2dp.
+    final gap = days.length > 60 ? 0.0 : (days.length > 31 ? 1.0 : 2.0);
 
     String edgeLabel(String iso) {
       final parsed = DateTime.tryParse(iso);
@@ -2769,39 +3060,43 @@ class _BioLinkPageState extends State<BioLinkPage> {
       return DateFormat('dd/MM', 'pt_BR').format(parsed);
     }
 
-    String viewsWord(int n) => n == 1 ? 'visualização' : 'visualizações';
+    String visitsWord(int n) => n == 1 ? 'visita' : 'visitas';
+
+    final edgeStyle = TextStyle(
+      fontSize: 10.5,
+      color: secondary,
+      fontWeight: FontWeight.w600,
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
-          height: 64,
+          height: 72,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               for (var i = 0; i < days.length; i++) ...[
-                if (i > 0) const SizedBox(width: 2),
+                if (i > 0 && gap > 0) SizedBox(width: gap),
                 Expanded(
                   child: Tooltip(
                     message:
-                        '${edgeLabel(days[i].date)} — ${days[i].views} '
-                        '${viewsWord(days[i].views)}',
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
+                        '${edgeLabel(days[i].date)} — '
+                        '${numberFmt.format(days[i].views)} '
+                        '${visitsWord(days[i].views)}',
+                    child: Container(
                       height: days[i].views <= 0
                           ? 3
-                          : (6 + 58 * (days[i].views / maxViews))
-                                .clamp(3, 64)
+                          : (6 + 64 * (days[i].views / maxViews))
+                                .clamp(3.0, 72.0)
                                 .toDouble(),
                       decoration: BoxDecoration(
                         borderRadius: const BorderRadius.vertical(
                           top: Radius.circular(3),
                         ),
                         color: days[i].views <= 0
-                            ? tone.withValues(alpha: isDark ? 0.14 : 0.1)
-                            : tone.withValues(
-                                alpha: 0.35 + 0.65 * (days[i].views / maxViews),
-                              ),
+                            ? violet.withValues(alpha: isDark ? 0.16 : 0.12)
+                            : violet.withValues(alpha: 0.85),
                       ),
                     ),
                   ),
@@ -2810,26 +3105,25 @@ class _BioLinkPageState extends State<BioLinkPage> {
             ],
           ),
         ),
+        Container(height: 1, color: ThemeHelpers.borderLightColor(context)),
         const SizedBox(height: 6),
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              days.isNotEmpty ? edgeLabel(days.first.date) : '',
-              style: TextStyle(fontSize: 10, color: secondary),
-            ),
-            Text(
-              'pico: $maxViews ${viewsWord(maxViews)}',
-              style: TextStyle(
-                fontSize: 10,
-                color: tone,
-                fontWeight: FontWeight.w800,
+            Text(edgeLabel(days.first.date), style: edgeStyle),
+            Expanded(
+              child: Text(
+                'pico: ${numberFmt.format(maxViews)} ${visitsWord(maxViews)}',
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  color: siteInk(context, violet),
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
-            Text(
-              days.isNotEmpty ? edgeLabel(days.last.date) : '',
-              style: TextStyle(fontSize: 10, color: secondary),
-            ),
+            Text(edgeLabel(days.last.date), style: edgeStyle),
           ],
         ),
       ],
@@ -2840,226 +3134,296 @@ class _BioLinkPageState extends State<BioLinkPage> {
     BuildContext context,
     BioPageLinkAnalytics item,
     int maxClicks,
-    Color tone,
+    int totalClicks,
     NumberFormat fmt,
   ) {
     final theme = Theme.of(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
+    final violet = _identity(context);
     final ratio = maxClicks <= 0 ? 0.0 : item.clicks / maxClicks;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                item.label.trim().isEmpty ? 'Sem texto' : item.label.trim(),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textColor(context),
-                  fontWeight: FontWeight.w700,
+    final share = totalClicks <= 0
+        ? null
+        : (item.clicks * 100 / totalClicks).round();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  item.label.trim().isEmpty ? 'Sem texto' : item.label.trim(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textColor(context),
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              fmt.format(item.clicks),
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: tone,
-                fontWeight: FontWeight.w900,
+              const SizedBox(width: 10),
+              Text(
+                fmt.format(item.clicks),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: ThemeHelpers.textColor(context),
+                  fontWeight: FontWeight.w900,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(999),
-          child: LinearProgressIndicator(
-            value: ratio.clamp(0.02, 1.0),
-            minHeight: 5,
-            backgroundColor: secondary.withValues(alpha: 0.12),
-            valueColor: AlwaysStoppedAnimation<Color>(
-              tone.withValues(alpha: 0.35 + 0.65 * ratio),
+              if (share != null) ...[
+                const SizedBox(width: 6),
+                Text(
+                  '$share%',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: secondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: ratio.clamp(0.02, 1.0).toDouble(),
+              minHeight: 5,
+              backgroundColor: secondary.withValues(alpha: 0.12),
+              valueColor: AlwaysStoppedAnimation<Color>(violet),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
   Widget _buildAnalyticsSkeleton(BuildContext context) {
-    return Column(
-      children: [
-        Row(
-          children: const [
-            Expanded(child: SkeletonBox(height: 84, borderRadius: 14)),
-            SizedBox(width: 10),
-            Expanded(child: SkeletonBox(height: 84, borderRadius: 14)),
+    Widget tile() =>
+        const Expanded(child: SkeletonBox(height: 92, borderRadius: 14));
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final four = constraints.maxWidth >= 560;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (four)
+              Row(
+                children: [
+                  tile(),
+                  const SizedBox(width: 10),
+                  tile(),
+                  const SizedBox(width: 10),
+                  tile(),
+                  const SizedBox(width: 10),
+                  tile(),
+                ],
+              )
+            else ...[
+              Row(children: [tile(), const SizedBox(width: 10), tile()]),
+              const SizedBox(height: 10),
+              Row(children: [tile(), const SizedBox(width: 10), tile()]),
+            ],
+            const SizedBox(height: 24),
+            const SkeletonText(width: 120, height: 10),
+            const SizedBox(height: 14),
+            const SkeletonBox(height: 72, borderRadius: 8),
+            const SizedBox(height: 24),
+            const SkeletonText(width: 120, height: 10),
+            const SizedBox(height: 14),
+            for (var i = 0; i < 3; i++) ...[
+              const SkeletonText(height: 12),
+              const SizedBox(height: 8),
+              const SkeletonBox(height: 5, borderRadius: 999),
+              const SizedBox(height: 16),
+            ],
           ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: const [
-            Expanded(child: SkeletonBox(height: 84, borderRadius: 14)),
-            SizedBox(width: 10),
-            Expanded(child: SkeletonBox(height: 84, borderRadius: 14)),
-          ],
-        ),
-        const SizedBox(height: 18),
-        const SkeletonBox(
-          width: double.infinity,
-          height: 150,
-          borderRadius: 16,
-        ),
-      ],
+        );
+      },
     );
   }
 
-  // ─── Skeleton (fiel ao hero recomposto e às linhas flush) ────────────────
+  // ─── Esqueleto (espelha o hero, as abas e as linhas de link) ─────────────
 
-  Widget _buildPageSkeleton(BuildContext context) {
+  Widget _buildPageSkeleton(BuildContext context, EdgeInsets insets) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final violet = isDark
-        ? AppColors.status.purpleDarkMode
-        : AppColors.status.purple;
-    // Mesma moldura tingida do mock real (enquanto carrega, a tinta é o
-    // violeta da tela — ainda não conhecemos as cores custom dos links).
-    final frameColor = Color.alphaBlend(
-      violet.withValues(alpha: isDark ? 0.30 : 0.24),
-      isDark ? const Color(0xFF191627) : const Color(0xFF201C2E),
+    // Mesma moldura da prévia real (enquanto carrega, o véu é o violeta da
+    // tela — ainda não conhecemos as cores dos links).
+    final frame = Color.alphaBlend(
+      _identity(context).withValues(alpha: isDark ? 0.22 : 0.16),
+      siteFieldFill(context),
     );
-    final hairline = ThemeHelpers.borderLightColor(
-      context,
-    ).withValues(alpha: 0.55);
+    final hairline = ThemeHelpers.borderLightColor(context);
 
-    Widget miniStat() => Column(
+    Widget phone(double width) => Container(
+      width: width,
+      padding: const EdgeInsets.all(7),
+      decoration: BoxDecoration(
+        color: frame,
+        borderRadius: BorderRadius.circular(26),
+      ),
+      child: SkeletonBox(
+        height: (width * 1.85).clamp(200.0, 300.0).toDouble(),
+        borderRadius: 20,
+      ),
+    );
+
+    Widget status() => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: const [
-        SkeletonText(width: 34, height: 17),
-        SizedBox(height: 5),
-        SkeletonText(width: 64, height: 8),
+      children: [
+        Row(
+          children: const [
+            SkeletonBox(width: 30, height: 30, borderRadius: 999),
+            SizedBox(width: 10),
+            Expanded(child: SkeletonText(height: 16)),
+          ],
+        ),
+        const SizedBox(height: 10),
+        const SkeletonText(height: 10),
+        const SizedBox(height: 6),
+        const SkeletonText(width: 90, height: 10),
+        const SizedBox(height: 18),
+        const SkeletonText(width: 64, height: 24),
+        const SizedBox(height: 6),
+        const SkeletonText(height: 10),
+      ],
+    );
+
+    Widget address() => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SkeletonBox(height: 58, borderRadius: 14),
+        const SizedBox(height: 10),
+        Row(
+          children: const [
+            Expanded(child: SkeletonBox(height: 56, borderRadius: 12)),
+            SizedBox(width: 8),
+            Expanded(child: SkeletonBox(height: 56, borderRadius: 12)),
+            SizedBox(width: 8),
+            Expanded(child: SkeletonBox(height: 56, borderRadius: 12)),
+          ],
+        ),
       ],
     );
 
     Widget linkRow() => Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
-        children: [
-          const SkeletonBox(width: 40, height: 40, borderRadius: 13),
-          const SizedBox(width: 12),
+        children: const [
+          SizedBox(width: 28),
+          SkeletonBox(width: 38, height: 38, borderRadius: 12),
+          SizedBox(width: 11),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                SkeletonText(width: 120, height: 13),
-                SizedBox(height: 6),
+              children: [
+                SkeletonText(width: 130, height: 13),
+                SizedBox(height: 7),
                 SkeletonText(width: 170, height: 10),
               ],
             ),
           ),
-          const SizedBox(width: 12),
-          const SkeletonBox(width: 40, height: 22, borderRadius: 999),
+          SizedBox(width: 10),
+          SkeletonBox(width: 46, height: 26, borderRadius: 999),
+          SizedBox(width: 12),
+          SkeletonBox(width: 16, height: 18, borderRadius: 4),
+          SizedBox(width: 9),
         ],
       ),
     );
 
     Widget indentedHairline() => Container(
-      margin: const EdgeInsets.only(left: 52),
+      margin: const EdgeInsets.only(left: 77),
       height: 1,
       color: hairline,
     );
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        _kPagePadH,
-        _kPagePadTop + 4,
-        _kPagePadH,
-        _kPagePadBottom,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Moldura do telefone
-              Container(
-                width: 168,
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: frameColor,
-                  borderRadius: BorderRadius.circular(28),
-                ),
-                child: const SkeletonBox(height: 264, borderRadius: 21),
-              ),
-              const SizedBox(width: 18),
-              Expanded(
-                child: Column(
+      padding: insets.copyWith(top: _kPagePadTop, bottom: _kPagePadBottom),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final wide = width >= 560;
+          final phoneWidth = wide
+              ? 176.0
+              : (width * 0.42).clamp(118.0, 168.0).toDouble();
+          final Widget hero = wide
+              ? Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const SizedBox(height: 4),
-                    // Pill de status + microlinha
-                    const SkeletonBox(
-                      width: 126,
-                      height: 26,
-                      borderRadius: 999,
-                    ),
-                    const SizedBox(height: 8),
-                    const SkeletonText(width: 148, height: 10),
-                    const SizedBox(height: 18),
-                    // Domínio esmaecido + /slug + icon-chips 32px
-                    const SkeletonText(width: 96, height: 9),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: const [
-                        Expanded(child: SkeletonText(height: 17)),
-                        SizedBox(width: 8),
-                        SkeletonBox(width: 32, height: 32, borderRadius: 10),
-                        SizedBox(width: 6),
-                        SkeletonBox(width: 32, height: 32, borderRadius: 10),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    // Par de mini-stats
-                    Row(
-                      children: [
-                        Expanded(child: miniStat()),
-                        const SizedBox(width: 12),
-                        Expanded(child: miniStat()),
-                      ],
+                    phone(phoneWidth),
+                    const SizedBox(width: 24),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          status(),
+                          const SizedBox(height: 18),
+                          address(),
+                        ],
+                      ),
                     ),
                   ],
-                ),
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        phone(phoneWidth),
+                        const SizedBox(width: 14),
+                        Expanded(child: status()),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    address(),
+                  ],
+                );
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              hero,
+              const SizedBox(height: 26),
+              Row(
+                children: const [
+                  Expanded(child: SkeletonText(height: 14)),
+                  SizedBox(width: 14),
+                  Expanded(child: SkeletonText(height: 14)),
+                  SizedBox(width: 14),
+                  Expanded(child: SkeletonText(height: 14)),
+                ],
               ),
+              const SizedBox(height: 24),
+              Row(
+                children: const [
+                  SkeletonBox(width: 3.5, height: 34, borderRadius: 999),
+                  SizedBox(width: 11),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SkeletonText(width: 150, height: 15),
+                        SizedBox(height: 6),
+                        SkeletonText(height: 10),
+                      ],
+                    ),
+                  ),
+                  SizedBox(width: 10),
+                  SkeletonBox(width: 34, height: 34, borderRadius: 11),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Container(height: 1, color: hairline),
+              linkRow(),
+              indentedHairline(),
+              linkRow(),
+              indentedHairline(),
+              linkRow(),
             ],
-          ),
-          const SizedBox(height: 22),
-          // Abas
-          Row(
-            children: const [
-              Expanded(child: SkeletonText(height: 14)),
-              SizedBox(width: 14),
-              Expanded(child: SkeletonText(height: 14)),
-              SizedBox(width: 14),
-              Expanded(child: SkeletonText(height: 14)),
-            ],
-          ),
-          const SizedBox(height: 22),
-          // Cabeçalho de seção (barra 18×2.5 + eyebrow + título)
-          const SkeletonBox(width: 18, height: 2.5, borderRadius: 999),
-          const SizedBox(height: 8),
-          const SkeletonText(width: 56, height: 9),
-          const SizedBox(height: 6),
-          const SkeletonText(width: 180, height: 15),
-          const SizedBox(height: 16),
-          // Linhas de link flush com hairlines indentados
-          linkRow(),
-          indentedHairline(),
-          linkRow(),
-          indentedHairline(),
-          linkRow(),
-        ],
+          );
+        },
       ),
     );
   }

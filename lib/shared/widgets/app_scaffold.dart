@@ -112,9 +112,14 @@ class _AppScaffoldState extends State<AppScaffold> {
                     clipBehavior: Clip.none,
                     children: [
                       Positioned.fill(child: widget.body),
+                      // Sem o botão do chat no chat e no WhatsApp: na
+                      // conversa ele cobria a hora/ticks da última bolha e a
+                      // bandeja de anexos (revisão de design, 30/09/2026).
                       if (currentRoute != AppRoutes.chat &&
                           currentRoute != null &&
-                          !currentRoute.startsWith('/chat'))
+                          !currentRoute.startsWith('/chat') &&
+                          currentRoute != AppRoutes.whatsapp &&
+                          !currentRoute.startsWith('/whatsapp/'))
                         const ChatFloatingButton(),
                     ],
                   ),

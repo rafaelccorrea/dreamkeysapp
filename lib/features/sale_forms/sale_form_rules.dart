@@ -3,14 +3,16 @@ import 'package:flutter/services.dart';
 // Regras da ficha de venda — espelho 1:1 do web (`CreateSaleFormPage.tsx`:
 // `computeErrorsForTab`, `getCommissionInstallmentValuesError`, TABS e
 // `saleFormNotApplicable.ts`). O web é a fonte da verdade: mesmas chaves,
-// mesmas mensagens, mesma ordem. Arquivo puro (sem widgets) para poder ser
-// conferido linha a linha contra o web.
+// mesmas regras, mesma ordem. As mensagens seguem as do web, ajustadas só no
+// texto quando citam algo que na tela do app tem outro nome (ex.: o botão
+// "Não se aplica"). Arquivo puro (sem widgets) para poder ser conferido linha
+// a linha contra o web.
 
 /// Valor gravado quando o campo foi marcado como "Não aplicável".
 const String kSaleFormNa = 'Não aplicável';
 
 /// Rótulo da opção nos selects (o valor continua sendo [kSaleFormNa]).
-const String kSaleFormNaSelectLabel = '― Não aplicável ―';
+const String kSaleFormNaSelectLabel = '― Não se aplica ―';
 
 /// `isSaleFormNotApplicable` do web: "Não aplicável" ou "N/A" (qualquer caixa).
 bool isSaleFormNa(String? value) {
@@ -138,9 +140,17 @@ const Map<int, List<String>> kSaleFormTabFieldKeys = {
 /// Limite do back (`ParcelamentoComissaoDto.quantidadeParcelas`).
 const int kSaleFormMaxParcelas = 120;
 
+/// "R$ 1.234,56" — mesmo formato dos campos de dinheiro da ficha.
 String _brl(double v) {
-  final s = v.toStringAsFixed(2);
-  return 'R\$ $s';
+  final centavos = (v * 100).round();
+  final inteiro = (centavos.abs() ~/ 100).toString();
+  final decimal = (centavos.abs() % 100).toString().padLeft(2, '0');
+  final b = StringBuffer();
+  for (var i = 0; i < inteiro.length; i++) {
+    if (i > 0 && (inteiro.length - i) % 3 == 0) b.write('.');
+    b.write(inteiro[i]);
+  }
+  return 'R\$ ${centavos < 0 ? '-' : ''}$b,$decimal';
 }
 
 /// `getCommissionInstallmentValuesError` do web (null = ok).
@@ -240,7 +250,7 @@ Map<String, String> computeSaleFormErrorsForTab(
       if (v('mediaSource').trim().isEmpty) {
         e['mediaSource'] = 'Mídia de origem é obrigatória';
       }
-      req('saleUnit', 'Unidade de venda é obrigatória');
+      req('saleUnit', 'Unidade responsável é obrigatória');
       req(
         'description',
         i.generalGroup
@@ -258,7 +268,7 @@ Map<String, String> computeSaleFormErrorsForTab(
           saleFormValidEmail,
           porDigitos: false);
       fmt('buyerPhone', 'Celular é obrigatório',
-          'Telefone inválido (mín. 10 dígitos)', saleFormValidPhone);
+          'Celular inválido (DDD + número)', saleFormValidPhone);
       fmt('buyerZipCode', 'CEP é obrigatório', 'CEP inválido (8 dígitos)',
           saleFormValidCep);
       req('buyerStreet', 'Rua é obrigatória');
@@ -279,9 +289,9 @@ Map<String, String> computeSaleFormErrorsForTab(
       fmt('sellerEmail', 'E-mail é obrigatório', 'E-mail inválido',
           saleFormValidEmail,
           porDigitos: false);
-      fmt('sellerPhone', 'Celular é obrigatório', 'Telefone inválido',
-          saleFormValidPhone);
-      fmt('sellerZipCode', 'CEP é obrigatório', 'CEP inválido',
+      fmt('sellerPhone', 'Celular é obrigatório',
+          'Celular inválido (DDD + número)', saleFormValidPhone);
+      fmt('sellerZipCode', 'CEP é obrigatório', 'CEP inválido (8 dígitos)',
           saleFormValidCep);
       req('sellerStreet', 'Rua é obrigatória');
       req('sellerNumber', 'Número é obrigatório');
@@ -307,8 +317,8 @@ Map<String, String> computeSaleFormErrorsForTab(
         req('formaPagamento', 'Forma de pagamento é obrigatória');
       } else {
         req('propertyCode', 'Código do imóvel é obrigatório');
-        fmt('propertyZipCode', 'CEP do imóvel é obrigatório', 'CEP inválido',
-            saleFormValidCep);
+        fmt('propertyZipCode', 'CEP do imóvel é obrigatório',
+            'CEP inválido (8 dígitos)', saleFormValidCep);
         req('propertyAddress', 'Endereço do imóvel é obrigatório');
         req('propertyNumber', 'Número é obrigatório');
         req('propertyNeighborhood', 'Bairro é obrigatório');
@@ -321,7 +331,7 @@ Map<String, String> computeSaleFormErrorsForTab(
       if (!i.commissionModelNaoAplicavel) {
         if (v('commissionPaymentModelDescription').trim().isEmpty) {
           e['commissionPaymentModelDescription'] =
-              'Descreva o modelo de pagamento da comissão ou marque Não aplicável.';
+              'Descreva o modelo de pagamento da comissão ou marque “Não se aplica”.';
         }
         if (!na('totalCommission')) {
           if (v('totalCommission').trim().isEmpty) {
@@ -345,7 +355,7 @@ Map<String, String> computeSaleFormErrorsForTab(
           } else if (qtd > kSaleFormMaxParcelas) {
             // Trava do back (ParcelamentoComissaoDto) — antecipada aqui.
             e['commissionInstallmentsCount'] =
-                'Quantidade de parcelas excede o limite permitido';
+                'Quantidade de parcelas acima do limite (máximo $kSaleFormMaxParcelas)';
           } else if (!i.installmentsEqual) {
             final err = saleFormInstallmentValuesError(
               i.installmentValues,
@@ -385,7 +395,7 @@ void _conjuge(
       fmt,
 ) {
   req('${p}Name',
-      'Nome do cônjuge é obrigatório quando “Possui cônjuge/sócio” está marcado');
+      'Nome do cônjuge é obrigatório quando há cônjuge ou sócio na venda');
   fmt('${p}Cpf', 'CPF do cônjuge é obrigatório', 'CPF inválido',
       saleFormValidCpf);
   req('${p}Rg', 'RG do cônjuge é obrigatório');
@@ -394,10 +404,10 @@ void _conjuge(
   fmt('${p}Email', 'E-mail do cônjuge é obrigatório', 'E-mail inválido',
       saleFormValidEmail,
       porDigitos: false);
-  fmt('${p}Phone', 'Celular do cônjuge é obrigatório', 'Telefone inválido',
-      saleFormValidPhone);
-  fmt('${p}ZipCode', 'CEP do cônjuge é obrigatório', 'CEP inválido',
-      saleFormValidCep);
+  fmt('${p}Phone', 'Celular do cônjuge é obrigatório',
+      'Celular inválido (DDD + número)', saleFormValidPhone);
+  fmt('${p}ZipCode', 'CEP do cônjuge é obrigatório',
+      'CEP inválido (8 dígitos)', saleFormValidCep);
   req('${p}Street', 'Rua é obrigatória');
   req('${p}Number', 'Número é obrigatório');
   req('${p}Neighborhood', 'Bairro é obrigatório');

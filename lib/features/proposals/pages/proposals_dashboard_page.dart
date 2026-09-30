@@ -18,6 +18,7 @@ import '../widgets/dashboard/pd_ranking_board.dart';
 import '../widgets/dashboard/pd_series_chart.dart';
 import '../widgets/dashboard/pd_sheets.dart';
 import '../widgets/dashboard/pd_signature_journey.dart';
+import '../widgets/proposal_signatures_sheet.dart';
 
 /// Dashboard de Fichas de Proposta — porta `/fichas-proposta/dashboard` do
 /// web (`PurchaseProposalsDashboardPage.tsx`): KPIs, evolução por período,
@@ -25,8 +26,11 @@ import '../widgets/dashboard/pd_signature_journey.dart';
 /// score de fechamento, com período, filtros avançados e exportação
 /// Excel/PDF gerada no servidor.
 ///
-/// Personalidade própria: abertura com o valor fechado + traço do período, e
-/// o corpo em capítulos numerados, cada um com a pergunta que responde.
+/// Personalidade própria: abre como um boletim — o valor fechado em
+/// manchete, o traço do período e a faixa "Agora" (o que pede ação, cada
+/// linha leva ao capítulo que explica); o corpo segue em capítulos
+/// numerados, cada um com a pergunta que responde. Assinatura parada e
+/// proposta com chance alta abrem as assinaturas da própria proposta.
 class ProposalsDashboardPage extends StatefulWidget {
   const ProposalsDashboardPage({super.key});
 
@@ -57,10 +61,21 @@ class ProposalsDashboardPage extends StatefulWidget {
 
 class _ProposalsDashboardPageState extends State<ProposalsDashboardPage> {
   static const double _padH = 16;
+
+  /// Coluna de leitura em tela larga (tablet/paisagem).
+  static const double _maxW = 720;
+
+  /// Mesmo `limit` enviado ao back — listas com esse tamanho podem estar
+  /// cortadas, então a contagem vira "15+".
+  static const int _listLimit = 15;
+
   static const String _prefsKey =
       'dashboard:purchase-proposals:advanced-filters:v1';
 
   final ProposalsDashboardService _svc = ProposalsDashboardService.instance;
+
+  final GlobalKey _chapterTrava = GlobalKey();
+  final GlobalKey _chapterChance = GlobalKey();
 
   ProposalsDashboardData? _data;
   bool _loading = true;
@@ -123,7 +138,7 @@ class _ProposalsDashboardPageState extends State<ProposalsDashboardPage> {
         excludeUserIds: _advanced.excludeUserIds,
         excludeTeamIds: _advanced.excludeTeamIds,
         excludeNonCommercialTeams: _advanced.excludeNonCommercialTeams,
-        limit: 15,
+        limit: _listLimit,
       );
 
   Future<void> _load() async {
@@ -224,9 +239,41 @@ class _ProposalsDashboardPageState extends State<ProposalsDashboardPage> {
         mode: LaunchMode.externalApplication,
       );
       if (!ok && mounted) _snack('$label salvo em ${out.path}');
-    } catch (e) {
-      if (mounted) _snack('Erro ao abrir o $label: $e');
+    } catch (_) {
+      if (mounted) {
+        _snack(
+          'Não foi possível abrir o $label. Confira se há um aplicativo '
+          'para abrir esse tipo de arquivo.',
+        );
+      }
     }
+  }
+
+  /// Abrir a proposta a partir do painel exige poder ver propostas; sem a
+  /// permissão, as linhas continuam legíveis, só não abrem.
+  bool get _canOpenProposals =>
+      ModuleAccessService.instance.hasPermission('proposal:view');
+
+  void _openProposal(String id, String number, int etapa) {
+    if (id.isEmpty) return;
+    showProposalSignaturesSheet(
+      context,
+      proposalId: id,
+      proposalNumber: number,
+      etapa: etapa < 1 ? 1 : (etapa > 3 ? 3 : etapa),
+      onChanged: _load,
+    );
+  }
+
+  void _goTo(GlobalKey key) {
+    final ctx = key.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(
+      ctx,
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeOutCubic,
+      alignment: 0.02,
+    );
   }
 
   void _snack(String message, {bool short = false}) {
@@ -273,64 +320,97 @@ class _ProposalsDashboardPageState extends State<ProposalsDashboardPage> {
     );
   }
 
+  /// Tela larga: coluna de leitura centrada — nada de gráfico esticado em
+  /// 1000dp.
+  Widget _capped(Widget child) => Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: _maxW),
+          child: child,
+        ),
+      );
+
   Widget _buildError() {
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: EdgeInsets.zero,
       children: [
-        _periodBar(),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(_padH, 48, _padH, 40),
-          child: AppErrorState.fromApi(
-            message: _error,
-            statusCode: _errorStatus,
-            onRetry: _load,
-            dense: true,
+        _capped(_periodBar()),
+        _capped(
+          Padding(
+            padding: const EdgeInsets.fromLTRB(_padH, 48, _padH, 40),
+            child: AppErrorState.fromApi(
+              message: _error,
+              statusCode: _errorStatus,
+              onRetry: _load,
+              dense: true,
+            ),
           ),
         ),
       ],
     );
   }
 
+  /// Esqueleto fiel à abertura: manchete, traço, três figuras, faixa
+  /// "Agora" e o primeiro gráfico.
   Widget _buildSkeleton() {
     Widget ledger() => Row(
           children: const [
-            Expanded(child: SkeletonBox(height: 40, borderRadius: 8)),
-            SizedBox(width: 14),
-            Expanded(child: SkeletonBox(height: 40, borderRadius: 8)),
-            SizedBox(width: 14),
-            Expanded(child: SkeletonBox(height: 40, borderRadius: 8)),
+            Expanded(child: SkeletonBox(height: 54, borderRadius: 8)),
+            SizedBox(width: 25),
+            Expanded(child: SkeletonBox(height: 54, borderRadius: 8)),
+            SizedBox(width: 25),
+            Expanded(child: SkeletonBox(height: 54, borderRadius: 8)),
           ],
+        );
+    Widget nowRow() => const Padding(
+          padding: EdgeInsets.symmetric(vertical: 11),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkeletonBox(width: 18, height: 18, borderRadius: 5),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkeletonText(height: 13),
+                    SizedBox(height: 6),
+                    SkeletonText(width: 170, height: 10),
+                  ],
+                ),
+              ),
+            ],
+          ),
         );
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: EdgeInsets.zero,
       children: [
-        _periodBar(),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(_padH, 22, _padH, 40),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SkeletonBox(width: 120, height: 12, borderRadius: 4),
-              const SizedBox(height: 10),
-              const SkeletonBox(width: 190, height: 38, borderRadius: 8),
-              const SizedBox(height: 10),
-              const SkeletonBox(height: 44, borderRadius: 8),
-              const SizedBox(height: 18),
-              ledger(),
-              const SizedBox(height: 26),
-              const SkeletonBox(width: 160, height: 16, borderRadius: 4),
-              const SizedBox(height: 14),
-              const SkeletonBox(height: 150, borderRadius: 10),
-              const SizedBox(height: 26),
-              const SkeletonBox(width: 180, height: 16, borderRadius: 4),
-              const SizedBox(height: 14),
-              for (var i = 0; i < 4; i++) ...[
-                const SkeletonBox(height: 22, borderRadius: 6),
-                const SizedBox(height: 12),
+        _capped(_periodBar()),
+        _capped(
+          Padding(
+            padding: const EdgeInsets.fromLTRB(_padH, 20, _padH, 40),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SkeletonBox(width: 190, height: 40, borderRadius: 8),
+                const SizedBox(height: 10),
+                const SkeletonText(width: 250, height: 12),
+                const SizedBox(height: 14),
+                const SkeletonBox(height: 44, borderRadius: 8),
+                const SizedBox(height: 18),
+                ledger(),
+                const SizedBox(height: 22),
+                const SkeletonText(width: 56, height: 10),
+                nowRow(),
+                nowRow(),
+                const SizedBox(height: 22),
+                const SkeletonBox(width: 160, height: 16, borderRadius: 4),
+                const SizedBox(height: 14),
+                const SkeletonBox(height: 200, borderRadius: 10),
               ],
-            ],
+            ),
           ),
         ),
       ],
@@ -348,111 +428,145 @@ class _ProposalsDashboardPageState extends State<ProposalsDashboardPage> {
       if (d.rankingEmpreendimentos.isNotEmpty)
         PdRankingTab('Empreendimentos', d.rankingEmpreendimentos),
     ];
+    final canOpen = _canOpenProposals;
 
-    return ListView(
+    // Coluna inteira montada (não lazy): a faixa "Agora" rola até o
+    // capítulo certo, e ele precisa existir para isso.
+    return SingleChildScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.only(bottom: 40),
-      children: [
-        _periodBar(),
-        AnimatedOpacity(
-          duration: const Duration(milliseconds: 180),
-          opacity: _loading ? 0.45 : 1,
-          child: IgnorePointer(
-            ignoring: _loading,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _hero(d),
-                _chapter(
-                  number: 1,
-                  title: 'Evolução',
-                  question:
-                      'Como as propostas e o valor fechado andaram no período?',
-                  child: PdSeriesChart(
-                    points: d.timeseries,
-                    granularity: _period.granularity,
-                  ),
-                ),
-                _chapter(
-                  number: 2,
-                  title: 'Jornada da assinatura',
-                  question: 'Até onde as propostas chegam antes de fechar?',
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      PdSignatureRail(funnel: d.funnel),
-                      const SizedBox(height: 18),
-                      _subhead('Assinaturas por etapa'),
-                      const SizedBox(height: 10),
-                      PdSignatureStages(signatures: d.signatures),
-                    ],
-                  ),
-                ),
-                _chapter(
-                  number: 3,
-                  title: 'Composição',
-                  question: 'Em que estado estão as propostas e de onde vieram?',
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      PdRingBreakdown(
-                        centerValue: pdInt.format(k.totalGeradas),
-                        centerLabel: 'geradas',
-                        slices: [
-                          PdSlice('Finalizadas', k.finalizadas, t.green),
-                          PdSlice('Em processamento', k.emProcessamento, t.blue),
-                          PdSlice('Canceladas', k.canceladas, t.amber),
-                          PdSlice('Excluídas', k.excluidas, t.red),
+      child: _capped(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _periodBar(),
+            AnimatedOpacity(
+              duration: const Duration(milliseconds: 180),
+              opacity: _loading ? 0.45 : 1,
+              child: IgnorePointer(
+                ignoring: _loading,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _opening(d),
+                    _chapter(
+                      number: 1,
+                      title: 'Evolução',
+                      question: 'Como as propostas e o valor fechado andaram '
+                          'no período?',
+                      child: PdSeriesChart(
+                        points: d.timeseries,
+                        granularity: _period.granularity,
+                      ),
+                    ),
+                    _chapter(
+                      number: 2,
+                      title: 'Jornada da assinatura',
+                      question: 'Até onde as propostas chegam antes de fechar?',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          PdSignatureRail(funnel: d.funnel),
+                          const SizedBox(height: 20),
+                          _subhead('Assinaturas por etapa'),
+                          const SizedBox(height: 12),
+                          PdSignatureStages(signatures: d.signatures),
                         ],
                       ),
-                      const SizedBox(height: 20),
-                      _subhead(
-                        'Mídia / origem',
-                        hint: 'via ficha de venda vinculada',
+                    ),
+                    _chapter(
+                      number: 3,
+                      title: 'Composição',
+                      question:
+                          'Em que estado estão as propostas e de onde vieram?',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          PdRingBreakdown(
+                            centerValue: pdInt.format(k.totalGeradas),
+                            centerLabel: 'geradas',
+                            slices: [
+                              PdSlice('Finalizadas', k.finalizadas, t.green),
+                              PdSlice('Em andamento', k.emProcessamento, t.blue),
+                              PdSlice('Canceladas', k.canceladas, t.amber),
+                              PdSlice('Excluídas', k.excluidas, t.red),
+                            ],
+                          ),
+                          const SizedBox(height: 22),
+                          _subhead(
+                            'Mídia / origem',
+                            hint: 'via ficha de venda vinculada',
+                          ),
+                          const SizedBox(height: 6),
+                          PdOriginBars(items: d.rankingMidias),
+                        ],
                       ),
-                      const SizedBox(height: 6),
-                      PdOriginBars(items: d.rankingMidias),
-                    ],
-                  ),
-                ),
-                _chapter(
-                  number: 4,
-                  title: 'Quem fecha',
-                  question: 'Quem converte mais valor no recorte?',
-                  child: PdRankingBoard(tabs: rankingTabs),
-                ),
-                _chapter(
-                  number: 5,
-                  title: 'Onde trava',
-                  question:
-                      'Quem está segurando assinatura e como andam as contrapropostas?',
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      PdBottleneckList(items: d.signatures.gargalos),
-                      const SizedBox(height: 16),
-                      _subhead(
-                        'Contrapropostas',
-                        hint:
-                            '${pdInt.format(d.counterProposals.total)} no recorte',
+                    ),
+                    _chapter(
+                      number: 4,
+                      title: 'Quem fecha',
+                      question: 'Quem converte mais valor no recorte?',
+                      child: PdRankingBoard(tabs: rankingTabs),
+                    ),
+                    _chapter(
+                      key: _chapterTrava,
+                      number: 5,
+                      title: 'Onde trava',
+                      question: 'Quem está segurando assinatura e como andam '
+                          'as contrapropostas?',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (canOpen && d.signatures.gargalos.isNotEmpty) ...[
+                            _tapHint('Toque numa linha para reenviar ou copiar '
+                                'o link da assinatura.'),
+                            const SizedBox(height: 4),
+                          ],
+                          PdBottleneckList(
+                            items: d.signatures.gargalos,
+                            onOpen: canOpen
+                                ? (g) => _openProposal(
+                                      g.proposalId,
+                                      g.proposalNumber,
+                                      g.etapa,
+                                    )
+                                : null,
+                          ),
+                          const SizedBox(height: 18),
+                          _subhead(
+                            'Contrapropostas',
+                            hint: '${pdInt.format(d.counterProposals.total)} '
+                                'no recorte',
+                          ),
+                          const SizedBox(height: 12),
+                          PdCounterProposals(stats: d.counterProposals),
+                        ],
                       ),
-                      const SizedBox(height: 10),
-                      PdCounterProposals(stats: d.counterProposals),
-                    ],
-                  ),
+                    ),
+                    _chapter(
+                      key: _chapterChance,
+                      number: 6,
+                      title: 'Chance de fechamento',
+                      question: 'Quais propostas em aberto têm mais chance de '
+                          'virar venda?',
+                      child: PdScoreList(
+                        items: d.scoreFechamento,
+                        onOpen: canOpen
+                            ? (s) => _openProposal(
+                                  s.proposalId,
+                                  s.proposalNumber,
+                                  s.etapaAtual,
+                                )
+                            : null,
+                      ),
+                    ),
+                  ],
                 ),
-                _chapter(
-                  number: 6,
-                  title: 'Chance de fechamento',
-                  question:
-                      'Quais propostas em aberto têm mais chance de virar venda?',
-                  child: PdScoreList(items: d.scoreFechamento),
-                ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
@@ -530,6 +644,7 @@ class _ProposalsDashboardPageState extends State<ProposalsDashboardPage> {
                 style: TextButton.styleFrom(
                   foregroundColor: t.text,
                   padding: const EdgeInsets.symmetric(horizontal: 10),
+                  minimumSize: const Size(48, 44),
                 ),
                 onPressed: _openAdvanced,
                 child: Row(
@@ -539,6 +654,7 @@ class _ProposalsDashboardPageState extends State<ProposalsDashboardPage> {
                     const SizedBox(width: 6),
                     const Text(
                       'Filtros',
+                      maxLines: 1,
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w800,
@@ -559,12 +675,11 @@ class _ProposalsDashboardPageState extends State<ProposalsDashboardPage> {
                         child: Text(
                           '$count',
                           textAlign: TextAlign.center,
+                          textScaler: TextScaler.noScaling,
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w800,
-                            color: t.dark
-                                ? const Color(0xFF13131F)
-                                : Colors.white,
+                            color: t.surface,
                           ),
                         ),
                       ),
@@ -590,7 +705,7 @@ class _ProposalsDashboardPageState extends State<ProposalsDashboardPage> {
                             ? 'Seu escopo: unidades restritas'
                             : 'Seu escopo: ${scope.resolvedLabels.length} unidades '
                                 '(${scope.resolvedLabels.join(', ')})',
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 11.5,
@@ -609,33 +724,26 @@ class _ProposalsDashboardPageState extends State<ProposalsDashboardPage> {
 
   // ─── Abertura ──────────────────────────────────────────────────────────
 
-  Widget _hero(ProposalsDashboardData d) {
+  /// Boletim do período: a manchete é o dinheiro fechado (o rótulo vem
+  /// depois do número, como frase — sem eyebrow), o traço mostra o ritmo,
+  /// três figuras dão a proporção e a faixa "Agora" diz o que pede ação.
+  Widget _opening(ProposalsDashboardData d) {
     final t = PdTones.of(context);
     final k = d.kpis;
-    final linkedLow = k.propPropostasComFicha < 30;
     return Padding(
       padding: const EdgeInsets.fromLTRB(_padH, 20, _padH, 22),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'FECHADO NO PERÍODO',
-            style: TextStyle(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.3,
-              color: t.accent,
-            ),
-          ),
-          const SizedBox(height: 4),
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
             child: Text(
               pdBrlCompact.format(k.valorFinalizado),
               maxLines: 1,
+              softWrap: false,
               style: TextStyle(
-                fontSize: 38,
+                fontSize: 40,
                 fontWeight: FontWeight.w900,
                 letterSpacing: -1.2,
                 height: 1.05,
@@ -643,98 +751,272 @@ class _ProposalsDashboardPageState extends State<ProposalsDashboardPage> {
               ),
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            '${pdBrlFull.format(k.valorFinalizado)} em '
-            '${pdInt.format(k.finalizadas)} de '
-            '${pdInt.format(k.totalGeradas)} propostas geradas',
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w600,
-              height: 1.3,
-              color: t.muted,
+          const SizedBox(height: 6),
+          Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: 'fechados no período',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: t.text,
+                  ),
+                ),
+                TextSpan(
+                  text: ' · ${pdBrlFull.format(k.valorFinalizado)} em '
+                      '${pdPlural(k.finalizadas, 'proposta finalizada', 'propostas finalizadas')}'
+                      ' de ${pdInt.format(k.totalGeradas)} geradas',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: t.muted,
+                  ),
+                ),
+              ],
             ),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(height: 1.35),
           ),
           if (d.timeseries.length > 1) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             PdSparkline(
               values: [for (final p in d.timeseries) p.valorFinalizado],
               color: t.accent,
             ),
           ],
-          const SizedBox(height: 16),
-          IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: _figure(
-                    pdPercent(k.taxaConversao),
-                    'conversão',
-                    'finalizadas ÷ geradas',
-                    t.green,
-                  ),
-                ),
-                _vDivider(),
-                Expanded(
-                  child: _figure(
-                    pdBrlCompact.format(k.ticketMedio),
-                    'ticket médio',
-                    pdBrlFull.format(k.ticketMedio),
-                    t.text,
-                  ),
-                ),
-                _vDivider(),
-                Expanded(
-                  child: _figure(
-                    pdBrlCompact.format(k.valorPendente),
-                    'pendente',
-                    'em processamento',
-                    t.amber,
-                  ),
-                ),
-              ],
-            ),
-          ),
           const SizedBox(height: 18),
-          const PdHairline(),
-          const SizedBox(height: 14),
-          // Vínculo proposta → ficha de venda (diagnóstico do web).
-          Row(
+          PdLedger(
             children: [
-              Icon(LucideIcons.link, size: 15, color: t.muted),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Vinculadas a ficha de venda',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: t.text,
-                  ),
-                ),
+              PdFigure(
+                value: pdPercent(k.taxaConversao),
+                label: 'conversão',
+                sub: 'finalizadas ÷ geradas',
+                tone: t.green,
               ),
-              const SizedBox(width: 8),
-              Text(
-                pdPercent(k.propPropostasComFicha),
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w900,
-                  color: linkedLow ? t.red : t.green,
-                ),
+              PdFigure(
+                value: pdBrlCompact.format(k.ticketMedio),
+                label: 'ticket médio',
+                sub: pdBrlFull.format(k.ticketMedio),
+              ),
+              PdFigure(
+                value: pdBrlCompact.format(k.valorPendente),
+                label: 'em andamento',
+                sub: pdPlural(k.emProcessamento, 'proposta aberta',
+                    'propostas abertas'),
+                tone: t.amber,
               ),
             ],
           ),
-          const SizedBox(height: 7),
-          PdMeter(
-            fraction: k.propPropostasComFicha / 100,
-            color: linkedLow ? t.red : t.green,
-            height: 5,
+          const SizedBox(height: 22),
+          _nowBlock(d),
+          const SizedBox(height: 16),
+          const PdHairline(),
+          const SizedBox(height: 14),
+          _linkBlock(k),
+        ],
+      ),
+    );
+  }
+
+  /// Faixa "Agora": o que pede ação no recorte, em frases. Cada linha leva
+  /// ao capítulo que detalha (rastreio = navegação). Sem nada travado, uma
+  /// linha calma diz isso — o vazio também informa.
+  Widget _nowBlock(ProposalsDashboardData d) {
+    final t = PdTones.of(context);
+    final gargalos = d.signatures.gargalos;
+    final lentas = gargalos.where((g) => g.pendingDays >= 3).toList();
+    ProposalsSignatureBottleneck? pior;
+    for (final g in lentas) {
+      if (pior == null || g.pendingDays > pior.pendingDays) pior = g;
+    }
+    final cortada =
+        gargalos.length >= _listLimit && lentas.length == gargalos.length;
+    final contras = d.counterProposals.pendente;
+    final altas = d.scoreFechamento.where((s) => s.score >= 70).toList();
+
+    final rows = <Widget>[];
+    if (pior != null) {
+      final n = lentas.length;
+      final qtd = cortada ? '$n+' : pdInt.format(n);
+      final quem = pior.signerName.isEmpty ? 'signatário sem nome' : pior.signerName;
+      rows.add(
+        _nowRow(
+          icon: LucideIcons.clockAlert,
+          tone: pior.pendingDays >= 7 ? t.red : t.amberText,
+          title: n == 1
+              ? '1 assinatura esperando há 3 dias ou mais'
+              : '$qtd assinaturas esperando há 3 dias ou mais',
+          detail: 'A mais antiga: ${pdDays(pior.pendingDays)} · $quem'
+              '${pior.proposalNumber.isEmpty ? '' : ' · Nº ${pior.proposalNumber}'}',
+          onTap: () => _goTo(_chapterTrava),
+        ),
+      );
+    }
+    if (contras > 0) {
+      rows.add(
+        _nowRow(
+          icon: LucideIcons.handshake,
+          tone: t.amberText,
+          title: '${pdPlural(contras, 'contraproposta esperando', 'contrapropostas esperando')} '
+              'resposta',
+          detail: 'O placar de aprovadas e recusadas está em "Onde trava".',
+          onTap: () => _goTo(_chapterTrava),
+        ),
+      );
+    }
+    if (rows.isEmpty) {
+      rows.add(
+        _nowRow(
+          icon: LucideIcons.circleCheck,
+          tone: t.green,
+          title: 'Nada travado no recorte',
+          detail: 'Nenhuma assinatura esperando há 3 dias ou mais e nenhuma '
+              'contraproposta sem resposta.',
+        ),
+      );
+    }
+    if (altas.isNotEmpty) {
+      final melhor = altas.first;
+      final nome = melhor.proponentName.isEmpty
+          ? 'proponente não informado'
+          : melhor.proponentName;
+      rows.add(
+        _nowRow(
+          icon: LucideIcons.trendingUp,
+          tone: t.green,
+          title: altas.length == 1
+              ? '1 proposta com chance alta de fechar'
+              : '${pdInt.format(altas.length)} propostas com chance alta de '
+                  'fechar',
+          detail: 'Nota ${melhor.score}: $nome · '
+              '${pdBrlCompact.format(melhor.proposedPrice)}',
+          onTap: () => _goTo(_chapterChance),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _subhead('Agora'),
+        const SizedBox(height: 2),
+        for (var i = 0; i < rows.length; i++) ...[
+          if (i > 0) const PdHairline(indent: 30),
+          rows[i],
+        ],
+      ],
+    );
+  }
+
+  Widget _nowRow({
+    required IconData icon,
+    required Color tone,
+    required String title,
+    String? detail,
+    VoidCallback? onTap,
+  }) {
+    final t = PdTones.of(context);
+    final content = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 11),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(icon, size: 18, color: tone),
           ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    height: 1.25,
+                    color: t.text,
+                  ),
+                ),
+                if (detail != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    detail,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                      height: 1.3,
+                      color: t.muted,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (onTap != null) ...[
+            const SizedBox(width: 8),
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Icon(LucideIcons.chevronRight, size: 16, color: t.muted),
+            ),
+          ],
+        ],
+      ),
+    );
+    if (onTap == null) return content;
+    return InkWell(onTap: onTap, child: content);
+  }
+
+  /// Vínculo proposta → ficha de venda (diagnóstico do web). O número fica
+  /// em tinta de texto; a régua carrega o alerta.
+  Widget _linkBlock(ProposalsKpis k) {
+    final t = PdTones.of(context);
+    final linkedLow = k.propPropostasComFicha < 30;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Icon(LucideIcons.link, size: 15, color: t.muted),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Vinculadas a ficha de venda',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: t.text,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              pdPercent(k.propPropostasComFicha),
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w900,
+                color: t.text,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 7),
+        PdMeter(
+          fraction: k.propPropostasComFicha / 100,
+          color: linkedLow ? t.red : t.green,
+          height: 5,
+        ),
+        if (k.propPropostasComFicha < 100) ...[
           const SizedBox(height: 7),
           Text(
             'Quando a proposta finaliza e gera a ficha de venda, o vínculo '
@@ -748,59 +1030,6 @@ class _ProposalsDashboardPageState extends State<ProposalsDashboardPage> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _vDivider() {
-    final t = PdTones.of(context);
-    return Container(
-      width: 1,
-      margin: const EdgeInsets.symmetric(horizontal: 12),
-      color: t.hairline,
-    );
-  }
-
-  Widget _figure(String value, String label, String sub, Color tone) {
-    final t = PdTones.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text(
-            value,
-            maxLines: 1,
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.4,
-              color: tone,
-            ),
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 11.5,
-            fontWeight: FontWeight.w800,
-            color: t.text,
-          ),
-        ),
-        Text(
-          sub,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 10.5,
-            fontWeight: FontWeight.w500,
-            color: t.muted,
-          ),
-        ),
       ],
     );
   }
@@ -808,12 +1037,14 @@ class _ProposalsDashboardPageState extends State<ProposalsDashboardPage> {
   // ─── Capítulos ─────────────────────────────────────────────────────────
 
   Widget _chapter({
+    Key? key,
     required int number,
     required String title,
     required String question,
     required Widget child,
   }) {
     return Column(
+      key: key,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const PdHairline(),
@@ -830,6 +1061,28 @@ class _ProposalsDashboardPageState extends State<ProposalsDashboardPage> {
               const SizedBox(height: 16),
               child,
             ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _tapHint(String text) {
+    final t = PdTones.of(context);
+    return Row(
+      children: [
+        Icon(LucideIcons.pointer, size: 13, color: t.muted),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            text,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: t.muted,
+            ),
           ),
         ),
       ],

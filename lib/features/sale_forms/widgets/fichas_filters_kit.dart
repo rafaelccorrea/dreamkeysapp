@@ -5,6 +5,7 @@ import '../../../core/constants/api_constants.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/api_service.dart';
+import '../../../shared/widgets/skeleton_box.dart';
 
 /// Kit dos filtros das listas de Fichas (venda e proposta).
 ///
@@ -23,22 +24,27 @@ class FichasFilterTones {
   static bool _dark(BuildContext c) =>
       Theme.of(c).brightness == Brightness.dark;
 
+  // Por token quando há equivalente (tons de texto legíveis no claro);
+  // teal e sky não têm token no app e seguem com o valor próprio.
   static Color brand(BuildContext c) =>
       _dark(c) ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
-  static Color amber(BuildContext c) =>
-      _dark(c) ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
-  static Color green(BuildContext c) =>
-      _dark(c) ? const Color(0xFF34D399) : const Color(0xFF059669);
+  static Color amber(BuildContext c) => _dark(c)
+      ? AppColors.message.warningTextDarkMode
+      : AppColors.message.warningText;
+  static Color green(BuildContext c) => _dark(c)
+      ? AppColors.message.successTextDarkMode
+      : AppColors.message.successText;
   static Color teal(BuildContext c) =>
       _dark(c) ? const Color(0xFF2DD4BF) : const Color(0xFF0D9488);
   static Color purple(BuildContext c) =>
-      _dark(c) ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
-  static Color blue(BuildContext c) =>
-      _dark(c) ? const Color(0xFF60A5FA) : const Color(0xFF2563EB);
+      _dark(c) ? AppColors.status.purpleDarkMode : AppColors.status.purple;
+  static Color blue(BuildContext c) => _dark(c)
+      ? AppColors.message.infoTextDarkMode
+      : AppColors.message.infoText;
   static Color sky(BuildContext c) =>
       _dark(c) ? const Color(0xFF38BDF8) : const Color(0xFF0284C7);
   static Color rose(BuildContext c) =>
-      _dark(c) ? const Color(0xFFF472B6) : const Color(0xFFDB2777);
+      _dark(c) ? AppColors.status.roseDarkMode : AppColors.status.rose;
   static Color slate(BuildContext c) => ThemeHelpers.textSecondaryColor(c);
 }
 
@@ -370,6 +376,11 @@ class FichasSheetShell extends StatelessWidget {
     final free = mq.size.height - mq.viewInsets.bottom - mq.padding.top - 12;
     final cap = mq.size.height * 0.88;
     final maxH = free < cap ? (free < 240 ? 240.0 : free) : cap;
+    // Altura curta (teclado aberto em paisagem): some a alça; digitando com
+    // muito pouco espaço, o rodapé sai da frente (volta ao fechar o teclado)
+    // para a busca e a lista não estourarem.
+    final curto = free < 300;
+    final semRodape = mq.viewInsets.bottom > 0 && free < 220;
     return Padding(
       padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
       child: ConstrainedBox(
@@ -387,24 +398,27 @@ class FichasSheetShell extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 10, bottom: 4),
-                child: Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: ThemeHelpers.borderColor(
-                        context,
-                      ).withValues(alpha: 0.55),
-                      borderRadius: BorderRadius.circular(999),
+              if (!curto)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10, bottom: 4),
+                  child: Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: ThemeHelpers.borderColor(
+                          context,
+                        ).withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
                     ),
                   ),
-                ),
-              ),
+                )
+              else
+                const SizedBox(height: 8),
               header,
               Flexible(child: body),
-              if (footer != null) footer!,
+              if (footer != null && !semRodape) footer!,
             ],
           ),
         ),
@@ -679,8 +693,9 @@ class FichasFilterFooter extends StatelessWidget {
                     ),
                   ),
                   style: FilledButton.styleFrom(
-                    // Verde de confirmação, como em todo sheet do app.
-                    backgroundColor: const Color(0xFF059669),
+                    // Verde de confirmação (token), cheio nos dois temas —
+                    // o tom claro do escuro deixaria o texto branco ilegível.
+                    backgroundColor: AppColors.status.success,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
@@ -1231,20 +1246,26 @@ class _FichasPickSheetState extends State<_FichasPickSheet> {
               future: widget.options,
               builder: (ctx, snap) {
                 if (snap.connectionState != ConnectionState.done) {
-                  return const Padding(
-                    padding: EdgeInsets.all(28),
-                    child: Center(
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  );
+                  return _skeleton();
                 }
                 if (snap.hasError) {
-                  return _message(ctx, snap.error.toString());
+                  return _message(
+                    ctx,
+                    '${snap.error}\nFeche esta lista e abra de novo para '
+                    'tentar outra vez.',
+                    icon: Icons.error_outline_rounded,
+                  );
                 }
                 final rows = _filter(snap.data ?? const []);
                 final showAll = !widget.multi && _query.text.trim().isEmpty;
                 if (rows.isEmpty && !showAll) {
-                  return _message(ctx, widget.emptyMessage);
+                  return _message(
+                    ctx,
+                    _query.text.trim().isEmpty
+                        ? widget.emptyMessage
+                        : 'Nada encontrado para "${_query.text.trim()}".',
+                    icon: Icons.search_off_rounded,
+                  );
                 }
                 final count = rows.length + (showAll ? 1 : 0);
                 return ListView.builder(
@@ -1271,7 +1292,7 @@ class _FichasPickSheetState extends State<_FichasPickSheet> {
                     final on = _sel.contains(o.id);
                     return _row(
                       ctx,
-                      label: o.label.isEmpty ? '—' : o.label,
+                      label: o.label.isEmpty ? 'Sem nome' : o.label,
                       subtitle: o.subtitle,
                       inactive: o.inactive,
                       selected: on,
@@ -1353,17 +1374,61 @@ class _FichasPickSheetState extends State<_FichasPickSheet> {
     );
   }
 
-  Widget _message(BuildContext context, String text) {
-    return Padding(
+  Widget _message(
+    BuildContext context,
+    String text, {
+    IconData icon = Icons.info_outline_rounded,
+  }) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-      child: Text(
-        text,
-        textAlign: TextAlign.center,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-              fontWeight: FontWeight.w600,
-            ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 24, color: muted),
+          const SizedBox(height: 8),
+          Text(
+            text,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: muted,
+                  fontWeight: FontWeight.w600,
+                  height: 1.4,
+                ),
+          ),
+        ],
       ),
+    );
+  }
+
+  /// Esqueleto fiel às linhas (marcador + nome + apoio).
+  Widget _skeleton() {
+    return ListView(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(10, 4, 10, 12),
+      children: [
+        for (var i = 0; i < 5; i++)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(10, 10, 10, 10),
+            child: Row(
+              children: [
+                SkeletonBox(width: 20, height: 20, borderRadius: 5),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonBox(width: 160, height: 13, borderRadius: 6),
+                      SizedBox(height: 6),
+                      SkeletonBox(width: 110, height: 10, borderRadius: 6),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 

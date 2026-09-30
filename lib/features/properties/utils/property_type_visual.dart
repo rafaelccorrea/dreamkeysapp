@@ -3,13 +3,16 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../shared/services/property_service.dart';
 
-/// Ícone e tom de cada um dos 16 tipos de imóvel.
+/// Ícone e família de cada um dos 16 tipos de imóvel.
 ///
 /// Os 5 tipos originais mantêm os ícones que o app já usava. Os novos seguem o
 /// agrupamento do `typeIconMap` do web (`PropertyCreationSetupModal`): sobrado
 /// é "casa"; studio, loft, kitnet, duplex e triplex são "apartamento";
 /// cobertura, sala comercial, loja e galpão têm ícone próprio; fazenda é
 /// "campo", como rural.
+///
+/// Tipo NÃO tem cor própria: cor é significado (status), e 16 tons seriam
+/// arco-íris. Quem diferencia o tipo é o ícone e o grupo ([family]).
 class PropertyTypeVisual {
   const PropertyTypeVisual._();
 
@@ -103,13 +106,13 @@ class PropertyTypeVisual {
     }
   }
 
-  /// Tom por família — as cores que o drawer já usava para os 5 tipos
-  /// originais; os novos herdam a cor da família.
-  static Color tone(PropertyType type) {
+  /// Família do tipo — só agrupamento de LEITURA (seletores e filtros): 16
+  /// pastilhas soltas viram três blocos que a pessoa reconhece de cara. Não
+  /// entra em payload nem em regra.
+  static PropertyTypeFamily family(PropertyType type) {
     switch (type) {
       case PropertyType.house:
       case PropertyType.townhouse:
-        return const Color(0xFF10B981);
       case PropertyType.apartment:
       case PropertyType.penthouse:
       case PropertyType.studio:
@@ -117,17 +120,42 @@ class PropertyTypeVisual {
       case PropertyType.kitnet:
       case PropertyType.duplex:
       case PropertyType.triplex:
-        return const Color(0xFF3B82F6);
+        return PropertyTypeFamily.residencial;
       case PropertyType.commercial:
       case PropertyType.office:
       case PropertyType.store:
       case PropertyType.warehouse:
-        return const Color(0xFFF59E0B);
-      case PropertyType.land:
-        return const Color(0xFF84CC16);
+        return PropertyTypeFamily.comercial;
       case PropertyType.farm:
+      case PropertyType.land:
       case PropertyType.rural:
-        return const Color(0xFFA16207);
+        return PropertyTypeFamily.terra;
     }
   }
+
+  /// Os tipos agrupados por família, cada grupo na ordem do enum (a mesma de
+  /// `PropertyTypeOptions` do web). Grupo vazio não sai.
+  static List<(PropertyTypeFamily, List<PropertyType>)> grouped() {
+    return [
+      for (final f in PropertyTypeFamily.values)
+        (
+          f,
+          [
+            for (final t in PropertyType.values)
+              if (family(t) == f) t,
+          ],
+        ),
+    ].where((g) => g.$2.isNotEmpty).toList();
+  }
+}
+
+/// Famílias de tipo de imóvel (agrupamento visual).
+enum PropertyTypeFamily {
+  residencial('Residencial'),
+  comercial('Comercial'),
+  terra('Terreno e rural');
+
+  const PropertyTypeFamily(this.label);
+
+  final String label;
 }

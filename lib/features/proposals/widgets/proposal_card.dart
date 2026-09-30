@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/purchase_proposals_service.dart';
@@ -9,10 +10,11 @@ import 'proposal_row_actions.dart';
 
 /// Card de uma proposta na listagem (mobile).
 ///
-/// Layout editorial e denso: cabeçalho (status + nº), proponente em destaque,
-/// linha de contexto do imóvel, bloco de valor em evidência, **tracker de
-/// etapas** (Comprador → Proprietário → Corretor) e rodapé de autoria. A borda
-/// é levemente tingida pelo status para leitura rápida na lista.
+/// Gramática aprovada do card de fichas: card flush simples (fundo de card +
+/// filete neutro + sombra crisp no claro), status na pílula e menu de 3
+/// pontos — sem borda tingida, sem faixa lateral, sem ponto luminoso. A
+/// personalidade da proposta fica no **trilho de etapas** (Comprador →
+/// Proprietário → Corretor) e na ação da etapa, no próprio card.
 class ProposalCard extends StatelessWidget {
   const ProposalCard({
     super.key,
@@ -42,9 +44,12 @@ class ProposalCard extends StatelessWidget {
       'proposal:update',
     );
 
-    final statusTone = _statusTone(proposal.status);
+    final statusTone = _statusTone(context, proposal.status);
     final statusLabel = _statusLabel(proposal.status);
-    final etapaLabel = _etapaLabel(proposal.etapa);
+    final deleted = proposal.deletedAt != null;
+    final danger = isDark
+        ? AppColors.status.errorDarkMode
+        : AppColors.status.error;
 
     final priceText = proposal.proposedPrice != null
         ? NumberFormat.currency(
@@ -62,23 +67,28 @@ class ProposalCard extends StatelessWidget {
     final hasPropertyContext =
         (propCode != null && propCode.isNotEmpty) || propLoc.isNotEmpty;
 
-    // Sub-linha do valor: entrada e/ou comissão, quando informadas.
-    final valueExtras = <String>[];
+    // Condições da proposta numa linha que QUEBRA (nunca corta em 320dp).
+    final terms = <String>[];
     if (proposal.downPayment != null && proposal.downPayment! > 0) {
-      valueExtras.add(
+      terms.add(
         'Entrada ${NumberFormat.compactCurrency(locale: 'pt_BR', symbol: 'R\$', decimalDigits: 0).format(proposal.downPayment!)}',
       );
     }
     if (proposal.commissionPercentage != null &&
         proposal.commissionPercentage! > 0) {
-      valueExtras.add('Comissão ${_trimNum(proposal.commissionPercentage!)}%');
+      terms.add('Comissão ${_trimNum(proposal.commissionPercentage!)}%');
+    }
+    final validity = proposal.validityDays;
+    if (validity != null) {
+      terms.add(
+        'Validade $validity ${validity == 1 ? 'dia útil' : 'dias úteis'}',
+      );
     }
 
     final maxEtapa =
         proposal.maxEtapaLiberadaParaEnvio ?? proposal.etapa.number;
     final isProcessing =
-        proposal.status == ProposalStatus.processing &&
-        proposal.deletedAt == null;
+        proposal.status == ProposalStatus.processing && !deleted;
     final isFinalized = proposal.status == ProposalStatus.finalized;
     final isCanceled = proposal.status == ProposalStatus.canceled;
     final canShowContinue = canUpdate && isProcessing;
@@ -95,222 +105,222 @@ class ProposalCard extends StatelessWidget {
       continueLabel = 'Continuar preenchimento';
       continueIcon = Icons.arrow_forward_rounded;
     }
+    final success = isDark
+        ? AppColors.status.successDarkMode
+        : AppColors.status.success;
+    final successInk = isDark
+        ? AppColors.message.successTextDarkMode
+        : AppColors.message.successText;
 
     return Material(
-      color: theme.colorScheme.surface,
+      color: Colors.transparent,
       borderRadius: BorderRadius.circular(18),
-      elevation: 0,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(18),
         child: Ink(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
+            color: ThemeHelpers.cardBackgroundColor(context),
             border: Border.all(
-              color: statusTone.withValues(alpha: isDark ? 0.34 : 0.24),
+              color: ThemeHelpers.borderLightColor(
+                context,
+              ).withValues(alpha: isDark ? 0.9 : 1),
             ),
-            color: isDark ? Colors.white.withValues(alpha: 0.02) : Colors.white,
-            boxShadow: [
-              if (!isDark)
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 14,
-                  offset: const Offset(0, 4),
-                  spreadRadius: -6,
-                ),
-            ],
+            boxShadow: isDark ? null : ThemeHelpers.cardShadow(context),
           ),
-          padding: const EdgeInsets.fromLTRB(14, 13, 10, 14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ── Cabeçalho: dot + nº + status + menu ────────────────────
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _StatusDot(tone: statusTone),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(15, 14, 8, 15),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Cabeçalho: Nº + status · menu ───────────────────────
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              _NumberBadge(
+                                accent: accent,
+                                number: proposal.proposalNumber,
                               ),
-                              decoration: BoxDecoration(
-                                color: accent.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                proposal.proposalNumber.isEmpty
-                                    ? '—'
-                                    : 'Nº ${proposal.proposalNumber}',
-                                style: theme.textTheme.labelMedium?.copyWith(
-                                  color: accent,
-                                  fontWeight: FontWeight.w900,
-                                  fontFeatures: const [
-                                    FontFeature.tabularFigures(),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Flexible(
-                              child: _StatusPill(
-                                tone: statusTone,
-                                label: statusLabel,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 7),
-                        Text(
-                          proposal.proponentName?.trim().isNotEmpty == true
-                              ? proposal.proponentName!
-                              : 'Comprador não informado',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.2,
-                            height: 1.15,
+                              _StatusPill(tone: statusTone, label: statusLabel),
+                              if (deleted)
+                                _StatusPill(tone: danger, label: 'EXCLUÍDA'),
+                            ],
                           ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
+                          const SizedBox(height: 8),
+                          Text(
+                            proposal.proponentName?.trim().isNotEmpty == true
+                                ? proposal.proponentName!
+                                : 'Comprador não informado',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.2,
+                              height: 1.15,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  if (onAction != null)
-                    ProposalActionsMenu(
-                      rules: ProposalRowRules(proposal),
-                      onAction: onAction!,
-                    ),
-                ],
-              ),
-
-              // ── Contexto do imóvel ─────────────────────────────────────
-              if (hasPropertyContext) ...[
-                const SizedBox(height: 9),
-                _PropertyContextLine(
-                  code: propCode,
-                  location: propLoc,
-                  accent: accent,
+                    if (onAction != null)
+                      ProposalActionsMenu(
+                        rules: ProposalRowRules(proposal),
+                        onAction: onAction!,
+                      ),
+                  ],
                 ),
-              ],
 
-              const SizedBox(height: 12),
-              Divider(
-                height: 1,
-                thickness: 1,
-                color: ThemeHelpers.borderLightColor(
-                  context,
-                ).withValues(alpha: 0.7),
-              ),
-              const SizedBox(height: 12),
+                // ── Corpo (margem direita igual à esquerda) ─────────────
+                Padding(
+                  padding: const EdgeInsets.only(right: 7),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (hasPropertyContext) ...[
+                        const SizedBox(height: 10),
+                        _PropertyContextLine(code: propCode, location: propLoc),
+                      ],
+                      const SizedBox(height: 12),
+                      Divider(
+                        height: 1,
+                        thickness: 1,
+                        color: ThemeHelpers.borderLightColor(context),
+                      ),
+                      const SizedBox(height: 12),
 
-              // ── Bloco de valor em destaque ─────────────────────────────
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'VALOR PROPOSTO',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: muted,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.2,
-                            fontSize: 9.5,
-                          ),
+                      // ── Valor em destaque (encolhe, nunca corta) ──────
+                      Text(
+                        'VALOR PROPOSTO',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: muted,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.2,
+                          fontSize: 9.5,
                         ),
-                        const SizedBox(height: 3),
-                        Text(
+                      ),
+                      const SizedBox(height: 3),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
                           priceText,
+                          maxLines: 1,
+                          softWrap: false,
                           style: theme.textTheme.headlineSmall?.copyWith(
                             fontWeight: FontWeight.w900,
                             letterSpacing: -0.8,
                             height: 1.0,
-                            fontFeatures: const [FontFeature.tabularFigures()],
                           ),
-                          maxLines: 1,
+                        ),
+                      ),
+                      if (terms.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          terms.join('  ·  '),
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: muted,
+                            fontWeight: FontWeight.w700,
+                            height: 1.35,
+                          ),
                         ),
                       ],
-                    ),
+
+                      // ── Trilho de etapas ──────────────────────────────
+                      const SizedBox(height: 14),
+                      _StageTracker(
+                        current: proposal.etapa.number,
+                        finalized: isFinalized,
+                        canceled: isCanceled || deleted,
+                        accent: accent,
+                      ),
+
+                      // ── Rodapé: autoria + data ────────────────────────
+                      const SizedBox(height: 13),
+                      _FooterMeta(
+                        creatorName: proposal.creatorName,
+                        createdAt: proposal.createdAt,
+                      ),
+
+                      // ── Ação da etapa, no próprio card ─────────────────
+                      if (canShowContinue && onContinue != null) ...[
+                        const SizedBox(height: 13),
+                        FilledButton.tonalIcon(
+                          onPressed: onContinue,
+                          icon: Icon(continueIcon, size: 18),
+                          label: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              continueLabel,
+                              maxLines: 1,
+                              softWrap: false,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 13.5,
+                              ),
+                            ),
+                          ),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: success.withValues(
+                              alpha: isDark ? 0.18 : 0.12,
+                            ),
+                            foregroundColor: successInk,
+                            minimumSize: const Size.fromHeight(46),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ] else if (isProcessing && !canUpdate) ...[
+                        const SizedBox(height: 12),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(top: 1),
+                              child: Icon(
+                                Icons.lock_outline_rounded,
+                                size: 14,
+                                color: muted,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'Envio para assinatura travado: sua conta '
+                                'não edita propostas.',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: muted,
+                                  fontWeight: FontWeight.w600,
+                                  height: 1.3,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
                   ),
-                  if (proposal.validityDays != null) ...[
-                    const SizedBox(width: 10),
-                    _MetaPill(
-                      icon: Icons.event_available_outlined,
-                      label: '${proposal.validityDays} dias úteis',
-                      tone: muted,
-                    ),
-                  ],
-                ],
-              ),
-              if (valueExtras.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(
-                  valueExtras.join('   ·   '),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: muted,
-                    fontWeight: FontWeight.w700,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
               ],
-
-              // ── Tracker de etapas ──────────────────────────────────────
-              const SizedBox(height: 14),
-              _StageTracker(
-                current: proposal.etapa.number,
-                finalized: isFinalized,
-                canceled: isCanceled,
-                accent: accent,
-              ),
-
-              // ── Rodapé: autoria + data ─────────────────────────────────
-              const SizedBox(height: 13),
-              _FooterMeta(
-                creatorName: proposal.creatorName,
-                createdAt: proposal.createdAt,
-                etapaLabel: etapaLabel,
-              ),
-
-              if (canShowContinue && onContinue != null) ...[
-                const SizedBox(height: 13),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.tonalIcon(
-                    onPressed: onContinue,
-                    icon: Icon(continueIcon, size: 18),
-                    label: Text(
-                      continueLabel,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 13.5,
-                      ),
-                    ),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(
-                        0xFF22C55E,
-                      ).withValues(alpha: 0.16),
-                      foregroundColor: const Color(0xFF16A34A),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ],
+            ),
           ),
         ),
       ),
@@ -328,25 +338,18 @@ class ProposalCard extends StatelessWidget {
     }
   }
 
-  Color _statusTone(ProposalStatus s) {
+  /// Mesmas cores dos filtros rápidos da lista (`AppColors.status`).
+  Color _statusTone(BuildContext context, ProposalStatus s) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     switch (s) {
       case ProposalStatus.finalized:
-        return const Color(0xFF16A34A);
+        return dark
+            ? AppColors.status.successDarkMode
+            : AppColors.status.success;
       case ProposalStatus.canceled:
-        return const Color(0xFFDC2626);
+        return dark ? AppColors.status.errorDarkMode : AppColors.status.error;
       case ProposalStatus.processing:
-        return const Color(0xFF6366F1);
-    }
-  }
-
-  String _etapaLabel(ProposalEtapa e) {
-    switch (e) {
-      case ProposalEtapa.comprador:
-        return 'Etapa 1 — Comprador';
-      case ProposalEtapa.proprietario:
-        return 'Etapa 2 — Proprietário';
-      case ProposalEtapa.corretor:
-        return 'Etapa 3 — Corretor / Captadores';
+        return dark ? AppColors.status.infoDarkMode : AppColors.status.info;
     }
   }
 
@@ -358,8 +361,8 @@ class ProposalCard extends StatelessWidget {
 }
 
 /// Placeholder de carregamento — **fiel** ao `ProposalCard` (mesmo container e
-/// posições: cabeçalho Nº+status, proponente, contexto, divisória, bloco de
-/// valor, tracker de etapas e rodapé). Usado na listagem enquanto `_loading`.
+/// posições: Nº+status, comprador, contexto, filete, valor + condições,
+/// trilho de etapas e rodapé). Usado na listagem e na próxima página.
 class ProposalCardSkeleton extends StatelessWidget {
   const ProposalCardSkeleton({super.key});
 
@@ -369,23 +372,15 @@ class ProposalCardSkeleton extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
-        color: isDark ? Colors.white.withValues(alpha: 0.02) : Colors.white,
+        color: ThemeHelpers.cardBackgroundColor(context),
         border: Border.all(
           color: ThemeHelpers.borderLightColor(
             context,
-          ).withValues(alpha: isDark ? 0.9 : 0.8),
+          ).withValues(alpha: isDark ? 0.9 : 1),
         ),
-        boxShadow: [
-          if (!isDark)
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 14,
-              offset: const Offset(0, 4),
-              spreadRadius: -6,
-            ),
-        ],
+        boxShadow: isDark ? null : ThemeHelpers.cardShadow(context),
       ),
-      padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
+      padding: const EdgeInsets.fromLTRB(15, 14, 15, 15),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -394,9 +389,11 @@ class ProposalCardSkeleton extends StatelessWidget {
               SkeletonBox(width: 56, height: 20, borderRadius: 6),
               SizedBox(width: 8),
               SkeletonBox(width: 90, height: 20, borderRadius: 999),
+              Spacer(),
+              SkeletonBox(width: 34, height: 34, borderRadius: 10),
             ],
           ),
-          const SizedBox(height: 13),
+          const SizedBox(height: 8),
           Row(
             children: const [
               Expanded(flex: 7, child: SkeletonText(height: 18)),
@@ -415,20 +412,17 @@ class ProposalCardSkeleton extends StatelessWidget {
           const SizedBox(height: 14),
           const SkeletonBox(width: double.infinity, height: 1),
           const SizedBox(height: 14),
-          // Bloco de valor
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: const [
-              SkeletonText(width: 70, height: 9),
-              SizedBox(height: 7),
-              SkeletonBox(width: 150, height: 24, borderRadius: 6),
-            ],
-          ),
+          // Valor + condições
+          const SkeletonText(width: 70, height: 9),
+          const SizedBox(height: 7),
+          const SkeletonBox(width: 150, height: 24, borderRadius: 6),
+          const SizedBox(height: 8),
+          const SkeletonText(width: 200, height: 11),
           const SizedBox(height: 16),
-          // Tracker de etapas (3 nós)
+          // Trilho de etapas (3 nós)
           Row(
             children: const [
-              SkeletonBox(width: 26, height: 26, borderRadius: 13),
+              SkeletonBox(width: 22, height: 22, borderRadius: 11),
               Expanded(
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 6),
@@ -439,7 +433,7 @@ class ProposalCardSkeleton extends StatelessWidget {
                   ),
                 ),
               ),
-              SkeletonBox(width: 26, height: 26, borderRadius: 13),
+              SkeletonBox(width: 22, height: 22, borderRadius: 11),
               Expanded(
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 6),
@@ -450,7 +444,7 @@ class ProposalCardSkeleton extends StatelessWidget {
                   ),
                 ),
               ),
-              SkeletonBox(width: 26, height: 26, borderRadius: 13),
+              SkeletonBox(width: 22, height: 22, borderRadius: 11),
             ],
           ),
           const SizedBox(height: 16),
@@ -467,27 +461,28 @@ class ProposalCardSkeleton extends StatelessWidget {
   }
 }
 
-class _StatusDot extends StatelessWidget {
-  const _StatusDot({required this.tone});
+class _NumberBadge extends StatelessWidget {
+  const _NumberBadge({required this.accent, required this.number});
 
-  final Color tone;
+  final Color accent;
+  final String number;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 10,
-      height: 10,
-      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: tone,
-        shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: tone.withValues(alpha: 0.45),
-            blurRadius: 6,
-            spreadRadius: 1,
-          ),
-        ],
+        color: accent.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        number.isEmpty ? 'Sem número' : 'Nº $number',
+        maxLines: 1,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+          color: accent,
+          fontWeight: FontWeight.w900,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        ),
       ),
     );
   }
@@ -527,15 +522,10 @@ class _StatusPill extends StatelessWidget {
 
 /// Linha de contexto do imóvel — chip de código + localização.
 class _PropertyContextLine extends StatelessWidget {
-  const _PropertyContextLine({
-    required this.code,
-    required this.location,
-    required this.accent,
-  });
+  const _PropertyContextLine({required this.code, required this.location});
 
   final String? code;
   final String location;
-  final Color accent;
 
   @override
   Widget build(BuildContext context) {
@@ -548,15 +538,16 @@ class _PropertyContextLine extends StatelessWidget {
         const SizedBox(width: 6),
         if (hasCode) ...[
           Container(
+            constraints: const BoxConstraints(maxWidth: 130),
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: ThemeHelpers.borderLightColor(
-                context,
-              ).withValues(alpha: 0.8),
+              color: ThemeHelpers.borderLightColor(context),
               borderRadius: BorderRadius.circular(5),
             ),
             child: Text(
               'CÓD $code',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: theme.textTheme.labelSmall?.copyWith(
                 color: muted,
                 fontWeight: FontWeight.w900,
@@ -584,51 +575,10 @@ class _PropertyContextLine extends StatelessWidget {
   }
 }
 
-/// Pill compacto de metadado (ícone + label) com borda fina tonal.
-class _MetaPill extends StatelessWidget {
-  const _MetaPill({
-    required this.icon,
-    required this.label,
-    required this.tone,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color tone;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.6),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12, color: tone),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: tone,
-              fontWeight: FontWeight.w800,
-              fontSize: 10.5,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Tracker horizontal das 3 etapas da ficha (Comprador → Proprietário →
+/// Trilho horizontal das 3 etapas da ficha (Comprador → Proprietário →
 /// Corretor). Nós concluídos recebem check; o atual fica em destaque; os
 /// futuros ficam apagados. Em proposta finalizada, todas concluídas; em
-/// cancelada, fica neutralizado.
+/// cancelada/excluída, fica neutralizado.
 class _StageTracker extends StatelessWidget {
   const _StageTracker({
     required this.current,
@@ -642,7 +592,7 @@ class _StageTracker extends StatelessWidget {
   final bool canceled;
   final Color accent;
 
-  static const _labels = ['Comprador', 'Propriet.', 'Corretor'];
+  static const _labels = ['Comprador', 'Proprietário', 'Corretor'];
 
   @override
   Widget build(BuildContext context) {
@@ -666,9 +616,7 @@ class _StageTracker extends StatelessWidget {
               height: 2,
               margin: const EdgeInsets.symmetric(horizontal: 4),
               decoration: BoxDecoration(
-                color: filled
-                    ? tone.withValues(alpha: 0.55)
-                    : border.withValues(alpha: 0.6),
+                color: filled ? tone.withValues(alpha: 0.55) : border,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -687,35 +635,44 @@ class _StageTracker extends StatelessWidget {
       );
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(children: nodes),
-        const SizedBox(height: 6),
-        Row(
-          children: [
-            for (var i = 0; i < 3; i++)
-              Expanded(
-                child: Text(
-                  _labels[i],
-                  textAlign: i == 0
-                      ? TextAlign.start
-                      : (i == 2 ? TextAlign.end : TextAlign.center),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: isActive(i + 1) ? tone : muted,
-                    fontWeight: isActive(i + 1)
-                        ? FontWeight.w900
-                        : FontWeight.w700,
-                    fontSize: 9.5,
-                    letterSpacing: 0.2,
+    final estado = finalized
+        ? 'todas as etapas concluídas'
+        : canceled
+        ? 'etapas interrompidas'
+        : 'etapa $current de 3, ${_labels[(current - 1).clamp(0, 2).toInt()]}';
+
+    return Semantics(
+      label: 'Assinaturas: $estado',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(children: nodes),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              for (var i = 0; i < 3; i++)
+                Expanded(
+                  child: Text(
+                    _labels[i],
+                    textAlign: i == 0
+                        ? TextAlign.start
+                        : (i == 2 ? TextAlign.end : TextAlign.center),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: isActive(i + 1) ? tone : muted,
+                      fontWeight: isActive(i + 1)
+                          ? FontWeight.w900
+                          : FontWeight.w700,
+                      fontSize: 10,
+                      letterSpacing: 0.1,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-          ],
-        ),
-      ],
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -749,24 +706,16 @@ class _StageNode extends StatelessWidget {
             ? tone
             : (active ? tone.withValues(alpha: 0.14) : Colors.transparent),
         border: Border.all(
-          color: filled ? tone : border.withValues(alpha: 0.7),
+          color: filled ? tone : border,
           width: active ? 2 : 1.4,
         ),
-        boxShadow: active
-            ? [
-                BoxShadow(
-                  color: tone.withValues(alpha: 0.3),
-                  blurRadius: 8,
-                  spreadRadius: -1,
-                ),
-              ]
-            : null,
       ),
       alignment: Alignment.center,
       child: done
           ? const Icon(Icons.check_rounded, size: 13, color: Colors.white)
           : Text(
               '$step',
+              textScaler: TextScaler.noScaling,
               style: TextStyle(
                 color: active ? tone : muted,
                 fontWeight: FontWeight.w900,
@@ -778,17 +727,13 @@ class _StageNode extends StatelessWidget {
   }
 }
 
-/// Rodapé com autoria, data e etapa textual — denso e calmo.
+/// Rodapé com autoria e data — denso e calmo; quebra de linha em vez de
+/// cortar quando a fonte é grande.
 class _FooterMeta extends StatelessWidget {
-  const _FooterMeta({
-    required this.creatorName,
-    required this.createdAt,
-    required this.etapaLabel,
-  });
+  const _FooterMeta({required this.creatorName, required this.createdAt});
 
   final String? creatorName;
   final DateTime? createdAt;
-  final String etapaLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -797,45 +742,52 @@ class _FooterMeta extends StatelessWidget {
     final dateStr = createdAt != null
         ? DateFormat('dd/MM/yyyy', 'pt_BR').format(createdAt!.toLocal())
         : null;
+    final creator = creatorName?.trim().isNotEmpty == true
+        ? creatorName!.trim()
+        : 'Autor não informado';
+    final style = theme.textTheme.labelSmall?.copyWith(
+      color: muted,
+      fontWeight: FontWeight.w800,
+      letterSpacing: 0.1,
+    );
 
-    return Row(
+    return Wrap(
+      spacing: 12,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        Icon(Icons.person_outline, size: 14, color: muted),
-        const SizedBox(width: 5),
-        Flexible(
-          child: Text(
-            creatorName?.trim().isNotEmpty == true ? creatorName! : '—',
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: muted,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.1,
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.person_outline, size: 14, color: muted),
+            const SizedBox(width: 5),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 190),
+              child: Text(
+                creator,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
+          ],
         ),
-        if (dateStr != null) ...[
-          const SizedBox(width: 8),
-          Container(
-            width: 3,
-            height: 3,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: muted.withValues(alpha: 0.5),
-            ),
+        if (dateStr != null)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.schedule_outlined, size: 13, color: muted),
+              const SizedBox(width: 5),
+              Text(
+                'criada em $dateStr',
+                maxLines: 1,
+                style: style?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          Icon(Icons.schedule_outlined, size: 13, color: muted),
-          const SizedBox(width: 5),
-          Text(
-            dateStr,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: muted,
-              fontWeight: FontWeight.w700,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          ),
-        ],
       ],
     );
   }

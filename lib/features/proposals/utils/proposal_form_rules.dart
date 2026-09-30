@@ -257,20 +257,22 @@ class ProposalPercentFormatter extends TextInputFormatter {
   }
 }
 
-/// Opções fixas do web (`AppSelect` de estado civil e regime).
+/// Opções fixas do web (`AppSelect` de estado civil e regime). Os valores
+/// gravados são os do web; só os rótulos da tela vêm por extenso, em
+/// português do dia a dia ("Comunhão parcial de bens").
 const List<(String, String)> kProposalMaritalStatus = [
   ('solteiro', 'Solteiro(a)'),
   ('casado', 'Casado(a)'),
   ('divorciado', 'Divorciado(a)'),
   ('viuvo', 'Viúvo(a)'),
-  ('uniao_estavel', 'União Estável'),
+  ('uniao_estavel', 'União estável'),
 ];
 
 const List<(String, String)> kProposalMarriageRegime = [
-  ('comunhao_parcial', 'Comunhão Parcial'),
-  ('comunhao_universal', 'Comunhão Universal'),
-  ('separacao_total', 'Separação Total'),
-  ('participacao_final', 'Participação Final'),
+  ('comunhao_parcial', 'Comunhão parcial de bens'),
+  ('comunhao_universal', 'Comunhão universal de bens'),
+  ('separacao_total', 'Separação total de bens'),
+  ('participacao_final', 'Participação final nos aquestos'),
 ];
 
 const List<String> kProposalUfs = [

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../shared/services/sale_forms_service.dart';
 import 'fichas_filters_kit.dart';
+import 'sale_form_tones.dart';
 
 /// Resultado do modal: filtros aplicados, ou `cleared` quando o usuário tocou
 /// em "Limpar filtros" (a página também desliga "Apenas excluídas", como o
@@ -308,10 +309,12 @@ class _SaleFormsFiltersSheetState extends State<_SaleFormsFiltersSheet> {
               children: [
                 for (final s in SaleFormStatus.values)
                   FichasChoiceChip(
-                    // Mesmos rótulos curtos dos chips do topo da lista.
+                    // Mesmos rótulos e cores dos atalhos do topo da lista
+                    // (cada status na sua cor, com o ponto).
                     label: s.shortLabel,
                     selected: _statuses.contains(s),
-                    accent: cStatus,
+                    accent: SaleFormTom.doStatus(context, s).texto,
+                    dot: true,
                     onTap: () => setState(() {
                       if (!_statuses.remove(s)) _statuses.add(s);
                     }),

@@ -37,7 +37,10 @@ class SaleFormRowRules {
     }
     if (_canceled) return 'Ficha cancelada: não pode mais ser editada.';
     if (hasActiveSignatures || _processing) {
-      return 'Esta ficha já possui assinatura(s) em andamento. Para editar, invalide as assinaturas primeiro (opção "Cancelar assinaturas (reenvio)").';
+      return 'Esta ficha já tem assinaturas em andamento. Para editar, cancele '
+          'as assinaturas primeiro: no menu da ficha, toque em "Cancelar '
+          'assinaturas (reenvio)". Se a opção não aparecer para você, peça a '
+          'quem criou a ficha ou a um gestor.';
     }
     return null;
   }

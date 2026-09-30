@@ -45,6 +45,7 @@ class _ListedPropertyMetrics {
     required this.draft,
     required this.pendingReview,
     required this.maintenance,
+    required this.inRentalFunnel,
     required this.active,
     required this.inactive,
     required this.featuredHighlights,
@@ -63,6 +64,8 @@ class _ListedPropertyMetrics {
   /// `pending_approval` + `pending_owner_authorization` no CRM.
   final int pendingReview;
   final int maintenance;
+  /// 9 etapas do funil de locação (em atendimento → assinatura).
+  final int inRentalFunnel;
   final int active;
   final int inactive;
   final int featuredHighlights;
@@ -758,28 +761,34 @@ class _PropertiesPageState extends State<PropertiesPage> {
         label: 'Disponíveis',
         icon: Icons.check_circle_rounded,
         active: _activeScope == PortfolioScope.available,
-        tone: const Color(0xFF10B981),
+        tone: PropertyStatusVisual.of(
+          PropertyStatus.available,
+          dark: isDark,
+        ).color,
         onTap: () => _setPortfolioScope(PortfolioScope.available),
       ),
       _ScopeChipData(
         label: 'Vendidos',
         icon: Icons.sell_rounded,
         active: _activeScope == PortfolioScope.sold,
-        tone: const Color(0xFF8B5CF6),
+        tone: PropertyStatusVisual.of(PropertyStatus.sold, dark: isDark).color,
         onTap: () => _setPortfolioScope(PortfolioScope.sold),
       ),
       _ScopeChipData(
         label: 'Pendentes',
         icon: Icons.schedule_rounded,
         active: _activeScope == PortfolioScope.pending,
-        tone: const Color(0xFFF59E0B),
+        tone: PropertyStatusVisual.of(
+          PropertyStatus.pendingApproval,
+          dark: isDark,
+        ).color,
         onTap: () => _setPortfolioScope(PortfolioScope.pending),
       ),
       _ScopeChipData(
         label: 'Recusados',
         icon: Icons.cancel_rounded,
         active: _activeScope == PortfolioScope.rejected,
-        tone: const Color(0xFFEF4444),
+        tone: isDark ? AppColors.status.errorDarkMode : AppColors.status.error,
         onTap: () => _setPortfolioScope(PortfolioScope.rejected),
       ),
     ];
@@ -1108,6 +1117,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
     int draft = 0;
     int pendingReview = 0;
     int maintenance = 0;
+    int inRentalFunnel = 0;
     int active = 0;
     int inactive = 0;
     int featured = 0;
@@ -1156,7 +1166,8 @@ class _PropertiesPageState extends State<PropertiesPage> {
           maintenance++;
           break;
         default:
-          // Etapas do funil de locação: não entram em nenhum balde acima.
+          // Etapas do funil de locação: balde próprio (distribuição).
+          if (p.statusIsKnown && p.status.isRentalFunnel) inRentalFunnel++;
           break;
       }
       if (p.salePrice != null) {
@@ -1180,6 +1191,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
       draft: draft,
       pendingReview: pendingReview,
       maintenance: maintenance,
+      inRentalFunnel: inRentalFunnel,
       active: active,
       inactive: inactive,
       featuredHighlights: featured,
@@ -3886,31 +3898,44 @@ class _PortfolioMetricsSheet extends StatelessWidget {
     final rented = useGlobal ? global!.rented : listed.rented;
     final sold = useGlobal ? global!.sold : listed.sold;
     final pending = listed.pendingReview;
+    final funnel = listed.inRentalFunnel;
     final total = useGlobal
         ? global!.total
-        : (available + rented + sold + pending);
+        : (available + rented + sold + pending + funnel);
+    // Mesma cor da pill do card para o mesmo status (fonte única, tokens):
+    // o verde de "Disponíveis" aqui é o verde de "Disponível" na lista.
+    Color tom(PropertyStatus s) =>
+        PropertyStatusVisual.of(s, dark: isDark).color;
 
     final segments = <_MetricSegment>[
       _MetricSegment(
         label: 'Disponíveis',
         value: available,
-        color: const Color(0xFF10B981),
+        color: tom(PropertyStatus.available),
       ),
+      // Imóveis nas 9 etapas do funil de locação: antes ficavam fora da
+      // barra e a soma não batia com a lista.
+      if (funnel > 0)
+        _MetricSegment(
+          label: 'Funil de locação',
+          value: funnel,
+          color: tom(PropertyStatus.inNegotiation),
+        ),
       _MetricSegment(
         label: 'Locação',
         value: rented,
-        color: const Color(0xFF6366F1),
+        color: tom(PropertyStatus.rented),
       ),
       _MetricSegment(
         label: 'Vendas',
         value: sold,
-        color: const Color(0xFFEC4899),
+        color: tom(PropertyStatus.sold),
       ),
       if (pending > 0)
         _MetricSegment(
           label: 'Em revisão',
           value: pending,
-          color: const Color(0xFFF59E0B),
+          color: tom(PropertyStatus.pendingApproval),
         ),
     ];
 

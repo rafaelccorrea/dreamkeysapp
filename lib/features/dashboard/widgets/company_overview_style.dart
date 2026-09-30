@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+// `hide TextDirection`: o intl tem o próprio TextDirection (LTR maiúsculo),
+// que sombreava o do Flutter e quebrava o `TextDirection.ltr` do layout.
+import 'package:intl/intl.dart' hide TextDirection;
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
@@ -14,34 +16,55 @@ import 'dashboard_filters_drawer.dart';
 ///   âmbar          = compromisso no tempo, atenção (agenda, vence hoje);
 ///   musgo (green)  = confirmado (fichas finalizadas, meta batida);
 ///   oxblood (red)  = perda, atraso.
-/// Os tons do modo claro são os escuros do web — texto âmbar #E6B84C sobre
-/// branco não passa contraste; #B45309 passa.
+///
+/// 30/09/2026 (revisão de design): as tintas saem SÓ dos tokens do app
+/// (`AppColors.status` / `message` / `text`), a mesma família do Dashboard
+/// geral — nada de hex solto. O verde e o âmbar dos tokens não passam
+/// contraste de TEXTO miúdo sobre branco, então nesta tela eles pintam só o
+/// SINAL (ícone, régua, marcador, selo); o texto ao lado fica no tom neutro
+/// do tema. O vermelho passa e pode pintar texto de perda/atraso.
 abstract final class OverviewTones {
   static bool _dark(BuildContext c) => Theme.of(c).brightness == Brightness.dark;
 
+  /// Aço — o que entra (leads, canais).
   static Color sky(BuildContext c) =>
-      _dark(c) ? const Color(0xFF7DB8D8) : const Color(0xFF2E6F8E);
+      _dark(c) ? AppColors.status.infoDarkMode : AppColors.status.info;
+
+  /// Pedra — estrutura, número derivado (conversão, ranking).
   static Color slate(BuildContext c) =>
-      _dark(c) ? const Color(0xFFA8A29E) : const Color(0xFF57534E);
-  static Color amber(BuildContext c) =>
-      _dark(c) ? const Color(0xFFF0A868) : const Color(0xFFB45309);
+      _dark(c) ? AppColors.text.textLightDarkMode : AppColors.text.textLight;
+
+  /// Âmbar — compromisso no tempo, atenção. No claro, o âmbar de texto de
+  /// aviso do tema (o `warning` puro some no branco).
+  static Color amber(BuildContext c) => _dark(c)
+      ? AppColors.status.warningDarkMode
+      : AppColors.message.warningText;
+
+  /// Musgo — confirmado (fichas finalizadas, meta batida).
   static Color green(BuildContext c) =>
-      _dark(c) ? const Color(0xFF9BCB5A) : const Color(0xFF4D7C0F);
+      _dark(c) ? AppColors.status.successDarkMode : AppColors.status.success;
+
+  /// Perda, atraso.
   static Color red(BuildContext c) =>
-      _dark(c) ? const Color(0xFFFB7185) : const Color(0xFF9F1239);
+      _dark(c) ? AppColors.status.errorDarkMode : AppColors.status.error;
 
   /// Vermelho da marca — a curva do VGV e o anel da meta no caminho normal.
   static Color brand(BuildContext c) =>
       _dark(c) ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
 
-  /// Trilho das réguas (fundo neutro, sem gota de cor).
+  /// Trilho das réguas e chapa neutra (selo de valor, avatar sem foto): o
+  /// fill terciário do tema no claro; no escuro, branco a 8% — o terciário
+  /// escuro some sobre o fundo grafite.
   static Color track(BuildContext c) => _dark(c)
-      ? Colors.white.withValues(alpha: 0.07)
-      : const Color(0xFFECEDF1);
+      ? Colors.white.withValues(alpha: 0.08)
+      : AppColors.background.backgroundTertiary;
+
+  /// Véu da tinta atrás de um ícone ou selo.
+  static Color wash(BuildContext c, Color tone) =>
+      tone.withValues(alpha: _dark(c) ? 0.18 : 0.12);
 
   /// Fio que separa as faixas.
-  static Color rule(BuildContext c) =>
-      ThemeHelpers.borderLightColor(c).withValues(alpha: _dark(c) ? 0.9 : 1);
+  static Color rule(BuildContext c) => ThemeHelpers.borderLightColor(c);
 }
 
 final NumberFormat _intFmt = NumberFormat.decimalPattern('pt_BR');
@@ -273,56 +296,120 @@ String ovInitials(String name) {
   return letters.isEmpty ? '?' : letters;
 }
 
+/// Largura da palavra mais longa dos textos, medida no tamanho real (fonte
+/// do sistema inclusa). Serve para decidir se um rótulo cabe na coluna
+/// sem partir a palavra no meio ("Agendam/entos") — largura fixa em dp não
+/// acompanha texto em 130%.
+double ovWidestWord(
+  Iterable<String> texts,
+  TextStyle? style,
+  TextScaler scaler,
+) {
+  var widest = 0.0;
+  for (final t in texts) {
+    for (final word in t.split(RegExp(r'\s+'))) {
+      if (word.isEmpty) continue;
+      final tp = TextPainter(
+        text: TextSpan(text: word, style: style),
+        textDirection: TextDirection.ltr,
+        textScaler: scaler,
+        maxLines: 1,
+      )..layout();
+      if (tp.width > widest) widest = tp.width;
+      tp.dispose();
+    }
+  }
+  return widest;
+}
+
 // ─── Peças visuais comuns ────────────────────────────────────────────────────
 
-/// Cabeçalho de faixa: traço tonal curto + título + dica, com ação à direita.
-/// O título nunca trunca com reticências — quebra linha.
+/// Cabeçalho de faixa: chapa tonal com o ícone da faixa (ou traço curto, sem
+/// ícone) + título + dica, com ação à direita — a mesma leitura "ícone +
+/// título" dos painéis do Dashboard geral. O título nunca trunca com
+/// reticências — quebra linha.
 class OverviewBandHeader extends StatelessWidget {
   const OverviewBandHeader({
     super.key,
     required this.title,
     required this.tone,
+    this.icon,
     this.hint,
+    this.badge,
     this.trailing,
   });
 
   final String title;
   final Color tone;
+  final IconData? icon;
   final String? hint;
+
+  /// Selo curto colado ao título ("12,5% de conversão", "24"): na mesma
+  /// linha quando cabe; em tela estreita desce para baixo do título. À
+  /// direita, como `trailing`, ele espremia título e dica numa coluna de
+  /// ~90dp em 320dp com fonte grande (e partia "agenda/mentos").
+  final Widget? badge;
+
+  /// Controle pequeno à direita (seta de abrir/fechar).
   final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final glyph = icon;
+    final titleText = Text(
+      title,
+      softWrap: true,
+      style: theme.textTheme.titleMedium?.copyWith(
+        fontWeight: FontWeight.w900,
+        color: ThemeHelpers.textColor(context),
+        letterSpacing: -0.3,
+        height: 1.2,
+      ),
+    );
+    final mark = badge;
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: glyph != null
+          ? CrossAxisAlignment.center
+          : CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Container(
-            width: 16,
-            height: 3,
+        if (glyph != null)
+          Container(
+            width: 34,
+            height: 34,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: tone,
-              borderRadius: BorderRadius.circular(2),
+              color: OverviewTones.wash(context, tone),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(glyph, size: 17, color: tone),
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Container(
+              width: 16,
+              height: 3,
+              decoration: BoxDecoration(
+                color: tone,
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
           ),
-        ),
-        const SizedBox(width: 8),
+        SizedBox(width: glyph != null ? 11 : 8),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                title,
-                softWrap: true,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: ThemeHelpers.textColor(context),
-                  letterSpacing: -0.3,
-                  height: 1.2,
+              if (mark == null)
+                titleText
+              else
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [titleText, mark],
                 ),
-              ),
               if (hint != null && hint!.isNotEmpty) ...[
                 const SizedBox(height: 2),
                 Text(
@@ -380,16 +467,20 @@ class OverviewLink extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = ThemeHelpers.textColor(context);
+    // Alvo de toque de ~36dp: o link mora ao lado de um rótulo miúdo e,
+    // com 6px de respiro, o dedo errava.
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               label,
+              maxLines: 1,
+              softWrap: false,
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
                     color: color,
                     fontWeight: FontWeight.w800,
@@ -406,7 +497,9 @@ class OverviewLink extends StatelessWidget {
   }
 }
 
-/// Selo de variação (seta + percentual) na tinta do sentido.
+/// Selo de variação: seta na tinta do sentido sobre o véu da mesma tinta, e
+/// o percentual no texto do tema — o verde dos tokens não passa contraste
+/// como texto miúdo no claro; a seta e o véu já dizem "subiu"/"caiu".
 class OverviewDeltaChip extends StatelessWidget {
   const OverviewDeltaChip({super.key, required this.value, this.compact = false});
 
@@ -426,25 +519,26 @@ class OverviewDeltaChip extends StatelessWidget {
       OvDeltaTone.down => Icons.south_east_rounded,
       OvDeltaTone.flat => Icons.remove_rounded,
     };
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: EdgeInsets.symmetric(
         horizontal: compact ? 6 : 8,
         vertical: compact ? 2 : 3,
       ),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: isDark ? 0.16 : 0.10),
+        color: OverviewTones.wash(context, color),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: compact ? 11 : 12, color: color),
+          Icon(icon, size: compact ? 12 : 13, color: color),
           const SizedBox(width: 3),
           Text(
             ovDelta(value),
+            maxLines: 1,
+            softWrap: false,
             style: TextStyle(
-              color: color,
+              color: ThemeHelpers.textColor(context),
               fontWeight: FontWeight.w900,
               fontSize: compact ? 10.5 : 11.5,
               height: 1.1,
@@ -547,25 +641,35 @@ class OverviewAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final initials = ovInitials(name);
     final fallback = Container(
       width: size,
       height: size,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: isDark ? const Color(0xFF1C1C23) : const Color(0xFFEEF0F3),
+        color: OverviewTones.track(context),
         border: Border.all(color: ThemeHelpers.borderLightColor(context)),
       ),
-      child: Text(
-        ovInitials(name),
-        style: TextStyle(
-          color: ThemeHelpers.textColor(context),
-          fontWeight: FontWeight.w800,
-          fontSize: size * 0.36,
-          height: 1,
-        ),
-      ),
+      // Sem nome ainda (perfil carregando): silhueta, não um "?". A inicial
+      // acompanha o diâmetro, não a fonte do sistema: com texto em 130% ela
+      // vazaria do círculo.
+      child: initials == '?'
+          ? Icon(
+              Icons.person_rounded,
+              size: size * 0.5,
+              color: ThemeHelpers.textSecondaryColor(context),
+            )
+          : Text(
+              initials,
+              textScaler: TextScaler.noScaling,
+              style: TextStyle(
+                color: ThemeHelpers.textColor(context),
+                fontWeight: FontWeight.w800,
+                fontSize: size * 0.36,
+                height: 1,
+              ),
+            ),
     );
     final u = url;
     if (u == null || u.isEmpty) return fallback;
@@ -575,6 +679,10 @@ class OverviewAvatar extends StatelessWidget {
         width: size,
         height: size,
         fit: BoxFit.cover,
+        // Enquanto a foto baixa, as iniciais seguram o lugar — antes o
+        // círculo ficava vazio (um buraco no topo e no ranking).
+        frameBuilder: (context, child, frame, wasSynchronouslyLoaded) =>
+            wasSynchronouslyLoaded || frame != null ? child : fallback,
         errorBuilder: (_, __, ___) => fallback,
       ),
     );

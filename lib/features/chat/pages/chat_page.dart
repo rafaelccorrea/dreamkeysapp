@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/app_bottom_navigation.dart';
 import '../../../shared/widgets/skeleton_box.dart';
@@ -17,9 +18,12 @@ import '../models/chat_models.dart';
 import '../services/chat_api_service.dart';
 import '../services/chat_socket_service.dart';
 import '../controllers/chat_unread_controller.dart';
+import '../../whatsapp/widgets/whatsapp_conversation_card.dart'
+    show WhatsAppAvatar;
 import '../widgets/chat_room_list_item.dart';
 import '../widgets/chat_message_list.dart';
 import '../widgets/chat_input.dart';
+import '../widgets/chat_visual.dart';
 
 /// Página principal do chat
 class ChatPage extends StatefulWidget {
@@ -54,6 +58,19 @@ class _ChatPageState extends State<ChatPage>
   // "sem permissão" de "servidor fora do ar".
   int _errorStatus = 0;
   ErrorCause? _errorCause;
+
+  // Colaboradores: a falha na carga virava "Nenhum colaborador encontrado"
+  // (30/09/2026) — agora a tela diz a causa e oferece "Tentar de novo".
+  String? _usersError;
+  int _usersErrorStatus = 0;
+
+  /// Colega cuja conversa está sendo aberta (mostra progresso na linha e
+  /// evita o toque duplo criar duas chamadas).
+  String? _openingUserId;
+
+  /// Busca local da lista (nome, prévia, e-mail do colega) — não chama a API.
+  final TextEditingController _searchController = TextEditingController();
+  String _query = '';
 
   int _messageOffset = 0;
   static const int _messagesLimit = 50;
@@ -135,10 +152,13 @@ class _ChatPageState extends State<ChatPage>
   Future<void> _loadCompanyUsers() async {
     setState(() {
       _isLoadingUsers = true;
+      _usersError = null;
+      _usersErrorStatus = 0;
     });
 
     try {
       final response = await _chatApi.getCompanyUsers();
+      if (!mounted) return;
       if (response.success && response.data != null) {
         setState(() {
           // Filtrar o usuário atual da lista
@@ -152,38 +172,95 @@ class _ChatPageState extends State<ChatPage>
       } else {
         setState(() {
           _isLoadingUsers = false;
+          _usersError =
+              response.message ?? 'Não foi possível carregar os colegas.';
+          _usersErrorStatus = response.statusCode;
         });
       }
     } catch (e) {
+      debugPrint('❌ [CHAT] Erro ao carregar colaboradores: $e');
+      if (!mounted) return;
       setState(() {
         _isLoadingUsers = false;
+        _usersError = 'Não foi possível carregar os colegas.';
       });
-      debugPrint('❌ [CHAT] Erro ao carregar colaboradores: $e');
     }
+  }
+
+  /// Aviso curto no cartão do tema, com ícone de erro ou de sucesso (o
+  /// fundo vermelho/verde saturado com texto branco foi trocado).
+  void _toast(String message, {bool error = false}) {
+    if (!mounted) return;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final Color tone;
+    if (error) {
+      tone = isDark
+          ? AppColors.message.errorTextDarkMode
+          : AppColors.message.errorText;
+    } else {
+      tone = isDark
+          ? AppColors.message.successTextDarkMode
+          : AppColors.message.successText;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(
+              error ? LucideIcons.circleAlert : LucideIcons.circleCheck,
+              size: 18,
+              color: tone,
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: Text(message)),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _showDeleteChatDialog(
     BuildContext context,
     ChatRoom room,
   ) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final danger =
+        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final name = room.getDisplayName(_currentUserId);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Deletar conversa'),
-        content: Text(
-          'Tem certeza que deseja deletar esta conversa? Esta ação não pode ser desfeita.',
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Excluir conversa',
+          style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.3),
+        ),
+        content: SingleChildScrollView(
+          child: Text(
+            room.type == ChatRoomType.group
+                ? 'Você sai do grupo "$name" e a conversa some da sua lista. '
+                      'Esta ação não pode ser desfeita.'
+                : 'A conversa com $name some da sua lista. '
+                      'Esta ação não pode ser desfeita.',
+            style: const TextStyle(height: 1.4),
+          ),
         ),
         actions: [
+          // Cancelar NEUTRO: o tema pinta TextButton de vermelho.
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
+            style: TextButton.styleFrom(
+              foregroundColor: ThemeHelpers.textSecondaryColor(dialogContext),
+            ),
             child: const Text('Cancelar'),
           ),
-          TextButton(
+          FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.error,
+            style: FilledButton.styleFrom(
+              backgroundColor: danger,
+              foregroundColor: Colors.white,
             ),
-            child: const Text('Deletar'),
+            child: const Text('Excluir'),
           ),
         ],
       ),
@@ -215,38 +292,26 @@ class _ChatPageState extends State<ChatPage>
         // Atualizar controller de não lidas
         _syncUnreadBadge();
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Conversa deletada com sucesso'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
+        _toast('Conversa excluída.');
       } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(response.message ?? 'Erro ao deletar conversa'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+        _toast(
+          response.message ?? 'Não foi possível excluir a conversa.',
+          error: true,
+        );
       }
     } catch (e) {
       debugPrint('❌ [CHAT] Erro ao deletar conversa: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao deletar conversa: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      _toast(
+        'Não foi possível excluir a conversa. '
+        'Confira a conexão e tente de novo.',
+        error: true,
+      );
     }
   }
 
   Future<void> _startConversationWithUser(CompanyUser user) async {
+    if (_openingUserId != null) return;
+    setState(() => _openingUserId = user.id);
     try {
       // Criar ou obter sala de conversa direta com o usuário
       final response = await _chatApi.createOrGetRoom(
@@ -278,25 +343,19 @@ class _ChatPageState extends State<ChatPage>
         // Voltar para a aba em que a conversa está ('Todas' ou 'Arquivadas')
         _tabController.animateTo(room.isArchived == true ? 1 : 0);
       } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(response.message ?? 'Erro ao iniciar conversa'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+        _toast(
+          response.message ?? 'Não foi possível abrir a conversa.',
+          error: true,
+        );
       }
     } catch (e) {
       debugPrint('❌ [CHAT] Erro ao iniciar conversa: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao iniciar conversa: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      _toast(
+        'Não foi possível abrir a conversa. Confira a conexão e tente de novo.',
+        error: true,
+      );
+    } finally {
+      if (mounted) setState(() => _openingUserId = null);
     }
   }
 
@@ -509,13 +568,9 @@ class _ChatPageState extends State<ChatPage>
       final fetched = response.data;
       if (!response.success || fetched == null) {
         // Causa real do back (ex.: 'Você não tem acesso a esta sala de chat').
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              response.message ?? 'Não foi possível abrir a conversa',
-            ),
-            backgroundColor: Colors.red,
-          ),
+        _toast(
+          response.message ?? 'Não foi possível abrir a conversa.',
+          error: true,
         );
         return;
       }
@@ -603,8 +658,10 @@ class _ChatPageState extends State<ChatPage>
       roomId: _selectedRoom!.id,
       senderId: _currentUserId ?? '',
       senderName: 'Você',
+      // Só na bolha provisória, enquanto envia: o nome do arquivo, sem emoji
+      // (a interface não usa emoji). O que vai para a API não muda.
       content: content.trim().isEmpty
-          ? (file != null ? '📎 ${file.path.split('/').last}' : '')
+          ? (file != null ? file.path.split(RegExp(r'[\\/]')).last : '')
           : content.trim(),
       status: ChatMessageStatus.sending,
       isEdited: false,
@@ -643,546 +700,1044 @@ class _ChatPageState extends State<ChatPage>
       setState(() {
         _messages.removeWhere((m) => m.id == tempId);
       });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(response.message ?? 'Erro ao enviar mensagem'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      _toast(
+        response.message ?? 'A mensagem não foi enviada. Tente de novo.',
+        error: true,
+      );
     }
   }
 
+  // ─── Lista: Todas · Arquivadas · Colaboradores ───────────────────────────
+
+  static String _plural(int n, String one, String many) =>
+      n == 1 ? '1 $one' : '$n $many';
+
+  bool _roomMatches(ChatRoom r, String q) {
+    if (r.getDisplayName(_currentUserId).toLowerCase().contains(q)) {
+      return true;
+    }
+    return chatPreviewText(r.lastMessage).toLowerCase().contains(q);
+  }
+
+  bool _userMatches(CompanyUser u, String q) =>
+      u.name.toLowerCase().contains(q) || u.email.toLowerCase().contains(q);
+
+  void _clearSearch() {
+    _searchController.clear();
+    setState(() => _query = '');
+  }
+
+  /// Lista inteira num scroll só (30/09/2026): o resumo, a busca e as abas
+  /// rolam junto com as linhas. Antes o topo era fixo (título + abas com
+  /// ícone, ~140dp) sobre um Expanded — em paisagem com o teclado aberto a
+  /// lista ficava sem altura. O puxar-para-atualizar vale nas três abas
+  /// (ListView direto sob o RefreshIndicator).
   Widget _buildRoomsList(BuildContext context, ThemeData theme) {
-    // Lista da aba calculada uma vez por build (o getter copia e ordena).
-    final rooms = _rooms;
-    final isArchivedTab = _tabController.index == 1;
-    return Column(
-      children: [
-        // Header da lista
-        Container(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Conversas',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.refresh),
-                onPressed: _loadRooms,
-                tooltip: 'Atualizar',
-              ),
-            ],
-          ),
-        ),
-        // Tabs
-        Container(
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(
-                color: ThemeHelpers.borderColor(context),
-                width: 1,
-              ),
-            ),
-          ),
-          child: TabBar(
-            controller: _tabController,
-            labelColor: AppColors.primary.primary,
-            unselectedLabelColor: ThemeHelpers.textSecondaryColor(context),
-            indicatorColor: AppColors.primary.primary,
-            dividerColor: Colors.transparent,
-            overlayColor: WidgetStateProperty.all(Colors.transparent),
-            tabs: const [
-              Tab(
-                icon: Icon(Icons.chat_bubble_outline, size: 20),
-                text: 'Todas',
-              ),
-              Tab(
-                icon: Icon(Icons.archive_outlined, size: 20),
-                text: 'Arquivadas',
-              ),
-              Tab(
-                icon: Icon(Icons.people_outline, size: 20),
-                text: 'Colaboradores',
-              ),
-            ],
-          ),
-        ),
-        // Lista de conversas ou colaboradores
-        Expanded(
-          child: _tabController.index == 2
-              ? _buildUsersList(context, theme)
-              : _isLoadingRooms
-              ? _buildRoomsShimmer(context)
-              : _errorMessage != null
-              ? (_errorCause != null
-                    ? AppErrorState(
-                        cause: _errorCause!,
-                        onRetry: _loadRooms,
-                      )
-                    : AppErrorState.fromApi(
-                        message: _errorMessage,
-                        statusCode: _errorStatus,
-                        onRetry: _loadRooms,
-                      ))
-              : rooms.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        isArchivedTab
-                            ? Icons.archive_outlined
-                            : Icons.chat_bubble_outline,
-                        size: 64,
-                        color: ThemeHelpers.textSecondaryColor(context),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        isArchivedTab
-                            ? 'Nenhuma conversa arquivada'
-                            : 'Nenhuma conversa',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          color: ThemeHelpers.textSecondaryColor(context),
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  itemCount: rooms.length,
-                  itemBuilder: (context, index) {
-                    final room = rooms[index];
-                    final isSelected = _selectedRoom?.id == room.id;
-                    return ChatRoomListItem(
-                      room: room,
-                      currentUserId: _currentUserId,
-                      isSelected: isSelected,
-                      onTap: () => _selectRoom(room),
-                    );
-                  },
-                ),
-        ),
-      ],
+    final tab = _tabController.index;
+    final top = <Widget>[
+      _buildListHeader(context),
+      _buildSearchField(context),
+      _buildTabs(context),
+    ];
+    final body = tab == 2 ? _usersBody(context) : _roomsBody(context);
+    return RefreshIndicator(
+      color: chatInk(context),
+      onRefresh: tab == 2 ? _loadCompanyUsers : _loadRooms,
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: const EdgeInsets.only(bottom: 32),
+        itemCount: top.length + body.length,
+        itemBuilder: (context, i) =>
+            i < top.length ? top[i] : body[i - top.length],
+      ),
     );
   }
 
-  Widget _buildUsersList(BuildContext context, ThemeData theme) {
-    if (_isLoadingUsers) {
-      return ListView.builder(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: 8,
-        itemBuilder: (context, index) {
-          return Card(
-            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  SkeletonBox(width: 48, height: 48, borderRadius: 24),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SkeletonText(
-                          width: double.infinity,
-                          height: 16,
-                          margin: const EdgeInsets.only(bottom: 8),
-                        ),
-                        SkeletonText(width: 150, height: 14),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
+  /// "Conversas" + a frase que responde "tem algo para mim?" antes de ler a
+  /// lista (quantas com mensagem nova, silenciadas, arquivadas, colegas).
+  Widget _buildListHeader(BuildContext context) {
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final tab = _tabController.index;
+
+    var summary = '';
+    var summaryColor = secondary;
+    var summaryWeight = FontWeight.w500;
+    if (tab == 2) {
+      if (_isLoadingUsers && _companyUsers.isEmpty) {
+        summary = 'Carregando a equipe…';
+      } else if (_companyUsers.isEmpty) {
+        summary = 'Toque em um colega para conversar.';
+      } else {
+        final online = _companyUsers.where((u) => u.isOnline).length;
+        summary = _plural(_companyUsers.length, 'colega', 'colegas');
+        if (online > 0) summary += ' · $online online agora';
+        summary += ' · toque para conversar';
+      }
+    } else if (tab == 1) {
+      final archived = _plural(
+        _archivedRooms.length,
+        'conversa arquivada',
+        'conversas arquivadas',
       );
+      summary = _archivedRooms.isEmpty
+          ? 'Nada arquivado.'
+          : '$archived · mensagem nova aqui não acende o aviso';
+    } else if (_isLoadingRooms && _activeRooms.isEmpty) {
+      summary = 'Carregando suas conversas…';
+    } else {
+      final unreadRooms =
+          _activeRooms.where((r) => (r.unreadCount ?? 0) > 0).length;
+      final muted = _activeRooms.where((r) => r.isMuted == true).length;
+      if (unreadRooms > 0) {
+        summary = unreadRooms == 1
+            ? '1 conversa com mensagem nova'
+            : '$unreadRooms conversas com mensagem nova';
+        summaryColor = chatInk(context);
+        summaryWeight = FontWeight.w700;
+      } else if (_activeRooms.isEmpty) {
+        summary = 'Nenhuma conversa ainda.';
+      } else {
+        final total = _plural(_activeRooms.length, 'conversa', 'conversas');
+        summary = 'Tudo lido · $total';
+      }
+      if (muted > 0) {
+        summary += ' · ${_plural(muted, 'silenciada', 'silenciadas')}';
+      }
     }
 
-    if (_companyUsers.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.people_outline,
-              size: 64,
-              color: ThemeHelpers.textSecondaryColor(context),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 6, 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Conversas',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.6,
+                    height: 1.1,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  summary,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: summaryColor,
+                    fontSize: 13,
+                    fontWeight: summaryWeight,
+                    height: 1.3,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            Text(
-              'Nenhum colaborador encontrado',
-              style: theme.textTheme.bodyLarge?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context),
+          ),
+          IconButton(
+            tooltip: 'Atualizar',
+            onPressed: tab == 2 ? _loadCompanyUsers : _loadRooms,
+            icon: Icon(LucideIcons.refreshCw, size: 19, color: secondary),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Busca no molde da de Imóveis (campo cheio, lupa, limpar). Filtra a
+  /// lista da aba aberta aqui mesmo — não chama a API.
+  Widget _buildSearchField(BuildContext context) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final tab = _tabController.index;
+    final hasText = _searchController.text.isNotEmpty;
+    final hint = tab == 2
+        ? 'Buscar colega por nome ou e-mail'
+        : tab == 1
+        ? 'Buscar nas arquivadas'
+        : 'Buscar conversa';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 44),
+        decoration: BoxDecoration(
+          color: chatFieldFill(context),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.4),
+          ),
+        ),
+        child: Row(
+          children: [
+            const SizedBox(width: 12),
+            Icon(LucideIcons.search, size: 18, color: secondary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: _searchController,
+                textInputAction: TextInputAction.search,
+                cursorColor: chatInk(context),
+                style: TextStyle(
+                  color: ThemeHelpers.textColor(context),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+                decoration: InputDecoration(
+                  hintText: hint,
+                  hintMaxLines: 1,
+                  hintStyle: TextStyle(
+                    color: secondary,
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w400,
+                  ),
+                  // O fill vive no Container (o tema global pintaria outro).
+                  filled: false,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                onChanged: (v) => setState(() => _query = v),
               ),
             ),
+            if (hasText)
+              IconButton(
+                tooltip: 'Limpar busca',
+                visualDensity: VisualDensity.compact,
+                onPressed: _clearSearch,
+                icon: Icon(LucideIcons.x, size: 17, color: secondary),
+              )
+            else
+              const SizedBox(width: 8),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Abas com sublinhado, só texto + contagem (as de ícone empilhado tinham
+  /// ~72dp de altura e "Colaboradores" apagava no fim a 320dp/130%). Roláveis
+  /// e alinhadas à esquerda: nenhum rótulo é cortado.
+  Widget _buildTabs(BuildContext context) {
+    final ink = chatInk(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+
+    Widget tab(String label, int? count) => Tab(
+      height: 44,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, maxLines: 1),
+          if (count != null && count > 0) ...[
+            const SizedBox(width: 5),
+            Text(
+              count > 99 ? '99+' : '$count',
+              maxLines: 1,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            ),
+          ],
+        ],
+      ),
+    );
+
+    return Container(
+      decoration: BoxDecoration(border: Border(bottom: chatHairline(context))),
+      child: TabBar(
+        controller: _tabController,
+        isScrollable: true,
+        tabAlignment: TabAlignment.start,
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        labelPadding: const EdgeInsets.symmetric(horizontal: 12),
+        labelColor: ink,
+        unselectedLabelColor: secondary,
+        labelStyle: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w800,
+          letterSpacing: -0.1,
+        ),
+        unselectedLabelStyle: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          letterSpacing: -0.1,
+        ),
+        indicatorColor: ink,
+        indicatorSize: TabBarIndicatorSize.label,
+        indicatorWeight: 2.5,
+        dividerColor: Colors.transparent,
+        overlayColor: WidgetStateProperty.all(Colors.transparent),
+        tabs: [
+          tab('Todas', _activeRooms.length),
+          tab('Arquivadas', _archivedRooms.length),
+          tab(
+            'Colaboradores',
+            _companyUsers.isEmpty ? null : _companyUsers.length,
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _roomsBody(BuildContext context) {
+    final isArchivedTab = _tabController.index == 1;
+    final hasAny = _activeRooms.isNotEmpty || _archivedRooms.isNotEmpty;
+
+    // Esqueleto só na primeira carga: recarregar mantém a lista na tela.
+    if (_isLoadingRooms && !hasAny) {
+      return List.generate(7, (_) => _rowSkeleton(context, avatar: 52));
+    }
+    if (_errorMessage != null && !hasAny) {
+      return [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: _errorCause != null
+              ? AppErrorState(
+                  cause: _errorCause!,
+                  onRetry: _loadRooms,
+                  dense: true,
+                )
+              : AppErrorState.fromApi(
+                  message: _errorMessage,
+                  statusCode: _errorStatus,
+                  onRetry: _loadRooms,
+                  dense: true,
+                ),
+        ),
+      ];
+    }
+
+    final q = _query.trim().toLowerCase();
+    final all = _rooms;
+    final rooms = q.isEmpty
+        ? all
+        : all.where((r) => _roomMatches(r, q)).toList();
+
+    final out = <Widget>[];
+    if (_errorMessage != null) {
+      out.add(_refreshFailedStrip(context, onRetry: _loadRooms));
+    }
+    if (rooms.isEmpty) {
+      if (q.isNotEmpty) {
+        out.add(_emptySearch(context));
+      } else if (isArchivedTab) {
+        out.add(
+          _emptyState(
+            context,
+            icon: LucideIcons.archive,
+            title: 'Nenhuma conversa arquivada',
+            body:
+                'Conversa que você arquivar no sistema web sai de Todas e '
+                'fica guardada aqui. Mensagem nova nela não acende o aviso '
+                'do chat.',
+          ),
+        );
+      } else {
+        out.add(
+          _emptyState(
+            context,
+            icon: LucideIcons.messagesSquare,
+            title: 'Nenhuma conversa ainda',
+            body:
+                'Para falar com alguém da equipe, abra Colaboradores e toque '
+                'no nome da pessoa.',
+            actionLabel: 'Ver colaboradores',
+            actionIcon: LucideIcons.usersRound,
+            onAction: () => _tabController.animateTo(2),
+          ),
+        );
+      }
+      return out;
+    }
+
+    for (final room in rooms) {
+      out.add(
+        ChatRoomListItem(
+          key: ValueKey('room-${room.id}'),
+          room: room,
+          currentUserId: _currentUserId,
+          isSelected: _selectedRoom?.id == room.id,
+          onTap: () => _selectRoom(room),
         ),
       );
     }
+    return out;
+  }
 
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: _companyUsers.length,
-      itemBuilder: (context, index) {
-        final user = _companyUsers[index];
-        return Card(
-          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(
-              color: ThemeHelpers.borderLightColor(context),
-              width: 1,
-            ),
+  List<Widget> _usersBody(BuildContext context) {
+    if (_isLoadingUsers && _companyUsers.isEmpty) {
+      return List.generate(8, (_) => _rowSkeleton(context, avatar: 44));
+    }
+    if (_usersError != null && _companyUsers.isEmpty) {
+      return [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: AppErrorState.fromApi(
+            message: _usersError,
+            statusCode: _usersErrorStatus,
+            onRetry: _loadCompanyUsers,
+            dense: true,
           ),
-          child: InkWell(
-            onTap: () => _startConversationWithUser(user),
-            borderRadius: BorderRadius.circular(12),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                children: [
-                  // Avatar
-                  Stack(
+        ),
+      ];
+    }
+
+    final q = _query.trim().toLowerCase();
+    final users = q.isEmpty
+        ? _companyUsers
+        : _companyUsers.where((u) => _userMatches(u, q)).toList();
+
+    final out = <Widget>[];
+    if (_usersError != null) {
+      out.add(_refreshFailedStrip(context, onRetry: _loadCompanyUsers));
+    }
+    if (users.isEmpty) {
+      out.add(
+        q.isNotEmpty
+            ? _emptySearch(context)
+            : _emptyState(
+                context,
+                icon: LucideIcons.usersRound,
+                title: 'Nenhum colega encontrado',
+                body:
+                    'Aparecem aqui as pessoas da sua empresa com acesso ao '
+                    'sistema. Se alguém faltar, peça ao administrador para '
+                    'liberar o acesso.',
+              ),
+      );
+      return out;
+    }
+    for (final user in users) {
+      out.add(_userRow(context, user));
+    }
+    return out;
+  }
+
+  /// Colega em linha flush (antes: cartão com borda). Ponto verde só quando
+  /// o back diz que a pessoa está online; a linha inteira abre a conversa.
+  Widget _userRow(BuildContext context, CompanyUser user) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final ink = chatInk(context);
+    final green =
+        isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
+    final name = user.name.trim().isEmpty ? 'Sem nome' : user.name.trim();
+    final opening = _openingUserId == user.id;
+    final subtitle = [
+      if (user.isOnline) 'Online agora',
+      if (user.email.trim().isNotEmpty) user.email.trim(),
+    ].join(' · ');
+
+    return Semantics(
+      button: true,
+      label:
+          'Conversar com $name${user.isOnline ? ', online agora' : ''}',
+      excludeSemantics: true,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _openingUserId == null
+              ? () => _startConversationWithUser(user)
+              : null,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 16),
+            child: Row(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: Stack(
+                    clipBehavior: Clip.none,
                     children: [
-                      CircleAvatar(
-                        radius: 24,
-                        backgroundImage: user.avatar != null
-                            ? NetworkImage(user.avatar!)
-                            : null,
-                        child: user.avatar == null
-                            ? Text(
-                                user.name.isNotEmpty
-                                    ? user.name[0].toUpperCase()
-                                    : '?',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              )
-                            : null,
+                      WhatsAppAvatar(
+                        name: name,
+                        imageUrl: user.avatar,
+                        size: 44,
                       ),
-                      // Indicador online
                       if (user.isOnline)
                         Positioned(
-                          right: 0,
-                          bottom: 0,
+                          right: -1,
+                          bottom: -1,
                           child: Container(
                             width: 14,
                             height: 14,
                             decoration: BoxDecoration(
-                              color: ThemeHelpers.backgroundColor(context),
                               shape: BoxShape.circle,
-                            ),
-                            child: Center(
-                              child: Container(
-                                width: 10,
-                                height: 10,
-                                decoration: const BoxDecoration(
-                                  color: Colors.green,
-                                  shape: BoxShape.circle,
-                                ),
+                              color: green,
+                              border: Border.all(
+                                color: ThemeHelpers.backgroundColor(context),
+                                width: 2.5,
                               ),
                             ),
                           ),
                         ),
                     ],
                   ),
-                  const SizedBox(width: 12),
-                  // Nome e email
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
+                ),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(0, 11, 8, 11),
+                    decoration: BoxDecoration(
+                      border: Border(bottom: chatHairline(context)),
+                    ),
+                    child: Row(
                       children: [
-                        Text(
-                          user.name,
-                          style: theme.textTheme.bodyLarge?.copyWith(
-                            fontWeight: FontWeight.w600,
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: textColor,
+                                  fontSize: 15.5,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -0.2,
+                                  height: 1.2,
+                                ),
+                              ),
+                              if (subtitle.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  subtitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: secondary,
+                                    fontSize: 13,
+                                    height: 1.25,
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          user.email,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: ThemeHelpers.textSecondaryColor(context),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: Center(
+                            child: opening
+                                ? SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: ink,
+                                    ),
+                                  )
+                                : Icon(
+                                    LucideIcons.messageSquarePlus,
+                                    size: 20,
+                                    color: ink,
+                                  ),
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  // Ícone de chat
-                  Icon(
-                    Icons.chat_bubble_outline,
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    size: 20,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Esqueleto fiel à linha (avatar redondo + nome/hora + prévia, filete só
+  /// sob o texto).
+  Widget _rowSkeleton(BuildContext context, {required double avatar}) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 16),
+      child: Row(
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: SkeletonBox(
+              width: avatar,
+              height: avatar,
+              borderRadius: 999,
+            ),
+          ),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(0, 15, 16, 15),
+              decoration: BoxDecoration(
+                border: Border(bottom: chatHairline(context)),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SkeletonText(
+                          width: 150,
+                          height: 15,
+                          borderRadius: 999,
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                      SkeletonText(width: 36, height: 11, borderRadius: 999),
+                    ],
+                  ),
+                  SizedBox(height: 9),
+                  SkeletonText(
+                    width: double.infinity,
+                    height: 13,
+                    borderRadius: 999,
                   ),
                 ],
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// Vazio que ensina: o que aparece aqui e como chegar lá.
+  Widget _emptyState(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    required String body,
+    String? actionLabel,
+    IconData? actionIcon,
+    VoidCallback? onAction,
+    bool neutralAction = false,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final ink = chatInk(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final actionColor = neutralAction ? secondary : ink;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 36, 28, 12),
+      child: Column(
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: ink.withValues(alpha: isDark ? 0.16 : 0.08),
+            ),
+            child: Icon(icon, color: ink, size: 26),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: ThemeHelpers.textColor(context),
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
+              letterSpacing: -0.2,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            body,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: secondary, fontSize: 13, height: 1.4),
+          ),
+          if (actionLabel != null && onAction != null) ...[
+            const SizedBox(height: 14),
+            OutlinedButton.icon(
+              onPressed: onAction,
+              icon: Icon(actionIcon ?? LucideIcons.chevronRight, size: 16),
+              label: Text(
+                actionLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: actionColor,
+                side: BorderSide(color: actionColor.withValues(alpha: 0.45)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _emptySearch(BuildContext context) {
+    final isUsers = _tabController.index == 2;
+    return _emptyState(
+      context,
+      icon: LucideIcons.searchX,
+      title: 'Nada encontrado para "${_query.trim()}"',
+      body: isUsers
+          ? 'Busque pelo nome ou pelo e-mail do colega.'
+          : 'Busque pelo nome da pessoa, do grupo ou por um trecho da '
+                'última mensagem.',
+      actionLabel: 'Limpar busca',
+      actionIcon: LucideIcons.x,
+      onAction: _clearSearch,
+      neutralAction: true,
+    );
+  }
+
+  /// A atualização falhou mas há lista na tela: avisa sem apagar nada.
+  Widget _refreshFailedStrip(
+    BuildContext context, {
+    required Future<void> Function() onRetry,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = ThemeHelpers.textColor(context);
+    final amber =
+        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+      decoration: BoxDecoration(
+        color: amber.withValues(alpha: isDark ? 0.12 : 0.10),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            LucideIcons.triangleAlert,
+            size: 16,
+            color: isDark
+                ? AppColors.message.warningTextDarkMode
+                : AppColors.message.warningText,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Não deu para atualizar agora. Esta é a última lista carregada.',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: textColor,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                height: 1.3,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: onRetry,
+            style: TextButton.styleFrom(foregroundColor: textColor),
+            child: const Text('Tentar de novo', maxLines: 1),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Conversa ────────────────────────────────────────────────────────────
+
+  String _roomSubtitle(ChatRoom room) {
+    final parts = <String>[];
+    switch (room.type) {
+      case ChatRoomType.group:
+        final n = room.participants.where((p) => p.isActive).length;
+        parts.add(
+          n > 0
+              ? 'Grupo · ${_plural(n, 'participante', 'participantes')}'
+              : 'Grupo',
         );
-      },
+        break;
+      case ChatRoomType.support:
+        parts.add('Suporte');
+        break;
+      case ChatRoomType.direct:
+        parts.add('Conversa individual');
+        break;
+    }
+    if (room.isMuted == true) parts.add('silenciada');
+    if (room.isArchived == true) parts.add('arquivada');
+    return parts.join(' · ');
+  }
+
+  /// Cabeçalho da conversa no molde do WhatsApp do app: voltar (celular),
+  /// avatar, nome e uma linha de estado (tipo, silenciada, arquivada). A
+  /// barra do topo diz só "Chat": antes o nome aparecia duas vezes.
+  Widget _buildConversationHeader(
+    BuildContext context,
+    ChatRoom room,
+    bool isSmallScreen,
+  ) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final danger =
+        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final name = room.getDisplayName(_currentUserId);
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(isSmallScreen ? 4 : 16, 6, 4, 6),
+      decoration: BoxDecoration(border: Border(bottom: chatHairline(context))),
+      child: Row(
+        children: [
+          if (isSmallScreen)
+            IconButton(
+              tooltip: 'Voltar para as conversas',
+              onPressed: () => setState(() => _selectedRoom = null),
+              icon: Icon(LucideIcons.arrowLeft, size: 21, color: textColor),
+            ),
+          WhatsAppAvatar(
+            name: name,
+            imageUrl: room.getDisplayImage(_currentUserId),
+            size: 40,
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.3,
+                    height: 1.15,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    if (room.isMuted == true) ...[
+                      Icon(LucideIcons.bellOff, size: 12, color: secondary),
+                      const SizedBox(width: 4),
+                    ],
+                    Flexible(
+                      child: Text(
+                        _roomSubtitle(room),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: secondary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          height: 1.2,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'Mais opções',
+            icon: Icon(
+              LucideIcons.ellipsisVertical,
+              size: 19,
+              color: secondary,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+            color: ThemeHelpers.cardBackgroundColor(context),
+            onSelected: (value) {
+              if (value == 'delete') _showDeleteChatDialog(context, room);
+            },
+            itemBuilder: (ctx) => [
+              PopupMenuItem<String>(
+                value: 'delete',
+                child: Row(
+                  children: [
+                    Icon(LucideIcons.trash2, size: 16, color: danger),
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        'Excluir conversa',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: textColor,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Tablet sem conversa aberta: diz o que fazer, não só "selecione".
+  Widget _buildNoSelection(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final ink = chatInk(context);
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(28),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 360),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 64,
+                      height: 64,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: ink.withValues(alpha: isDark ? 0.16 : 0.08),
+                      ),
+                      child: Icon(
+                        LucideIcons.messagesSquare,
+                        color: ink,
+                        size: 28,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'Escolha uma conversa',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: ThemeHelpers.textColor(context),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 17,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'As mensagens aparecem aqui. Para falar com alguém '
+                      'novo, abra Colaboradores na lista ao lado.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: ThemeHelpers.textSecondaryColor(context),
+                        fontSize: 13,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
   Widget _buildMessagesArea(BuildContext context, ThemeData theme) {
-    if (_selectedRoom == null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+    final room = _selectedRoom;
+    if (room == null) return _buildNoSelection(context);
+
+    final isSmallScreen = MediaQuery.sizeOf(context).width < 600;
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Paisagem com teclado sobra ~130dp: o cabeçalho sai (volta ao
+        // fechar o teclado) e o campo fica em até 2 linhas. O campo tem
+        // chave e não muda de lugar na árvore — o teclado não fecha.
+        final tight = keyboardOpen && constraints.maxHeight < 300;
+        final hideHeader = keyboardOpen && constraints.maxHeight < 240;
+        // Rede de segurança: com arquivo escolhido + texto longo em tela
+        // muito baixa, o campo rola por dentro em vez de estourar a coluna.
+        final inputMax = math.max(
+          56.0,
+          constraints.maxHeight - (hideHeader ? 36.0 : 96.0),
+        );
+
+        return Column(
           children: [
-            Icon(
-              Icons.chat_bubble_outline,
-              size: 64,
-              color: ThemeHelpers.textSecondaryColor(context),
+            if (!hideHeader)
+              KeyedSubtree(
+                key: const ValueKey('chat-conversation-header'),
+                child: _buildConversationHeader(context, room, isSmallScreen),
+              ),
+            Expanded(
+              key: const ValueKey('chat-conversation-thread'),
+              child: _isLoadingMessages
+                  ? _buildMessagesShimmer(context)
+                  : ChatMessageList(
+                      messages: _messages,
+                      currentUserId: _currentUserId,
+                      scrollController: _messagesScrollController,
+                      isGroup: room.type != ChatRoomType.direct,
+                      peerName: room.type == ChatRoomType.direct
+                          ? room.getDisplayName(_currentUserId)
+                          : null,
+                      onLoadMore: () {
+                        if (!_isLoadingMessages) {
+                          _loadMessages(room.id, loadMore: true);
+                        }
+                      },
+                    ),
             ),
-            const SizedBox(height: 16),
-            Text(
-              'Selecione uma conversa',
-              style: theme.textTheme.bodyLarge?.copyWith(
-                color: ThemeHelpers.textSecondaryColor(context),
+            ConstrainedBox(
+              key: const ValueKey('chat-conversation-input'),
+              constraints: BoxConstraints(maxHeight: inputMax),
+              child: SingleChildScrollView(
+                physics: const ClampingScrollPhysics(),
+                child: ChatInput(
+                  onSend: _handleSendMessage,
+                  maxLines: tight ? 2 : 5,
+                ),
               ),
             ),
           ],
+        );
+      },
+    );
+  }
+
+  /// Esqueleto fiel à conversa: bolhas dos dois lados, algumas agrupadas.
+  Widget _buildMessagesShimmer(BuildContext context) {
+    Widget bubble({
+      required bool own,
+      required double width,
+      bool grouped = false,
+      double height = 44,
+    }) {
+      return Align(
+        alignment: own ? Alignment.centerRight : Alignment.centerLeft,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: grouped ? 2 : 8),
+          child: SkeletonBox(width: width, height: height, borderRadius: 18),
         ),
       );
     }
 
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
-
-    return Column(
+    return ListView(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(12, 14, 12, 10),
       children: [
-        // Header da conversa
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(
-                color: ThemeHelpers.borderColor(context),
-                width: 1,
-              ),
-            ),
-          ),
-          child: Row(
-            children: [
-              if (isSmallScreen)
-                IconButton(
-                  icon: const Icon(Icons.arrow_back),
-                  onPressed: () {
-                    setState(() {
-                      _selectedRoom = null;
-                    });
-                  },
-                ),
-              CircleAvatar(
-                backgroundImage:
-                    _selectedRoom!.getDisplayImage(_currentUserId) != null
-                    ? NetworkImage(
-                        _selectedRoom!.getDisplayImage(_currentUserId)!,
-                      )
-                    : null,
-                child: _selectedRoom!.getDisplayImage(_currentUserId) == null
-                    ? Text(
-                        _selectedRoom!
-                            .getDisplayName(_currentUserId)[0]
-                            .toUpperCase(),
-                      )
-                    : null,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  _selectedRoom!.getDisplayName(_currentUserId),
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              // Menu de opções
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert),
-                onSelected: (value) {
-                  if (value == 'delete') {
-                    _showDeleteChatDialog(context, _selectedRoom!);
-                  }
-                },
-                itemBuilder: (BuildContext context) => [
-                  const PopupMenuItem<String>(
-                    value: 'delete',
-                    child: Row(
-                      children: [
-                        Icon(Icons.delete_outline, color: Colors.red, size: 20),
-                        SizedBox(width: 8),
-                        Text('Deletar conversa'),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        // Lista de mensagens
-        Expanded(
-          child: _isLoadingMessages
-              ? _buildMessagesShimmer(context)
-              : ChatMessageList(
-                  messages: _messages,
-                  currentUserId: _currentUserId,
-                  scrollController: _messagesScrollController,
-                  onLoadMore: () {
-                    if (!_isLoadingMessages) {
-                      _loadMessages(_selectedRoom!.id, loadMore: true);
-                    }
-                  },
-                ),
-        ),
-        // Input de mensagem
-        ChatInput(onSend: _handleSendMessage),
+        bubble(own: false, width: 210, height: 54),
+        bubble(own: true, width: 180, grouped: true),
+        bubble(own: true, width: 140),
+        bubble(own: false, width: 236, grouped: true, height: 62),
+        bubble(own: false, width: 150),
+        bubble(own: true, width: 216, height: 54),
+        bubble(own: false, width: 190),
       ],
-    );
-  }
-
-  Widget _buildRoomsShimmer(BuildContext context) {
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: 8,
-      itemBuilder: (context, index) {
-        return Card(
-          margin: const EdgeInsets.only(bottom: 8, left: 12, right: 12, top: 8),
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(
-              color: ThemeHelpers.borderLightColor(context),
-              width: 1,
-            ),
-          ),
-          color: ThemeHelpers.cardBackgroundColor(context),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                // Avatar skeleton
-                SkeletonBox(width: 48, height: 48, borderRadius: 24),
-                const SizedBox(width: 12),
-                // Conteúdo skeleton
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SkeletonText(
-                        width: double.infinity,
-                        height: 16,
-                        margin: const EdgeInsets.only(bottom: 8),
-                      ),
-                      Row(
-                        children: [
-                          Expanded(child: SkeletonText(width: 150, height: 14)),
-                          SkeletonBox(width: 40, height: 20, borderRadius: 10),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildMessagesShimmer(BuildContext context) {
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: 10,
-      itemBuilder: (context, index) {
-        final isOwnMessage =
-            index % 3 == 0; // Alternar entre mensagens próprias e outras
-
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: Row(
-            mainAxisAlignment: isOwnMessage
-                ? MainAxisAlignment.end
-                : MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (!isOwnMessage) ...[
-                SkeletonBox(width: 32, height: 32, borderRadius: 16),
-                const SizedBox(width: 8),
-              ],
-              Flexible(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isOwnMessage
-                        ? AppColors.primary.primary.withOpacity(0.1)
-                        : ThemeHelpers.cardBackgroundColor(context),
-                    borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(18),
-                      topRight: const Radius.circular(18),
-                      bottomLeft: Radius.circular(isOwnMessage ? 18 : 4),
-                      bottomRight: Radius.circular(isOwnMessage ? 4 : 18),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: isOwnMessage
-                        ? CrossAxisAlignment.end
-                        : CrossAxisAlignment.start,
-                    children: [
-                      SkeletonText(
-                        width: index % 2 == 0 ? 200 : 150,
-                        height: 16,
-                        margin: EdgeInsets.zero,
-                      ),
-                      if (index % 2 == 0) ...[
-                        const SizedBox(height: 4),
-                        SkeletonText(
-                          width: 100,
-                          height: 16,
-                          margin: EdgeInsets.zero,
-                        ),
-                      ],
-                      const SizedBox(height: 8),
-                      SkeletonText(
-                        width: 60,
-                        height: 12,
-                        margin: EdgeInsets.zero,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              if (isOwnMessage) ...[
-                const SizedBox(width: 8),
-                SkeletonBox(width: 32, height: 32, borderRadius: 16),
-              ],
-            ],
-          ),
-        );
-      },
     );
   }
 
@@ -1203,18 +1758,24 @@ class _ChatPageState extends State<ChatPage>
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _messagesScrollController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isSmallScreen = MediaQuery.of(context).size.width < 600;
+    final width = MediaQuery.sizeOf(context).width;
+    final isSmallScreen = width < 600;
     final currentRoute = ModalRoute.of(context)?.settings.name;
     final navIndex = AppBottomNavigation.getIndexForRoute(currentRoute);
 
     // Notificar controller sobre a sala aberta quando o widget é construído
     ChatUnreadController.instance.setCurrentlyOpenRoom(_selectedRoom?.id);
+
+    // Lista ao lado da conversa (tablet/paisagem larga): nem estreita demais
+    // para o nome, nem 350 fixos numa tela de 1200.
+    final sidebarWidth = (width * 0.36).clamp(300.0, 380.0).toDouble();
 
     return PopScope(
       canPop: false,
@@ -1235,21 +1796,20 @@ class _ChatPageState extends State<ChatPage>
         }
       },
       child: AppScaffold(
-        title: _selectedRoom != null
-            ? _selectedRoom!.getDisplayName(_currentUserId)
-            : 'Chat',
+        // O nome da conversa fica no cabeçalho dela (com avatar e estado).
+        title: 'Chat',
         showDrawer: true,
         showBottomNavigation: true,
         currentBottomNavIndex: navIndex,
-        body: isSmallScreen && _selectedRoom != null
-            ? _buildMessagesArea(context, theme)
-            : isSmallScreen && _selectedRoom == null
-            ? _buildRoomsList(context, theme)
+        body: isSmallScreen
+            ? (_selectedRoom != null
+                  ? _buildMessagesArea(context, theme)
+                  : _buildRoomsList(context, theme))
             : Row(
                 children: [
                   // Lista de conversas (sidebar)
                   Container(
-                    width: 350,
+                    width: sidebarWidth,
                     decoration: BoxDecoration(
                       border: Border(
                         right: BorderSide(
@@ -1260,34 +1820,7 @@ class _ChatPageState extends State<ChatPage>
                     ),
                     child: _buildRoomsList(context, theme),
                   ),
-                  // Área de mensagens (apenas em telas grandes ou quando há sala selecionada)
-                  Expanded(
-                    child: _selectedRoom == null
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.chat_bubble_outline,
-                                  size: 64,
-                                  color: ThemeHelpers.textSecondaryColor(
-                                    context,
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                                Text(
-                                  'Selecione uma conversa',
-                                  style: theme.textTheme.bodyLarge?.copyWith(
-                                    color: ThemeHelpers.textSecondaryColor(
-                                      context,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          )
-                        : _buildMessagesArea(context, theme),
-                  ),
+                  Expanded(child: _buildMessagesArea(context, theme)),
                 ],
               ),
       ),

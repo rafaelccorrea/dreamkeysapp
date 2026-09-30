@@ -9,24 +9,25 @@ import '../../../../shared/utils/input_formatters.dart';
 import '../../../../shared/utils/masks.dart';
 import '../../../../shared/widgets/app_error_state.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
-import '../../../../shared/widgets/custom_button.dart';
-import '../../../../shared/widgets/custom_text_field.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
 
-// ─── Paleta editorial (mesmo DNA da tela de Perfil) ─────────────────────────
-// 1 cor de identidade por seção: vermelho da marca = conta/identidade;
-// violeta = tags/perfil no CRM. Sem arco-íris.
+// ─── Cores (só tokens) ──────────────────────────────────────────────────────
+// Vermelho da marca = o formulário (foco, barras de seção); as tags vestem
+// a própria cor cadastrada — violeta é só a reserva de tag sem cor.
 Color _pBrand(bool d) =>
     d ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
-Color _pViolet(bool d) => d ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
+Color _pTagFallback(bool d) =>
+    d ? AppColors.status.purpleDarkMode : AppColors.status.purple;
 
-/// Edição de perfil — alinhada ao sistema editorial da tela de Perfil:
-///   • Masthead (eyebrow + headline w900 + subtítulo), sem hero-card.
-///   • Faixa de identidade com avatar (somente leitura) e nome AO VIVO.
-///   • Seções full-bleed com header editorial e divisores finos.
+/// Edição de perfil — gramática de formulário do app:
+///   • Topo "Como a equipe te vê": prévia viva (nome e telefone espelham a
+///     digitação; as tags marcadas aparecem na cor real).
+///   • Campos `filled` leves; nome | telefone em 2 colunas quando cabem;
+///     e-mail de acesso visível e travado (não muda por aqui).
 ///   • Telefone com máscara ((00) 00000-0000) — mesma do formulário de cliente.
-///   • Tags como chips flush com a COR REAL de cada tag (dot + tom-sobre-tom).
-/// Design flush: nada encapsulado em card; separação por divisor.
+///   • Tags como chips flush com a COR REAL de cada tag.
+///   • Barra fixa: Cancelar neutro + Salvar verde; sai do caminho do
+///     teclado em tela baixa.
 class EditProfilePage extends StatefulWidget {
   const EditProfilePage({super.key});
 
@@ -240,16 +241,94 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   // ─── Build ───────────────────────────────────────────────────────────────
 
+  /// Tablet/landscape largo: a coluna para em [_kMaxContentWidth] e
+  /// centraliza — campo de 1000dp não é formulário.
+  EdgeInsets _pagePadding({double top = 0, double bottom = 0}) {
+    final w = MediaQuery.sizeOf(context).width;
+    final side = w > _kMaxContentWidth ? (w - _kMaxContentWidth) / 2 : 0.0;
+    return EdgeInsets.fromLTRB(side, top, side, bottom);
+  }
+
+  /// Campos `filled` leves: sem borda em repouso, foco na cor da marca — a
+  /// mesma gramática do formulário de ficha.
+  ThemeData _formTheme(BuildContext context, Color accent) {
+    final base = Theme.of(context);
+    final isDark = base.brightness == Brightness.dark;
+    final fill = isDark
+        ? AppColors.background.backgroundTertiaryDarkMode
+        : AppColors.background.backgroundTertiary;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final error = isDark
+        ? AppColors.status.errorDarkMode
+        : AppColors.status.error;
+    OutlineInputBorder b(Color c, double w) => OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: w == 0 ? BorderSide.none : BorderSide(color: c, width: w),
+    );
+    return base.copyWith(
+      colorScheme: base.colorScheme.copyWith(primary: accent),
+      textSelectionTheme: TextSelectionThemeData(
+        cursorColor: accent,
+        selectionColor: accent.withValues(alpha: 0.18),
+        selectionHandleColor: accent,
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: fill,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 16,
+        ),
+        labelStyle: TextStyle(
+          color: muted,
+          fontWeight: FontWeight.w600,
+          fontSize: 13.5,
+        ),
+        floatingLabelStyle: TextStyle(
+          color: accent,
+          fontWeight: FontWeight.w700,
+          fontSize: 13.5,
+        ),
+        hintStyle: TextStyle(
+          color: muted.withValues(alpha: 0.7),
+          fontWeight: FontWeight.w500,
+        ),
+        helperStyle: TextStyle(
+          color: muted,
+          fontWeight: FontWeight.w600,
+          fontSize: 11.5,
+        ),
+        errorStyle: TextStyle(
+          color: error,
+          fontWeight: FontWeight.w600,
+          fontSize: 11.5,
+        ),
+        errorMaxLines: 2,
+        helperMaxLines: 2,
+        prefixIconColor: muted,
+        border: b(Colors.transparent, 0),
+        enabledBorder: b(Colors.transparent, 0),
+        disabledBorder: b(Colors.transparent, 0),
+        focusedBorder: b(accent, 1.6),
+        errorBorder: b(error.withValues(alpha: 0.75), 1.2),
+        focusedErrorBorder: b(error, 1.6),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final brand = _pBrand(isDark);
-    final violet = _pViolet(isDark);
+    // Teclado aberto em tela baixa (landscape): a barra sai para o campo em
+    // foco caber; volta sozinha quando o teclado fecha.
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final hideBar = keyboardOpen && MediaQuery.sizeOf(context).height < 520;
 
     return AppScaffold(
       title: 'Editar Perfil',
       currentBottomNavIndex: -1,
+      showBottomNavigation: false,
       userName: _profile?.name,
       userEmail: _profile?.email,
       userAvatar: _profile?.avatar,
@@ -258,331 +337,503 @@ class _EditProfilePageState extends State<EditProfilePage> {
         switchInCurve: Curves.easeOut,
         switchOutCurve: Curves.easeIn,
         child: _isLoading
-            ? Padding(
+            ? KeyedSubtree(
                 key: const ValueKey('loading'),
-                padding: const EdgeInsets.only(top: 4),
                 child: _buildSkeleton(context),
               )
             : _errorMessage != null
             ? Padding(
                 key: ValueKey<String>('e-${_errorMessage.hashCode}'),
                 padding: const EdgeInsets.all(24),
-                child: _buildErrorState(context, theme, brand),
+                child: _buildErrorState(),
               )
-            : SingleChildScrollView(
+            : Column(
                 key: const ValueKey('ok'),
-                padding: const EdgeInsets.only(top: 4, bottom: 40),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _buildMasthead(context, theme, brand),
-                      const SizedBox(height: 16),
-                      _buildIdentityStrip(context, theme, brand, violet),
-                      const SizedBox(height: 18),
-                      _sectionSeparator(context),
-                      const SizedBox(height: 20),
-                      _SectionHeader(
-                        eyebrow: 'IDENTIDADE',
-                        title: 'Dados pessoais',
-                        subtitle:
-                            'Nome exibido no CRM e telefone de contato da equipe.',
-                        tone: brand,
-                      ),
-                      const SizedBox(height: 16),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            CustomTextField(
-                              controller: _nameController,
-                              label: 'Nome Completo *',
-                              prefixIcon: const Icon(Icons.person_outline),
-                              validator: (value) {
-                                if (value == null || value.trim().isEmpty) {
-                                  return 'Nome é obrigatório';
-                                }
-                                return null;
-                              },
-                            ),
-                            const SizedBox(height: 12),
-                            CustomTextField(
-                              controller: _phoneController,
-                              label: 'Telefone',
-                              prefixIcon: const Icon(Icons.phone_outlined),
-                              keyboardType: TextInputType.phone,
-                              inputFormatters: [PhoneInputFormatter()],
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 22),
-                      _sectionSeparator(context),
-                      const SizedBox(height: 20),
-                      _SectionHeader(
-                        eyebrow: 'PERFIL NO CRM',
-                        title: 'Tags',
-                        subtitle:
-                            'Como você é classificado nas listas e filtros.',
-                        tone: violet,
-                        trailing: _isLoadingTags
-                            ? null
-                            : _CountPill(
-                                label:
-                                    '${_selectedTagIds.length} '
-                                    '${_selectedTagIds.length == 1 ? 'selecionada' : 'selecionadas'}',
-                                tone: violet,
-                                active: _selectedTagIds.isNotEmpty,
+                children: [
+                  Expanded(
+                    child: Theme(
+                      data: _formTheme(context, brand),
+                      child: SingleChildScrollView(
+                        padding: _pagePadding(top: 14, bottom: 28),
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        child: Form(
+                          key: _formKey,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _buildLiveBadge(context, brand),
+                              _sectionBreak(context),
+                              _SectionHeader(
+                                title: 'Dados pessoais',
+                                subtitle:
+                                    'Nome que aparece no CRM e telefone de contato da equipe.',
+                                tone: brand,
                               ),
-                      ),
-                      const SizedBox(height: 14),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: _buildTagsSelector(context, theme, violet),
-                      ),
-                      const SizedBox(height: 26),
-                      _sectionSeparator(context),
-                      const SizedBox(height: 20),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            CustomButton(
-                              text: _isSaving
-                                  ? 'Salvando...'
-                                  : 'Salvar Alterações',
-                              onPressed: _isSaving ? null : _handleSave,
-                              icon: _isSaving ? null : Icons.save,
-                              isLoading: _isSaving,
-                            ),
-                            const SizedBox(height: 10),
-                            CustomButton(
-                              text: 'Cancelar',
-                              onPressed: () => Navigator.pop(context),
-                              icon: Icons.close,
-                              variant: ButtonVariant.secondary,
-                            ),
-                          ],
+                              const SizedBox(height: 14),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: _kPadH,
+                                ),
+                                child: _buildPersonalFields(context),
+                              ),
+                              _sectionBreak(context),
+                              _SectionHeader(
+                                title: 'Tags',
+                                subtitle:
+                                    'Como você é classificado nas listas e filtros. Toque para marcar ou desmarcar.',
+                                tone: brand,
+                                trailing: _isLoadingTags
+                                    ? null
+                                    : _CountPill(
+                                        label:
+                                            '${_selectedTagIds.length} '
+                                            '${_selectedTagIds.length == 1 ? 'marcada' : 'marcadas'}',
+                                        tone: brand,
+                                        active: _selectedTagIds.isNotEmpty,
+                                      ),
+                              ),
+                              const SizedBox(height: 14),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: _kPadH,
+                                ),
+                                child: _buildTagsSelector(context),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ],
+                    ),
                   ),
-                ),
+                  if (!hideBar) _buildSaveBar(context),
+                ],
               ),
       ),
     );
   }
 
-  // ─── Masthead (eyebrow + headline w900) ─────────────────────────────────
+  // ─── Como a equipe te vê — prévia viva do que está sendo editado ────────
 
-  Widget _buildMasthead(BuildContext context, ThemeData theme, Color brand) {
+  Widget _buildLiveBadge(BuildContext context, Color brand) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final email = _profile?.email ?? '';
+    final chosen = _availableTags
+        .where((t) => _selectedTagIds.contains(t.id))
+        .toList();
+    const maxShown = 6;
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+      padding: const EdgeInsets.symmetric(horizontal: _kPadH),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          Text(
+            'COMO A EQUIPE TE VÊ',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: secondary,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.4,
+              fontSize: 10,
+            ),
+          ),
+          const SizedBox(height: 10),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(
-                'MINHA CONTA',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: brand,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.2,
-                  fontSize: 10,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                width: 4,
-                height: 4,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: brand.withValues(alpha: 0.6),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'EDIÇÃO',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(
-                    context,
-                  ).withValues(alpha: 0.85),
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1.8,
-                  fontSize: 9.5,
+              _ReadonlyAvatar(profile: _profile, tone: brand),
+              const SizedBox(width: 12),
+              Expanded(
+                // Nome e telefone espelham a digitação.
+                child: ListenableBuilder(
+                  listenable: Listenable.merge([
+                    _nameController,
+                    _phoneController,
+                  ]),
+                  builder: (context, _) {
+                    final live = _nameController.text.trim();
+                    final phone = _phoneController.text.trim();
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          live.isEmpty ? 'Seu nome' : live,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.3,
+                            height: 1.15,
+                            color: live.isEmpty
+                                ? secondary
+                                : ThemeHelpers.textColor(context),
+                          ),
+                        ),
+                        if (email.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            email,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: secondary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 2),
+                        Text(
+                          phone.isEmpty ? 'Sem telefone' : phone,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: phone.isEmpty
+                                ? secondary
+                                : ThemeHelpers.textColor(context),
+                            fontWeight: FontWeight.w700,
+                            fontFeatures: const [
+                              FontFeature.tabularFigures(),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Editar perfil',
-            style: theme.textTheme.headlineMedium?.copyWith(
-              fontWeight: FontWeight.w900,
-              letterSpacing: -0.8,
-              height: 1.02,
-              color: ThemeHelpers.textColor(context),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Nome, telefone e tags. A foto e a senha ficam na tela de Perfil.',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: ThemeHelpers.textSecondaryColor(context),
-              fontWeight: FontWeight.w500,
-              height: 1.35,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ─── Faixa de identidade: avatar (leitura) + nome AO VIVO ───────────────
-
-  Widget _buildIdentityStrip(
-    BuildContext context,
-    ThemeData theme,
-    Color brand,
-    Color violet,
-  ) {
-    final email = _profile?.email ?? '';
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Row(
-        children: [
-          _ReadonlyAvatar(profile: _profile, tone: brand),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          if (chosen.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                // Nome espelha a digitação — mesmo conceito do preview vivo
-                // usado no CRM web, na escala do mobile.
-                ValueListenableBuilder<TextEditingValue>(
-                  valueListenable: _nameController,
-                  builder: (context, value, _) {
-                    final live = value.text.trim();
-                    return Text(
-                      live.isEmpty ? 'Seu nome' : live,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.3,
-                        color: live.isEmpty
-                            ? ThemeHelpers.textSecondaryColor(context)
-                            : ThemeHelpers.textColor(context),
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    );
-                  },
-                ),
-                if (email.isNotEmpty) ...[
-                  const SizedBox(height: 2),
+                for (final t in chosen.take(maxShown))
+                  _MiniTag(tag: t, fallbackTone: _pTagFallback(isDark)),
+                if (chosen.length > maxShown)
                   Text(
-                    email,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                      fontWeight: FontWeight.w600,
+                    '+${chosen.length - maxShown}',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: secondary,
+                      fontWeight: FontWeight.w800,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                   ),
-                ],
               ],
             ),
-          ),
-          const SizedBox(width: 8),
-          _CountPill(
-            label: 'Foto no Perfil',
-            tone: violet,
-            active: false,
-            icon: Icons.photo_camera_outlined,
+          ],
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Icon(Icons.photo_camera_outlined, size: 14, color: secondary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'A foto muda em Meu perfil, tocando nela.',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: secondary,
+                    fontWeight: FontWeight.w600,
+                    height: 1.3,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  // ─── Divisor fino full-bleed ─────────────────────────────────────────────
+  // ─── Dados pessoais — 2 colunas quando cabem, e-mail travado ─────────────
 
-  Widget _sectionSeparator(BuildContext context) {
+  Widget _buildPersonalFields(BuildContext context) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final fieldStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
+      fontWeight: FontWeight.w600,
+      color: ThemeHelpers.textColor(context),
+    );
+    final email = _profile?.email ?? '';
+
+    final name = TextFormField(
+      controller: _nameController,
+      textInputAction: TextInputAction.next,
+      style: fieldStyle,
+      decoration: const InputDecoration(
+        labelText: 'Nome completo *',
+        prefixIcon: Icon(Icons.person_outline_rounded, size: 19),
+      ),
+      validator: (value) {
+        if (value == null || value.trim().isEmpty) {
+          return 'Nome é obrigatório';
+        }
+        return null;
+      },
+    );
+
+    final phone = TextFormField(
+      controller: _phoneController,
+      keyboardType: TextInputType.phone,
+      textInputAction: TextInputAction.done,
+      inputFormatters: [PhoneInputFormatter()],
+      style: fieldStyle,
+      decoration: const InputDecoration(
+        labelText: 'Telefone',
+        hintText: '(00) 00000-0000',
+        prefixIcon: Icon(Icons.phone_outlined, size: 19),
+      ),
+    );
+
+    return LayoutBuilder(
+      builder: (context, box) {
+        // Duas colunas só quando cabem de verdade (tablet/landscape); em
+        // celular em pé, ou com fonte grande, um campo por linha.
+        final scale = MediaQuery.textScalerOf(context).scale(1);
+        final twoCols = scale <= 1.3 && box.maxWidth >= 520;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (twoCols)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 3, child: name),
+                  const SizedBox(width: 12),
+                  Expanded(flex: 2, child: phone),
+                ],
+              )
+            else ...[
+              name,
+              const SizedBox(height: 12),
+              phone,
+            ],
+            if (email.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              // Aparece travado e explicado: dá para ver e copiar, não para
+              // mudar por aqui.
+              TextFormField(
+                initialValue: email,
+                readOnly: true,
+                style: fieldStyle?.copyWith(color: secondary),
+                decoration: InputDecoration(
+                  labelText: 'E-mail de acesso',
+                  helperText: 'Não muda por aqui.',
+                  prefixIcon: const Icon(Icons.mail_outline_rounded, size: 19),
+                  suffixIcon: Tooltip(
+                    message: 'Não muda por aqui',
+                    child: Icon(
+                      Icons.lock_outline_rounded,
+                      size: 17,
+                      color: secondary,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  // ─── Barra de salvar — fixa, acima do teclado ────────────────────────────
+
+  Widget _buildSaveBar(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final confirm = isDark
+        ? AppColors.status.successDarkMode
+        : AppColors.status.success;
+    // Branco no claro; grafite no escuro (o verde escuro-mode é claro).
+    final onConfirm = ThemeHelpers.onPrimaryColor(context);
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final height = keyboardOpen ? 46.0 : 52.0;
+    final vPad = keyboardOpen ? 8.0 : 10.0;
+
     return Container(
-      height: 1,
-      color: ThemeHelpers.borderColor(context).withValues(alpha: 0.6),
+      padding: EdgeInsets.fromLTRB(
+        16,
+        vPad,
+        16,
+        vPad + MediaQuery.paddingOf(context).bottom,
+      ),
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        border: Border(
+          top: BorderSide(color: ThemeHelpers.borderColor(context)),
+        ),
+      ),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: _kMaxContentWidth),
+          child: Row(
+            children: [
+              OutlinedButton(
+                onPressed: _isSaving ? null : () => Navigator.pop(context),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: Size(0, height),
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  foregroundColor: ThemeHelpers.textSecondaryColor(context),
+                  side: BorderSide(color: ThemeHelpers.borderColor(context)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: const Text(
+                  'Cancelar',
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton(
+                  onPressed: _isSaving ? null : _handleSave,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: confirm,
+                    foregroundColor: onConfirm,
+                    disabledBackgroundColor: confirm.withValues(alpha: 0.55),
+                    disabledForegroundColor: onConfirm,
+                    minimumSize: Size(0, height),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: _isSaving
+                      ? SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.2,
+                            color: onConfirm,
+                          ),
+                        )
+                      : const FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.check_rounded, size: 18),
+                              SizedBox(width: 8),
+                              Text(
+                                'Salvar alterações',
+                                maxLines: 1,
+                                softWrap: false,
+                                style: TextStyle(
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ─── Divisores ───────────────────────────────────────────────────────────
+
+  Widget _sectionBreak(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 22),
+      child: Container(
+        height: 1,
+        color: ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
+      ),
     );
   }
 
   // ─── Skeleton (espelha o layout real) ───────────────────────────────────
 
   Widget _buildSkeleton(BuildContext context) {
-    Widget line(double w, double h, [double r = 6]) =>
-        SkeletonBox(width: w, height: h, borderRadius: r);
     return SingleChildScrollView(
       physics: const NeverScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 40),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          line(110, 10),
-          const SizedBox(height: 10),
-          line(190, 26),
-          const SizedBox(height: 8),
-          line(250, 12),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              const SkeletonBox(width: 52, height: 52, borderRadius: 26),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    line(140, 14),
-                    const SizedBox(height: 6),
-                    line(180, 10),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 26),
-          line(120, 10),
-          const SizedBox(height: 8),
-          line(160, 20),
-          const SizedBox(height: 16),
-          line(double.infinity, 56, 12),
-          const SizedBox(height: 12),
-          line(double.infinity, 56, 12),
-          const SizedBox(height: 28),
-          line(90, 10),
-          const SizedBox(height: 8),
-          line(110, 20),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: List.generate(
-              5,
-              (_) => line(86, 34, 999),
+      padding: _pagePadding(top: 14, bottom: 28),
+      child: const Padding(
+        padding: EdgeInsets.symmetric(horizontal: _kPadH),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SkeletonText(width: 130, height: 10),
             ),
-          ),
-          const SizedBox(height: 28),
-          line(double.infinity, 50, 12),
-          const SizedBox(height: 10),
-          line(double.infinity, 50, 12),
-        ],
+            SizedBox(height: 12),
+            Row(
+              children: [
+                SkeletonBox(width: 56, height: 56, borderRadius: 28),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonText(width: 150, height: 15),
+                      SizedBox(height: 6),
+                      SkeletonText(width: 180, height: 11),
+                      SizedBox(height: 6),
+                      SkeletonText(width: 110, height: 11),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 14),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SkeletonText(width: 210, height: 11),
+            ),
+            SizedBox(height: 36),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SkeletonText(width: 140, height: 18),
+            ),
+            SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SkeletonText(width: 240, height: 11),
+            ),
+            SizedBox(height: 16),
+            SkeletonBox(height: 54, borderRadius: 12),
+            SizedBox(height: 12),
+            SkeletonBox(height: 54, borderRadius: 12),
+            SizedBox(height: 12),
+            SkeletonBox(height: 54, borderRadius: 12),
+            SizedBox(height: 36),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SkeletonText(width: 80, height: 18),
+            ),
+            SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                SkeletonBox(width: 86, height: 34, borderRadius: 999),
+                SkeletonBox(width: 70, height: 34, borderRadius: 999),
+                SkeletonBox(width: 100, height: 34, borderRadius: 999),
+                SkeletonBox(width: 78, height: 34, borderRadius: 999),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  // ─── Erro (editorial, com retry) ─────────────────────────────────────────
+  // ─── Erro (com a causa e "Tentar de novo") ───────────────────────────────
 
-  Widget _buildErrorState(BuildContext context, ThemeData theme, Color brand) {
+  Widget _buildErrorState() {
     // Exceção solta traz seu próprio diagnóstico; falha de API vem da resposta.
     final cause = _errorCause;
     if (cause != null) {
@@ -598,11 +849,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   // ─── Tags (chips flush com a cor real da tag) ────────────────────────────
 
-  Widget _buildTagsSelector(
-    BuildContext context,
-    ThemeData theme,
-    Color violet,
-  ) {
+  Widget _buildTagsSelector(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
     if (_isLoadingTags) {
       return Wrap(
         spacing: 8,
@@ -616,6 +866,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
     if (_availableTags.isEmpty) {
       return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(
             Icons.sell_outlined,
@@ -625,10 +876,11 @@ class _EditProfilePageState extends State<EditProfilePage> {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Nenhuma tag disponível na sua empresa.',
+              'Sua empresa ainda não tem tags. Quando o administrador criar, elas aparecem aqui para você marcar.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: ThemeHelpers.textSecondaryColor(context),
                 fontWeight: FontWeight.w600,
+                height: 1.35,
               ),
             ),
           ),
@@ -644,7 +896,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
         return _TagChip(
           tag: tag,
           selected: selected,
-          fallbackTone: violet,
+          fallbackTone: _pTagFallback(isDark),
           onTap: () {
             setState(() {
               if (selected) {
@@ -661,21 +913,35 @@ class _EditProfilePageState extends State<EditProfilePage> {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// COMPONENTES INTERNOS — sistema editorial (mesmo DNA da tela de Perfil)
+// COMPONENTES INTERNOS — gramática de formulário flush
 // ════════════════════════════════════════════════════════════════════════
 
-/// Cabeçalho editorial de seção: barra tonal + eyebrow + título w900 +
-/// subtítulo, com espaço para um chip à direita (contagem de tags).
+/// Margem lateral da tela (gramática flush do app).
+const double _kPadH = 16;
+
+/// Largura máxima da coluna em tela larga.
+const double _kMaxContentWidth = 720;
+
+/// Cor de uma tag: a cor cadastrada (hex) ou a reserva do tema.
+Color _tagColorOf(Tag tag, Color fallback) {
+  final raw = (tag.color ?? '').replaceAll('#', '').trim();
+  if (raw.length == 6) {
+    final parsed = int.tryParse(raw, radix: 16);
+    if (parsed != null) return Color(0xFF000000 | parsed);
+  }
+  return fallback;
+}
+
+/// Cabeçalho de seção do formulário — barra tonal, título, explicação curta
+/// e, à direita, um selo opcional (contagem de tags).
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({
-    required this.eyebrow,
     required this.title,
     required this.tone,
     this.subtitle,
     this.trailing,
   });
 
-  final String eyebrow;
   final String title;
   final String? subtitle;
   final Color tone;
@@ -685,60 +951,43 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.symmetric(horizontal: _kPadH),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Container(
+            width: 3,
+            height: 18,
+            margin: const EdgeInsets.only(top: 2),
+            decoration: BoxDecoration(
+              color: tone,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 18,
-                      height: 2,
-                      decoration: BoxDecoration(
-                        color: tone,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        eyebrow,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: tone,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.8,
-                          fontSize: 10,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
                 Text(
                   title,
-                  style: theme.textTheme.headlineSmall?.copyWith(
+                  style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w900,
-                    letterSpacing: -0.6,
+                    letterSpacing: -0.4,
+                    height: 1.2,
+                    fontSize: 18,
                     color: ThemeHelpers.textColor(context),
-                    height: 1.05,
-                    fontSize: 22,
                   ),
                 ),
                 if (subtitle != null) ...[
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 3),
                   Text(
                     subtitle!,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: ThemeHelpers.textSecondaryColor(context),
                       fontWeight: FontWeight.w500,
-                      height: 1.3,
+                      height: 1.35,
                     ),
                   ),
                 ],
@@ -752,19 +1001,17 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
-/// Pill compacta tom-sobre-tom (contagem de tags / hint da foto).
+/// Selo compacto tom-sobre-tom (contagem de tags marcadas).
 class _CountPill extends StatelessWidget {
   const _CountPill({
     required this.label,
     required this.tone,
     required this.active,
-    this.icon,
   });
 
   final String label;
   final Color tone;
   final bool active;
-  final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
@@ -778,35 +1025,31 @@ class _CountPill extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 12, color: color),
-            const SizedBox(width: 5),
-          ],
-          Text(
-            label,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: color,
-              fontWeight: FontWeight.w800,
-              fontSize: 10.5,
-              letterSpacing: 0.2,
-            ),
-          ),
-        ],
+      child: Text(
+        label,
+        maxLines: 1,
+        softWrap: false,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w800,
+          fontSize: 11,
+          letterSpacing: 0.2,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        ),
       ),
     );
   }
 }
 
-/// Avatar somente leitura da faixa de identidade — a troca de foto vive na
-/// tela de Perfil (evita duplicar o fluxo de upload aqui).
+/// Avatar somente leitura da prévia — a troca de foto vive em Meu perfil
+/// (evita duplicar o fluxo de envio aqui).
 class _ReadonlyAvatar extends StatelessWidget {
   const _ReadonlyAvatar({required this.profile, required this.tone});
 
   final Profile? profile;
   final Color tone;
+
+  static const double _size = 56;
 
   String get _initials {
     final name = (profile?.name ?? '').trim();
@@ -822,9 +1065,13 @@ class _ReadonlyAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final avatar = profile?.avatar;
+    final initials = Text(
+      _initials,
+      style: TextStyle(color: tone, fontWeight: FontWeight.w900, fontSize: 17),
+    );
     return Container(
-      width: 52,
-      height: 52,
+      width: _size,
+      height: _size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         border: Border.all(color: tone.withValues(alpha: 0.35), width: 1.5),
@@ -836,31 +1083,61 @@ class _ReadonlyAvatar extends StatelessWidget {
           ? Image.network(
               avatar,
               fit: BoxFit.cover,
-              width: 52,
-              height: 52,
-              errorBuilder: (_, _, _) => Text(
-                _initials,
-                style: TextStyle(
-                  color: tone,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 16,
-                ),
-              ),
+              width: _size,
+              height: _size,
+              errorBuilder: (_, _, _) => initials,
             )
-          : Text(
-              _initials,
-              style: TextStyle(
-                color: tone,
-                fontWeight: FontWeight.w900,
-                fontSize: 16,
-              ),
-            ),
+          : initials,
     );
   }
 }
 
-/// Chip de tag flush: dot na COR REAL da tag + tom-sobre-tom quando
-/// selecionada. Sem FilterChip do Material — coerência com o sistema.
+/// Tag marcada na prévia — ponto na cor real + nome (corta se for longo).
+class _MiniTag extends StatelessWidget {
+  const _MiniTag({required this.tag, required this.fallbackTone});
+
+  final Tag tag;
+  final Color fallbackTone;
+
+  @override
+  Widget build(BuildContext context) {
+    final tone = _tagColorOf(tag, fallbackTone);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        color: tone.withValues(alpha: 0.1),
+        border: Border.all(color: tone.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: tone),
+          ),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              tag.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: ThemeHelpers.textColor(context),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Chip de tag flush: ponto na COR REAL da tag + tom-sobre-tom quando
+/// marcada. Nome longo corta com reticências (nunca estoura a linha).
 class _TagChip extends StatelessWidget {
   const _TagChip({
     required this.tag,
@@ -874,20 +1151,11 @@ class _TagChip extends StatelessWidget {
   final Color fallbackTone;
   final VoidCallback onTap;
 
-  Color get _tagColor {
-    final raw = (tag.color ?? '').replaceAll('#', '').trim();
-    if (raw.length == 6) {
-      final parsed = int.tryParse(raw, radix: 16);
-      if (parsed != null) return Color(0xFF000000 | parsed);
-    }
-    return fallbackTone;
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final tone = _tagColor;
+    final tone = _tagColorOf(tag, fallbackTone);
 
     final borderColor = selected
         ? tone.withValues(alpha: 0.5)
@@ -896,7 +1164,7 @@ class _TagChip extends StatelessWidget {
         ? tone.withValues(alpha: isDark ? 0.16 : 0.1)
         : Colors.transparent;
     final labelColor = selected
-        ? (isDark ? Colors.white : ThemeHelpers.textColor(context))
+        ? ThemeHelpers.textColor(context)
         : ThemeHelpers.textSecondaryColor(context);
 
     return Material(
@@ -925,12 +1193,16 @@ class _TagChip extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 7),
-              Text(
-                tag.name,
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: labelColor,
-                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                  fontSize: 12.5,
+              Flexible(
+                child: Text(
+                  tag.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: labelColor,
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                    fontSize: 12.5,
+                  ),
                 ),
               ),
               if (selected) ...[

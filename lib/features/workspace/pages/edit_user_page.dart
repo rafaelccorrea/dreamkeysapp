@@ -16,47 +16,16 @@ import '../services/admin_users_service.dart';
 import '../utils/permission_rules.dart';
 import '../widgets/user_access_widgets.dart';
 
-/// Acento por papel — torna a subtela coerente com QUEM se edita (Corretor,
-/// Gerente, Admin, Master). O vermelho da marca fica reservado para a ação
-/// principal (Salvar). Ver memória `color-strategy-subscreens`.
-/// Cores por papel — alinhadas ao hero da tela de Usuários (fonte de verdade):
-/// Corretor = verde, Gestor = azul/indigo, Admin = roxo. O conforto vem do
-/// uso TONAL (sem preenchimento neon) no segmented. Ver
-/// memória color-strategy-subscreens.
-Color _roleAccent(String role, bool isDark) {
-  switch (role) {
-    case 'master':
-      // Distinto do Admin (roxo mais profundo).
-      return isDark ? const Color(0xFFC4B5FD) : const Color(0xFF6D28D9);
-    case 'admin':
-      return isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED); // roxo
-    case 'manager':
-      return isDark ? const Color(0xFF818CF8) : const Color(0xFF6366F1); // azul
-    case 'user':
-    default:
-      return isDark ? const Color(0xFF34D399) : const Color(0xFF059669); // verde
-  }
-}
-
-String _roleLabel(String role) {
-  switch (role) {
-    case 'master':
-      return 'Master';
-    case 'admin':
-      return 'Administrador';
-    case 'manager':
-      return 'Gestor';
-    default:
-      return 'Corretor';
-  }
-}
-
 /// Tela de **Editar Usuário** (mobile, identidade própria — sem banner, flush).
 /// Paridade com o `EditUserPage` do web: dados básicos (nome, email com
 /// checagem de disponibilidade, telefone, nova senha opcional), papel,
-/// gestores (obrigatório p/ corretor), cargo/superior (admin/master), tags e
-/// permissões com as regras do web (fixas, dependências, alçada do editor,
-/// módulos do plano, trava do proprietário).
+/// gestores (obrigatório p/ Colaborador), cargo/superior (admin/master), tags
+/// e permissões com as regras do web (fixas, dependências, alçada do editor,
+/// módulos do plano, trava do proprietário). Nomes de papel: [uaRoleLabel].
+///
+/// O acento da tela é a cor do papel de quem se edita (verde Colaborador,
+/// azul Gestor, roxo Administrativo/Proprietário, ardósia Gerenciador);
+/// salvar é verde de confirmação.
 class EditUserPage extends StatefulWidget {
   const EditUserPage({super.key, required this.user});
 
@@ -67,8 +36,8 @@ class EditUserPage extends StatefulWidget {
 }
 
 class _EditUserPageState extends State<EditUserPage> {
-  static const double _padH = 20;
-  static const double _gap = 20; // espaçamento entre seções (enxuto)
+  static const double _padH = 16;
+  static const double _gap = 28; // respiro entre seções
 
   bool _loading = true;
   bool _saving = false;
@@ -119,10 +88,12 @@ class _EditUserPageState extends State<EditUserPage> {
   String? _jobLevelId0;
   String? _reportsToUserId0;
 
+  // Âncoras para as pendências da barra de salvar levarem até a seção.
+  final _managersKey = GlobalKey();
+  final _permissionsKey = GlobalKey();
+
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
-  Color get _accent => _roleAccent(_role, _isDark);
-  Color get _brandRed =>
-      _isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+  Color get _accent => uaRoleTone(_role, isDark: _isDark);
   bool get _isUser => _role == 'user';
   bool get _isPrivileged => _role == 'admin' || _role == 'master';
 
@@ -432,6 +403,39 @@ class _EditUserPageState extends State<EditUserPage> {
     );
   }
 
+  // ─── Apresentação ────────────────────────────────────────────────────────
+
+  /// Leva a rolagem até a seção (usado pelas pendências da barra).
+  void _scrollTo(GlobalKey key) {
+    final ctx = key.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(
+      ctx,
+      duration: const Duration(milliseconds: 380),
+      curve: Curves.easeOutCubic,
+      alignment: 0.06,
+    );
+  }
+
+  /// Papéis da edição (nomes via [uaRoleLabel]; o admin dono da empresa
+  /// aparece como "Proprietário"). Sem alçada, o admin fica travado com o
+  /// motivo — a mesma condição que o `_validate` recusaria ao salvar.
+  List<UaRoleChoice> _roleChoices() {
+    return [
+      const UaRoleChoice('user'),
+      const UaRoleChoice('manager'),
+      UaRoleChoice(
+        'admin',
+        isOwner: _user.owner,
+        lockedReason: !_elevatedActor && _role0 != 'admin'
+            ? 'Seu papel não permite definir a função '
+                '${uaRoleLabel('admin', isOwner: _user.owner)}.'
+            : null,
+      ),
+      if (_role0 == 'master') const UaRoleChoice('master'),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
@@ -450,266 +454,290 @@ class _EditUserPageState extends State<EditUserPage> {
 
   // ─── Conteúdo ──────────────────────────────────────────────────────────
 
-  InputDecoration _dec(
-    String label, {
-    String? hint,
-    String? errorText,
-    Widget? prefixIcon,
-    Widget? suffixIcon,
-  }) =>
-      InputDecoration(
-        labelText: label,
-        hintText: hint,
-        errorText: errorText,
-        errorMaxLines: 2,
-        prefixIcon: prefixIcon,
-        suffixIcon: suffixIcon,
-        filled: true,
-        fillColor: ThemeHelpers.cardBackgroundColor(context),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(
-            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
-          ),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(
-            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
-          ),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: _accent, width: 1.6),
-        ),
-      );
-
-  /// Duas colunas quando cabe (largura e escala de fonte); senão empilha.
-  Widget _twoCols(Widget a, Widget b) {
-    return LayoutBuilder(
-      builder: (context, c) {
-        final fits = c.maxWidth >= 360 &&
-            MediaQuery.textScalerOf(context).scale(14) <= 16;
-        if (!fits) {
-          return Column(children: [a, const SizedBox(height: 12), b]);
-        }
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(child: a),
-            const SizedBox(width: 10),
-            Expanded(child: b),
-          ],
-        );
-      },
-    );
-  }
-
   Widget _buildContent() {
     final sel = _sel;
+    final accent = _accent;
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(_padH, 14, _padH, 20),
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      children: [
-        _FlushHero(user: _user, role: _role, accent: _accent),
-        const SizedBox(height: _gap),
-        _SectionLabel(
-          icon: LucideIcons.userRound,
-          label: 'DADOS BÁSICOS',
-          accent: _accent,
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _name,
-          enabled: !_saving,
-          textCapitalization: TextCapitalization.words,
-          onChanged: (_) => setState(() => _nameError = null),
-          decoration: _dec(
-            'Nome completo',
-            hint: 'Ex: Maria Silva',
-            errorText: _nameError,
-          ),
-        ),
-        const SizedBox(height: 12),
-        _twoCols(
-          TextField(
-            controller: _email,
-            focusNode: _emailFocus,
-            enabled: !_saving,
-            keyboardType: TextInputType.emailAddress,
-            autocorrect: false,
-            onChanged: (_) => setState(() => _emailError = null),
-            decoration: _dec(
-              'Email',
-              hint: 'usuario@empresa.com',
-              errorText: _emailError,
-              suffixIcon: _validatingEmail
-                  ? const Padding(
-                      padding: EdgeInsets.all(14),
-                      child: SkeletonBox(width: 16, height: 16, borderRadius: 4),
-                    )
-                  : null,
-            ),
-          ),
-          TextField(
-            controller: _phone,
-            enabled: !_saving,
-            keyboardType: TextInputType.phone,
-            inputFormatters: [PhoneInputFormatter()],
-            onChanged: (_) => setState(() {}),
-            decoration: _dec('Telefone', hint: '(00) 00000-0000'),
-          ),
-        ),
-        const SizedBox(height: _gap),
-        // Sem título (só "Permissões" tem): o segmented já é autoexplicativo.
-        _RoleSegmented(
-          current: _role,
-          includeMaster: _role0 == 'master',
-          onChanged: _onRoleChanged,
-        ),
-        // Gestor responsável: exclusivo de corretor.
-        if (_isUser) ...[
-          const SizedBox(height: 14),
-          UaManagerSelector(
-            managers: _managers,
-            selected: _selectedManagers,
-            missing: _managerMissing,
-            accent: _accent,
-            onAdd: () => showUaManagerSheet(
-              context: context,
-              managers: _managers,
-              selected: _selectedManagers,
-              accent: _accent,
-              onToggle: (id) => setState(() {
-                if (!_selectedManagers.remove(id)) _selectedManagers.add(id);
-              }),
-            ),
-            onRemove: (id) => setState(() => _selectedManagers.remove(id)),
-          ),
-        ],
-        // Cargo e superior: só administrador/master alteram (regra do back).
-        if (_elevatedActor) ...[
-          const SizedBox(height: _gap),
-          _SectionLabel(
-            icon: LucideIcons.network,
-            label: 'HIERARQUIA',
-            accent: _accent,
-          ),
-          const SizedBox(height: 12),
-          UaHierarchyFields(
-            jobLevelId: _jobLevelId,
-            reportsToUserId: _reportsToUserId,
-            userId: widget.user.id,
-            accent: _accent,
-            enabled: !_saving,
-            onChanged: (level, superior) => setState(() {
-              _jobLevelId = level;
-              _reportsToUserId = superior;
-            }),
-          ),
-        ],
-        const SizedBox(height: _gap),
-        _SectionLabel(
-          icon: LucideIcons.keyRound,
-          label: 'SEGURANÇA',
-          accent: _accent,
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _password,
-          enabled: !_saving,
-          obscureText: !_showPassword,
-          autocorrect: false,
-          enableSuggestions: false,
-          onChanged: (_) => setState(() => _passwordError = null),
-          decoration: _dec(
-            'Nova senha',
-            hint: 'Deixe em branco para manter a senha atual',
-            errorText: _passwordError,
-            suffixIcon: IconButton(
-              tooltip: _showPassword ? 'Ocultar senha' : 'Mostrar senha',
-              onPressed: () => setState(() => _showPassword = !_showPassword),
-              icon: Icon(
-                _showPassword ? LucideIcons.eyeOff : LucideIcons.eye,
-                size: 18,
-                color: secondary,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: _gap),
-        _SectionLabel(
-          icon: LucideIcons.tag,
-          label: 'TAGS',
-          accent: _accent,
-        ),
-        const SizedBox(height: 12),
-        UaTagSelector(
-          tags: _tags,
-          selected: _selectedTags,
-          maxTags: 10,
-          accent: _accent,
-          loading: _tagsLoading,
-          enabled: !_saving,
-          onToggle: (id) => setState(() {
-            if (!_selectedTags.remove(id)) _selectedTags.add(id);
-          }),
-        ),
-        const SizedBox(height: _gap),
-        _SectionLabel(
-          icon: LucideIcons.shieldCheck,
-          label: 'PERMISSÕES',
-          accent: _accent,
-          trailing: sel == null
-              ? null
-              : _CountPill(
-                  text: '${sel.selected.length}/${sel.visibleTotal}',
-                  color: _accent,
+    return Theme(
+      data: uaFormTheme(context, accent),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(_padH, 16, _padH, 28),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: kUaMaxContentWidth),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _FlushHero(user: _user, role: _role, accent: accent),
+
+                // ── Dados básicos ────────────────────────────────────────
+                const SizedBox(height: _gap),
+                UaSectionHeader(
+                  icon: LucideIcons.userRound,
+                  label: 'Dados básicos',
+                  accent: accent,
                 ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: _name,
+                  enabled: !_saving,
+                  textCapitalization: TextCapitalization.words,
+                  onChanged: (_) => setState(() => _nameError = null),
+                  decoration: InputDecoration(
+                    labelText: 'Nome completo',
+                    hintText: 'Ex.: Maria Silva',
+                    errorText: _nameError,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                UaTwoCols(
+                  left: TextField(
+                    controller: _email,
+                    focusNode: _emailFocus,
+                    enabled: !_saving,
+                    keyboardType: TextInputType.emailAddress,
+                    autocorrect: false,
+                    onChanged: (_) => setState(() => _emailError = null),
+                    decoration: InputDecoration(
+                      labelText: 'Email',
+                      hintText: 'usuario@empresa.com',
+                      errorText: _emailError,
+                      suffixIcon: _validatingEmail
+                          ? const Padding(
+                              padding: EdgeInsets.all(14),
+                              child: SkeletonBox(
+                                width: 16,
+                                height: 16,
+                                borderRadius: 4,
+                              ),
+                            )
+                          : null,
+                    ),
+                  ),
+                  right: TextField(
+                    controller: _phone,
+                    enabled: !_saving,
+                    keyboardType: TextInputType.phone,
+                    inputFormatters: [PhoneInputFormatter()],
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'Telefone',
+                      hintText: '(00) 00000-0000',
+                    ),
+                  ),
+                ),
+
+                // ── Papel ────────────────────────────────────────────────
+                const SizedBox(height: _gap),
+                UaSectionHeader(
+                  icon: LucideIcons.shieldCheck,
+                  label: 'Papel',
+                  accent: accent,
+                ),
+                const SizedBox(height: 14),
+                UaRolePicker(
+                  current: _role,
+                  choices: _roleChoices(),
+                  enabled: !_saving,
+                  onChanged: _onRoleChanged,
+                ),
+
+                // ── Gestor responsável: exclusivo de Colaborador ─────────
+                if (_isUser) ...[
+                  const SizedBox(height: _gap),
+                  UaSectionHeader(
+                    key: _managersKey,
+                    icon: LucideIcons.users,
+                    label: 'Gestor responsável',
+                    accent: accent,
+                  ),
+                  const SizedBox(height: 10),
+                  UaRequirementLine(
+                    met: !_managerMissing,
+                    text: _managerMissing
+                        ? 'Gestor é obrigatório para usuários com perfil '
+                            'Colaborador. Selecione ao menos um gestor.'
+                        : 'Gestor definido. Dá para vincular mais de um.',
+                  ),
+                  const SizedBox(height: 12),
+                  UaManagerSelector(
+                    managers: _managers,
+                    selected: _selectedManagers,
+                    missing: _managerMissing,
+                    accent: accent,
+                    enabled: !_saving,
+                    onAdd: () => showUaManagerSheet(
+                      context: context,
+                      managers: _managers,
+                      selected: _selectedManagers,
+                      accent: accent,
+                      onToggle: (id) => setState(() {
+                        if (!_selectedManagers.remove(id)) {
+                          _selectedManagers.add(id);
+                        }
+                      }),
+                    ),
+                    onRemove: (id) =>
+                        setState(() => _selectedManagers.remove(id)),
+                  ),
+                ],
+
+                // ── Hierarquia: só administrador/master alteram ──────────
+                if (_elevatedActor) ...[
+                  const SizedBox(height: _gap),
+                  UaSectionHeader(
+                    icon: LucideIcons.network,
+                    label: 'Hierarquia',
+                    accent: accent,
+                  ),
+                  const SizedBox(height: 10),
+                  const UaHint(
+                    'O cargo na escada da imobiliária e a quem esta pessoa '
+                    'responde.',
+                  ),
+                  const SizedBox(height: 12),
+                  UaHierarchyFields(
+                    jobLevelId: _jobLevelId,
+                    reportsToUserId: _reportsToUserId,
+                    userId: widget.user.id,
+                    accent: accent,
+                    enabled: !_saving,
+                    onChanged: (level, superior) => setState(() {
+                      _jobLevelId = level;
+                      _reportsToUserId = superior;
+                    }),
+                  ),
+                ],
+
+                // ── Segurança ────────────────────────────────────────────
+                const SizedBox(height: _gap),
+                UaSectionHeader(
+                  icon: LucideIcons.keyRound,
+                  label: 'Segurança',
+                  accent: accent,
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: _password,
+                  enabled: !_saving,
+                  obscureText: !_showPassword,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  onChanged: (_) => setState(() => _passwordError = null),
+                  decoration: InputDecoration(
+                    labelText: 'Nova senha',
+                    hintText: 'Mínimo 6 caracteres',
+                    errorText: _passwordError,
+                    suffixIcon: IconButton(
+                      tooltip: _showPassword ? 'Ocultar senha' : 'Mostrar senha',
+                      onPressed: () =>
+                          setState(() => _showPassword = !_showPassword),
+                      icon: Icon(
+                        _showPassword ? LucideIcons.eyeOff : LucideIcons.eye,
+                        size: 18,
+                        color: secondary,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const UaHint(
+                  'Deixe em branco para manter a senha atual.',
+                ),
+
+                // ── Tags ─────────────────────────────────────────────────
+                const SizedBox(height: _gap),
+                UaSectionHeader(
+                  icon: LucideIcons.tag,
+                  label: 'Tags',
+                  accent: accent,
+                ),
+                const SizedBox(height: 14),
+                UaTagSelector(
+                  tags: _tags,
+                  selected: _selectedTags,
+                  maxTags: 10,
+                  accent: accent,
+                  loading: _tagsLoading,
+                  enabled: !_saving,
+                  onToggle: (id) => setState(() {
+                    if (!_selectedTags.remove(id)) _selectedTags.add(id);
+                  }),
+                ),
+
+                // ── Permissões ───────────────────────────────────────────
+                const SizedBox(height: _gap),
+                UaSectionHeader(
+                  key: _permissionsKey,
+                  icon: LucideIcons.listChecks,
+                  label: 'Permissões',
+                  accent: accent,
+                  trailing: sel == null
+                      ? null
+                      : UaCountPill(
+                          text: '${uaVisibleSelectedCount(sel)} de '
+                              '${sel.visibleTotal}',
+                          accent: accent,
+                        ),
+                ),
+                const SizedBox(height: 10),
+                if (sel != null && sel.ownerLocked) ...[
+                  const UaNoticeBanner(
+                    notice: PermissionNotice(
+                      'Apenas o usuário master pode alterar as permissões do '
+                      'proprietário.',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ] else if (_isPrivileged) ...[
+                  UaNoticeBanner(
+                    notice: PermissionNotice(
+                      'O papel '
+                      '${uaRoleLabel(_role, isOwner: _user.owner)} tem '
+                      'acesso total — as permissões abaixo são ignoradas '
+                      'pelo sistema.',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                if (sel != null) ...[
+                  UaRequirementLine(
+                    met: !_permissionsMissing,
+                    text: _permissionsMissing
+                        ? 'É obrigatório selecionar pelo menos 1 permissão.'
+                        : 'As obrigatórias (com cadeado) não saem. Toque numa '
+                            'categoria para ver e ajustar cada permissão.',
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                if (sel == null)
+                  _ErrorInline(
+                    message:
+                        _error ?? 'Não foi possível carregar as permissões.',
+                    statusCode: _errorStatus,
+                    error: _errorRaw,
+                    onRetry: _bootstrap,
+                  )
+                else
+                  UaPermissionGrid(
+                    selection: sel,
+                    accent: accent,
+                    onOpenCategory: (category, perms) =>
+                        showUaPermissionCategorySheet(
+                      context: context,
+                      selection: sel,
+                      category: category,
+                      perms: perms,
+                      accent: accent,
+                      onChanged: () => setState(() {}),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ),
-        const SizedBox(height: 11),
-        if (sel != null && sel.ownerLocked) ...[
-          const UaNoticeBanner(
-            notice: PermissionNotice(
-              'Apenas o usuário master pode alterar as permissões do proprietário.',
-            ),
-          ),
-          const SizedBox(height: 11),
-        ] else if (_isPrivileged) ...[
-          _PrivilegedNote(role: _role),
-          const SizedBox(height: 11),
-        ],
-        if (_permissionsMissing) ...[
-          const UaNoticeBanner(
-            notice: PermissionNotice(
-              'É obrigatório selecionar pelo menos 1 permissão',
-            ),
-          ),
-          const SizedBox(height: 11),
-        ],
-        if (sel == null)
-          _ErrorInline(
-            message: _error ?? 'Não foi possível carregar as permissões.',
-            statusCode: _errorStatus,
-            error: _errorRaw,
-            onRetry: _bootstrap,
-          )
-        else
-          UaPermissionGrid(
-            selection: sel,
-            accent: _accent,
-            horizontalPadding: _padH,
-            onOpenCategory: (category, perms) => showUaPermissionCategorySheet(
-              context: context,
-              selection: sel,
-              category: category,
-              perms: perms,
-              accent: _accent,
-              onChanged: () => setState(() {}),
-            ),
-          ),
-      ],
+      ),
     );
   }
 
@@ -718,104 +746,89 @@ class _EditUserPageState extends State<EditUserPage> {
   Widget _buildSaveBar() {
     final blocked = _managerMissing;
     final canSave = _dirty && !_saving && !blocked;
-    return Container(
-      decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        border: Border(
-          top: BorderSide(color: ThemeHelpers.borderLightColor(context)),
-        ),
-      ),
-      padding: EdgeInsets.fromLTRB(
-          _padH, 12, _padH, 12 + MediaQuery.paddingOf(context).bottom),
-      child: Row(
-        children: [
-          if (_dirty) ...[
-            TextButton(
-              onPressed: _saving ? null : () => Navigator.of(context).pop(),
-              child: const Text('Descartar'),
-            ),
-            const SizedBox(width: 12),
-          ],
-          Expanded(
-            child: FilledButton.icon(
-              onPressed: canSave ? _save : null,
-              style: FilledButton.styleFrom(
-                backgroundColor: _brandRed,
-                disabledBackgroundColor:
-                    ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
-              ),
-              icon: _saving
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Icon(LucideIcons.check, size: 18),
-              label: Text(
-                _saving
-                    ? 'Salvando…'
-                    : blocked
-                        ? 'Selecione um gestor'
-                        : (_dirty ? 'Salvar alterações' : 'Tudo salvo'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 14.5,
-                    letterSpacing: 0.2),
-              ),
-            ),
-          ),
-        ],
-      ),
+    return UaSaveBar(
+      saveLabel: _saving
+          ? 'Salvando…'
+          : (_dirty ? 'Salvar alterações' : 'Tudo salvo'),
+      saving: _saving,
+      onSave: canSave ? _save : null,
+      cancelLabel: _dirty ? 'Descartar' : null,
+      onCancel: () => Navigator.of(context).pop(),
+      pendingTitle: 'Falta para salvar:',
+      pending: [
+        if (_managerMissing)
+          UaPending('Gestor responsável', () => _scrollTo(_managersKey)),
+        if (_permissionsMissing)
+          UaPending('Pelo menos 1 permissão', () => _scrollTo(_permissionsKey)),
+      ],
     );
   }
 
-  // ─── Skeleton ─────────────────────────────────────────────────────────────
+  // ─── Skeleton (fiel ao hero + campos + papéis) ───────────────────────────
 
   Widget _buildSkeleton() {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(_padH, 14, _padH, 20),
+    return SingleChildScrollView(
       physics: const NeverScrollableScrollPhysics(),
-      children: [
-        Row(
-          children: [
-            SkeletonBox(width: 60, height: 60, borderRadius: 18),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
+      padding: const EdgeInsets.fromLTRB(_padH, 16, _padH, 20),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: kUaMaxContentWidth),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  SkeletonBox(width: 160, height: 16, borderRadius: 6),
-                  SizedBox(height: 8),
-                  SkeletonBox(width: 200, height: 12, borderRadius: 4),
+                children: [
+                  const SkeletonBox(width: 60, height: 60, borderRadius: 18),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        SkeletonBox(width: 170, height: 18, borderRadius: 6),
+                        SizedBox(height: 8),
+                        SkeletonBox(width: 190, height: 12, borderRadius: 4),
+                        SizedBox(height: 12),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            SkeletonBox(
+                              width: 90,
+                              height: 22,
+                              borderRadius: 999,
+                            ),
+                            SkeletonBox(
+                              width: 70,
+                              height: 22,
+                              borderRadius: 999,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 22),
-        SkeletonBox(width: double.infinity, height: 52, borderRadius: 14),
-        const SizedBox(height: 22),
-        SkeletonBox(width: 120, height: 11, borderRadius: 999),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: List.generate(
-            6,
-            (_) => SkeletonBox(
-              width: (MediaQuery.sizeOf(context).width - (_padH * 2) - 12) / 2,
-              height: 84,
-              borderRadius: 16,
-            ),
+              const SizedBox(height: 18),
+              const SkeletonBox(height: 46, borderRadius: 10),
+              const SizedBox(height: _gap),
+              const SkeletonBox(width: 140, height: 12, borderRadius: 4),
+              const SizedBox(height: 14),
+              const SkeletonBox(height: 50, borderRadius: 14),
+              const SizedBox(height: 12),
+              const SkeletonBox(height: 50, borderRadius: 14),
+              const SizedBox(height: _gap),
+              const SkeletonBox(width: 90, height: 12, borderRadius: 4),
+              const SizedBox(height: 14),
+              for (var i = 0; i < 3; i++) ...[
+                const SkeletonBox(height: 60, borderRadius: 14),
+                const SizedBox(height: 8),
+              ],
+            ],
           ),
         ),
-      ],
+      ),
     );
   }
 }
@@ -825,20 +838,38 @@ class _EditUserPageState extends State<EditUserPage> {
 // ───────────────────────────────────────────────────────────────────────────
 
 class _FlushHero extends StatelessWidget {
-  const _FlushHero({required this.user, required this.role, required this.accent});
+  const _FlushHero({
+    required this.user,
+    required this.role,
+    required this.accent,
+  });
 
   final AdminUser user;
   final String role;
   final Color accent;
 
-  ({Color color, String label, IconData icon}) _presence() {
+  ({Color color, String label, IconData icon}) _presence(bool isDark) {
     if (!user.isActiveInCompany || !user.active) {
-      return (color: const Color(0xFFA1A1AA), label: 'Desativado', icon: LucideIcons.minus);
+      return (
+        color: isDark ? AppColors.text.textLightDarkMode : AppColors.text.textLight,
+        label: 'Desativado',
+        icon: LucideIcons.ban,
+      );
     }
     if (user.neverLoggedIn) {
-      return (color: const Color(0xFFF59E0B), label: 'Nunca acessou', icon: LucideIcons.clock);
+      return (
+        color: isDark
+            ? AppColors.status.warningDarkMode
+            : AppColors.message.warningText,
+        label: 'Nunca acessou',
+        icon: LucideIcons.clock,
+      );
     }
-    return (color: const Color(0xFF10B981), label: 'Ativo', icon: LucideIcons.check);
+    return (
+      color: isDark ? AppColors.status.successDarkMode : AppColors.status.success,
+      label: 'Ativo',
+      icon: LucideIcons.check,
+    );
   }
 
   String? _maskedDoc() {
@@ -849,26 +880,13 @@ class _FlushHero extends StatelessWidget {
     return '***.***.***-${d.substring(d.length - 2)}';
   }
 
-  String _initials() {
-    final parts = user.name.trim().split(RegExp(r'\s+'));
-    if (parts.isEmpty || parts.first.isEmpty) return '?';
-    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
-    return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final textColor = ThemeHelpers.textColor(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final cardColor = ThemeHelpers.cardBackgroundColor(context);
-    final presence = _presence();
-    final hasPhoto = (user.avatar ?? '').trim().isNotEmpty;
-    final deep = HSLColor.fromColor(accent)
-        .withLightness(
-            (HSLColor.fromColor(accent).lightness * 0.78).clamp(0.0, 1.0))
-        .toColor();
+    final presence = _presence(isDark);
 
     final lastLogin = user.lastLoginAt != null
         ? DateFormat("d 'de' MMM · HH:mm", 'pt_BR')
@@ -877,83 +895,44 @@ class _FlushHero extends StatelessWidget {
     final created = user.createdAt != null
         ? DateFormat("d 'de' MMM yyyy", 'pt_BR').format(user.createdAt!.toLocal())
         : '—';
+    final phone = (user.phone?.trim().isNotEmpty == true)
+        ? user.phone!.trim()
+        : 'Não informado';
 
-    final initialsFallback = Container(
-      width: 60,
-      height: 60,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [accent, deep],
-        ),
+    final meta = <Widget>[
+      _MetaDatum(icon: LucideIcons.phone, label: 'TELEFONE', value: phone),
+      _MetaDatum(
+        icon: LucideIcons.fingerprint,
+        label: 'CPF',
+        value: _maskedDoc() ?? 'Não informado',
+        monospace: _maskedDoc() != null,
       ),
-      alignment: Alignment.center,
-      child: Text(
-        _initials(),
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w900,
-          fontSize: 21,
-        ),
+      // "Nunca" já vem sinalizado na pílula âmbar do estado — aqui fica na
+      // tinta de texto (âmbar como texto não passa em contraste no claro).
+      _MetaDatum(
+        icon: LucideIcons.clock,
+        label: 'ÚLTIMO ACESSO',
+        value: lastLogin,
       ),
-    );
-    final avatarInner = hasPhoto
-        ? Image.network(
-            user.avatar!,
-            width: 60,
-            height: 60,
-            fit: BoxFit.cover,
-            errorBuilder: (_, _, _) => initialsFallback,
-            loadingBuilder: (_, child, prog) =>
-                prog == null ? child : initialsFallback,
-          )
-        : initialsFallback;
+      _MetaDatum(
+        icon: LucideIcons.calendar,
+        label: 'MEMBRO DESDE',
+        value: created,
+      ),
+    ];
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(
-              width: 62,
-              height: 62,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Container(
-                    width: 60,
-                    height: 60,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: accent.withValues(alpha: 0.32)),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: avatarInner,
-                  ),
-                  Positioned(
-                    right: -2,
-                    bottom: -2,
-                    child: Container(
-                      width: 15,
-                      height: 15,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: presence.color,
-                        border: Border.all(color: cardColor, width: 2.5),
-                        boxShadow: [
-                          BoxShadow(
-                            color: presence.color.withValues(alpha: 0.55),
-                            blurRadius: 6,
-                            spreadRadius: 0.4,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+            UaAvatar(
+              name: user.name,
+              url: user.avatar,
+              tone: accent,
+              size: 60,
+              radius: 18,
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -961,12 +940,12 @@ class _FlushHero extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    user.name.isEmpty ? '—' : user.name,
+                    user.name.isEmpty ? 'Sem nome' : user.name,
                     style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w900,
                       color: textColor,
                       letterSpacing: -0.5,
-                      height: 1.05,
+                      height: 1.1,
                       fontSize: 20,
                     ),
                     maxLines: 2,
@@ -991,22 +970,20 @@ class _FlushHero extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 9),
+                  const SizedBox(height: 10),
                   Wrap(
                     spacing: 6,
                     runSpacing: 6,
                     children: [
-                      _MiniBadge(
-                        label: _roleLabel(role),
+                      _Pill(
+                        label: uaRoleLabel(role, isOwner: user.owner),
                         color: accent,
-                        icon: LucideIcons.shieldCheck,
-                        isDark: isDark,
+                        icon: uaRoleIcon(role),
                       ),
-                      _MiniBadge(
+                      _Pill(
                         label: presence.label,
                         color: presence.color,
                         icon: presence.icon,
-                        isDark: isDark,
                       ),
                     ],
                   ),
@@ -1015,300 +992,102 @@ class _FlushHero extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 14),
-        Divider(
-            height: 1,
-            color: ThemeHelpers.borderLightColor(context).withValues(alpha: 0.9)),
-        const SizedBox(height: 12),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _MetaDatum(
-                icon: LucideIcons.phone,
-                label: 'TELEFONE',
-                value: (user.phone?.trim().isNotEmpty == true)
-                    ? user.phone!.trim()
-                    : '—',
-              ),
-            ),
-            _metaDivider(context),
-            Expanded(
-              child: _MetaDatum(
-                icon: LucideIcons.fingerprint,
-                label: 'CPF',
-                value: _maskedDoc() ?? '—',
-                monospace: true,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Divider(
-            height: 1,
-            color: ThemeHelpers.borderLightColor(context).withValues(alpha: 0.5)),
-        const SizedBox(height: 12),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _MetaDatum(
-                icon: LucideIcons.clock,
-                label: 'ÚLTIMO ACESSO',
-                value: lastLogin,
-                valueColor: user.neverLoggedIn ? const Color(0xFFF59E0B) : null,
-              ),
-            ),
-            _metaDivider(context),
-            Expanded(
-              child: _MetaDatum(
-                icon: LucideIcons.calendar,
-                label: 'MEMBRO DESDE',
-                value: created,
-              ),
-            ),
-          ],
+        const SizedBox(height: 16),
+        // Metadados em faixa com filetes: 4 em linha na tela larga, 2×2 no
+        // celular (altura intrínseca — sem caixa de tamanho fixo).
+        LayoutBuilder(
+          builder: (context, c) {
+            final perRow = c.maxWidth >= 560 ? 4 : 2;
+            final hairline = ThemeHelpers.borderLightColor(context);
+            final rows = <Widget>[];
+            for (var i = 0; i < meta.length; i += perRow) {
+              final slice = meta.sublist(
+                i,
+                i + perRow > meta.length ? meta.length : i + perRow,
+              );
+              rows.add(
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  decoration: BoxDecoration(
+                    border: Border(top: BorderSide(color: hairline)),
+                  ),
+                  child: IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (var j = 0; j < slice.length; j++) ...[
+                          if (j > 0)
+                            Container(
+                              width: 1,
+                              margin: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
+                              color: hairline,
+                            ),
+                          Expanded(child: slice[j]),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ...rows,
+                Container(height: 1, color: hairline),
+              ],
+            );
+          },
         ),
       ],
     );
   }
-
-  Widget _metaDivider(BuildContext context) => Container(
-        width: 1,
-        height: 34,
-        margin: const EdgeInsets.symmetric(horizontal: 12),
-        color: ThemeHelpers.borderLightColor(context).withValues(alpha: 0.7),
-      );
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Section label (flush, com filete + trailing)
+// Reuso: pílula / meta / erro
 // ───────────────────────────────────────────────────────────────────────────
 
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel({
-    required this.icon,
+/// Pílula de papel/estado: tom no fundo, na borda e no ícone; texto na tinta
+/// de texto (contraste garantido nos dois temas).
+class _Pill extends StatelessWidget {
+  const _Pill({
     required this.label,
-    required this.accent,
-    this.trailing,
+    required this.color,
+    required this.icon,
   });
 
-  final IconData icon;
   final String label;
-  final Color accent;
-  final Widget? trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 22,
-          height: 22,
-          decoration: BoxDecoration(
-            color: accent.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(7),
-          ),
-          alignment: Alignment.center,
-          child: Icon(icon, size: 12, color: accent),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 1.5,
-            color: ThemeHelpers.textColor(context),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Container(
-            height: 1,
-            color: ThemeHelpers.borderLightColor(context).withValues(alpha: 0.8),
-          ),
-        ),
-        if (trailing != null) ...[const SizedBox(width: 10), trailing!],
-      ],
-    );
-  }
-}
-
-class _CountPill extends StatelessWidget {
-  const _CountPill({required this.text, required this.color});
-  final String text;
   final Color color;
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.24)),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: color,
-          fontWeight: FontWeight.w900,
-          fontSize: 11,
-          letterSpacing: 0.2,
-        ),
-      ),
-    );
-  }
-}
-
-// ───────────────────────────────────────────────────────────────────────────
-// Papel — segmented (cada papel na sua cor)
-// ───────────────────────────────────────────────────────────────────────────
-
-class _RoleSegmented extends StatelessWidget {
-  const _RoleSegmented({
-    required this.current,
-    required this.includeMaster,
-    required this.onChanged,
-  });
-
-  final String current;
-  final bool includeMaster;
-  final ValueChanged<String> onChanged;
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final items = <({String value, String label, IconData icon})>[
-      (value: 'user', label: 'Corretor', icon: LucideIcons.user),
-      (value: 'manager', label: 'Gestor', icon: LucideIcons.briefcase),
-      (value: 'admin', label: 'Admin', icon: LucideIcons.shieldCheck),
-      if (includeMaster)
-        (value: 'master', label: 'Master', icon: LucideIcons.crown),
-    ];
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5)),
-      ),
-      child: Row(
-        children: [
-          for (final it in items)
-            Expanded(
-              child: _RoleChip(
-                label: it.label,
-                icon: it.icon,
-                selected: current == it.value,
-                color: _roleAccent(it.value, isDark),
-                onTap: () => onChanged(it.value),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RoleChip extends StatelessWidget {
-  const _RoleChip({
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.color,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final Color color;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final fg = selected ? color : ThemeHelpers.textSecondaryColor(context);
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          // Tonal suave (sem preenchimento saturado nem brilho) — conforto.
-          color: selected
-              ? color.withValues(alpha: isDark ? 0.20 : 0.12)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: selected
-                ? color.withValues(alpha: isDark ? 0.5 : 0.38)
-                : Colors.transparent,
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 16, color: fg),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: fg,
-                fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
-                fontSize: 11.5,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ───────────────────────────────────────────────────────────────────────────
-// Reuso: badges / meta / notas
-// ───────────────────────────────────────────────────────────────────────────
-
-class _MiniBadge extends StatelessWidget {
-  const _MiniBadge({
-    required this.label,
-    required this.color,
-    required this.icon,
-    required this.isDark,
-  });
-
-  final String label;
-  final Color color;
-  final IconData icon;
-  final bool isDark;
-
-  @override
-  Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: isDark ? 0.18 : 0.10),
+        color: color.withValues(alpha: isDark ? 0.18 : 0.12),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: isDark ? 0.36 : 0.24)),
+        border: Border.all(color: color.withValues(alpha: isDark ? 0.4 : 0.32)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 11, color: color),
+          Icon(icon, size: 12, color: color),
           const SizedBox(width: 5),
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w800,
-              fontSize: 10.5,
-              letterSpacing: 0.2,
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: ThemeHelpers.textColor(context),
+                fontWeight: FontWeight.w800,
+                fontSize: 11.5,
+              ),
             ),
           ),
         ],
@@ -1323,19 +1102,31 @@ class _MetaDatum extends StatelessWidget {
     required this.label,
     required this.value,
     this.monospace = false,
-    this.valueColor,
   });
 
   final IconData icon;
   final String label;
   final String value;
   final bool monospace;
-  final Color? valueColor;
 
   @override
   Widget build(BuildContext context) {
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final textColor = ThemeHelpers.textColor(context);
+    final valueText = Text(
+      value,
+      maxLines: 1,
+      softWrap: false,
+      overflow: monospace ? TextOverflow.visible : TextOverflow.ellipsis,
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w800,
+        color: textColor,
+        letterSpacing: monospace ? 0.4 : -0.1,
+        fontFamily: monospace ? 'monospace' : null,
+        height: 1.15,
+      ),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -1348,9 +1139,9 @@ class _MetaDatum extends StatelessWidget {
               child: Text(
                 label,
                 style: TextStyle(
-                  fontSize: 9,
+                  fontSize: 9.5,
                   fontWeight: FontWeight.w800,
-                  letterSpacing: 1.1,
+                  letterSpacing: 1.0,
                   color: secondary,
                   height: 1.0,
                 ),
@@ -1361,57 +1152,16 @@ class _MetaDatum extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 6),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w800,
-            color: valueColor ?? textColor,
-            letterSpacing: monospace ? 0.4 : -0.1,
-            fontFamily: monospace ? 'monospace' : null,
-            height: 1.15,
-          ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        // CPF mascarado: encolhe para caber — os 2 dígitos finais são a
+        // única informação e não podem sumir no "…".
+        monospace
+            ? FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: valueText,
+              )
+            : valueText,
       ],
-    );
-  }
-}
-
-class _PrivilegedNote extends StatelessWidget {
-  const _PrivilegedNote({required this.role});
-  final String role;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final tone = isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: tone.withValues(alpha: isDark ? 0.12 : 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: tone.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        children: [
-          Icon(LucideIcons.info, size: 16, color: tone),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '${role == 'master' ? 'Master' : 'Administradores'} têm acesso '
-              'total — as permissões abaixo são ignoradas pelo sistema.',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: tone,
-                height: 1.3,
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

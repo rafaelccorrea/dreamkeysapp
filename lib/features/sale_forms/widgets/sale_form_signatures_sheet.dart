@@ -14,6 +14,7 @@ import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import 'sale_form_tones.dart';
 
 /// Bottom sheet de assinaturas da FICHA DE VENDA — paridade com
 /// `SaleFormSignatureModalPrivate.tsx` (web).
@@ -107,16 +108,16 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
   bool _prefilled = false;
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
-  Color get _green =>
-      _isDark ? AppColors.status.greenDarkMode : AppColors.status.green;
   Color get _accent =>
       _isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
-  Color get _warn =>
-      _isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
-  Color get _red =>
-      _isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
-  Color get _blue =>
-      _isDark ? AppColors.status.blueDarkMode : AppColors.status.blue;
+  // Tons de texto/ícone (legíveis também no modo claro) — `sale_form_tones`.
+  Color get _green => SaleFormTom.sucesso(context).texto;
+  Color get _warn => SaleFormTom.aviso(context).texto;
+  Color get _red => SaleFormTom.erro(context).texto;
+  Color get _blue => SaleFormTom.info(context).texto;
+
+  /// Fundo de botão verde com texto branco (o mesmo nos dois temas).
+  Color get _greenFill => SaleFormTom.verdeDeConfirmar();
 
   String get _numero {
     final a = widget.formNumber?.trim() ?? '';
@@ -314,8 +315,15 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        backgroundColor: ThemeHelpers.cardBackgroundColor(ctx),
         title: Text(titulo),
-        content: Text(texto),
+        content: Text(
+          texto,
+          style: TextStyle(
+            color: ThemeHelpers.textSecondaryColor(ctx),
+            height: 1.4,
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -327,7 +335,7 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             style: FilledButton.styleFrom(
-              backgroundColor: destrutivo ? _red : _green,
+              backgroundColor: destrutivo ? _red : _greenFill,
               foregroundColor: Colors.white,
             ),
             child: Text(confirmar),
@@ -662,10 +670,16 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
   @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
-    final altura = math.min(
-      mq.size.height * 0.88,
-      mq.size.height - mq.viewInsets.bottom - mq.padding.top - 12,
+    final altura = math.max(
+      0.0,
+      math.min(
+        mq.size.height * 0.88,
+        mq.size.height - mq.viewInsets.bottom - mq.padding.top - 12,
+      ),
     );
+    // Pouca altura (teclado aberto em paisagem): cabeçalho sem alça nem
+    // sobretítulo, para as abas e o corpo continuarem com espaço.
+    final compacto = altura < 360;
     return Padding(
       padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
       child: Container(
@@ -678,15 +692,26 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
           children: [
             _SheetHeader(
               formNumber: _numero,
+              compacto: compacto,
               onClose: () => Navigator.of(context).pop(),
             ),
             if (!_loading && _showTabs)
               TabBar(
                 controller: _tab,
                 indicatorColor: _accent,
+                indicatorSize: TabBarIndicatorSize.tab,
                 labelColor: _accent,
                 unselectedLabelColor:
                     ThemeHelpers.textSecondaryColor(context),
+                labelStyle: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                ),
+                unselectedLabelStyle: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+                dividerColor: ThemeHelpers.borderLightColor(context),
                 tabs: [
                   Tab(text: 'Status (${_ativas.length})'),
                   const Tab(text: 'Novo envio'),
@@ -717,11 +742,15 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
     if (_showTabs) {
       return TabBarView(
         controller: _tab,
-        children: [_buildStatusTab(), _buildSendTab()],
+        children: [_buildStatusTab(), _abaEnvio()],
       );
     }
-    return _alreadySent ? _buildStatusTab() : _buildSendTab();
+    return _alreadySent ? _buildStatusTab() : _abaEnvio();
   }
+
+  /// Aba de envio com os campos `filled` do formulário ([_formTheme]).
+  Widget _abaEnvio() =>
+      Theme(data: _formTheme(context), child: _buildSendTab());
 
   // ─── Status ──────────────────────────────────────────────────────────────
 
@@ -752,10 +781,32 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
             runSpacing: 4,
             children: [
               _Leitura(valor: '${ativas.length}', rotulo: 'no envio'),
-              _Leitura(valor: '$assinados', rotulo: 'assinados', cor: _green),
-              _Leitura(valor: '$pendentes', rotulo: 'pendentes', cor: _warn),
+              _Leitura(
+                valor: '$assinados',
+                rotulo: assinados == 1 ? 'assinou' : 'assinaram',
+                cor: _green,
+              ),
+              _Leitura(
+                valor: '$pendentes',
+                rotulo: pendentes == 1 ? 'falta assinar' : 'faltam assinar',
+                cor: _warn,
+              ),
             ],
           ),
+          if (ativas.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: LinearProgressIndicator(
+                value: (assinados / ativas.length).clamp(0.0, 1.0).toDouble(),
+                minHeight: 5,
+                backgroundColor: ThemeHelpers.borderLightColor(context),
+                valueColor: AlwaysStoppedAnimation(
+                  SaleFormTom.sucesso(context).sinal,
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
@@ -802,8 +853,13 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
                       : const Icon(LucideIcons.mailPlus, size: 17),
                   label: FittedBox(
                     fit: BoxFit.scaleDown,
-                    child: Text(_resendingEmail ? 'Enviando…' : 'Por e-mail'),
+                    child: Text(
+                      _resendingEmail ? 'Enviando…' : 'Por e-mail',
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
                   ),
+                  style: _estiloReenvio(_blue),
                 ),
               ),
               const SizedBox(width: 10),
@@ -815,9 +871,13 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
                       : const Icon(LucideIcons.messageCircle, size: 17),
                   label: FittedBox(
                     fit: BoxFit.scaleDown,
-                    child:
-                        Text(_resendingWa ? 'Enviando…' : 'Pelo WhatsApp'),
+                    child: Text(
+                      _resendingWa ? 'Enviando…' : 'Pelo WhatsApp',
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
                   ),
+                  style: _estiloReenvio(_green),
                 ),
               ),
             ],
@@ -866,7 +926,8 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
                 warn: _warn,
                 red: _red,
                 blue: _blue,
-                accent: _accent,
+                // "VOCÊ" na cor de assinar (a mesma das assinaturas pendentes).
+                accent: _green,
                 onAssinar: () => _assinar(s),
                 onCopyLink: () => _copiarLink(s),
                 onWhatsappManual: () => _whatsappManual(s),
@@ -889,12 +950,29 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
                 icon: _invalidating
                     ? const _Spin()
                     : Icon(LucideIcons.ban, size: 17, color: _red),
-                label: Text(
-                  'Cancelar todas para reenvio',
-                  style: TextStyle(color: _red),
+                label: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    'Cancelar todas para reenvio',
+                    maxLines: 1,
+                    softWrap: false,
+                    style: TextStyle(color: _red),
+                  ),
                 ),
                 style: OutlinedButton.styleFrom(
+                  foregroundColor: _red,
                   side: BorderSide(color: _red.withValues(alpha: 0.45)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 13,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
             ),
@@ -968,8 +1046,9 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        border: Border(left: BorderSide(color: cor, width: 3)),
         color: cor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cor.withValues(alpha: 0.28)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1011,6 +1090,73 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
     if (d.isEmpty) return null;
     final m = RegExp(r'^55(\d{2})(\d{4,5})(\d{4})$').firstMatch(d);
     return m != null ? '+55 (${m[1]}) ${m[2]}-${m[3]}' : '+$d';
+  }
+
+  /// Reenviar não é confirmação nem destrutivo: contorno neutro, a cor fica
+  /// só no ícone (e-mail azul, WhatsApp verde) e some quando desabilitado.
+  ButtonStyle _estiloReenvio(Color icone) => OutlinedButton.styleFrom(
+        foregroundColor: ThemeHelpers.textColor(context),
+        iconColor: icone,
+        side: BorderSide(color: ThemeHelpers.borderColor(context)),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+      );
+
+  /// Campos `filled` leves do formulário de envio — mesma gramática do
+  /// cadastro da ficha: sem borda em repouso, foco na cor da marca.
+  ThemeData _formTheme(BuildContext context) {
+    final base = Theme.of(context);
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final fill = _isDark
+        ? AppColors.background.backgroundTertiaryDarkMode
+        : AppColors.background.backgroundTertiary;
+    final erro = _red;
+    OutlineInputBorder b(Color c, double w) => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide:
+              w == 0 ? BorderSide.none : BorderSide(color: c, width: w),
+        );
+    return base.copyWith(
+      colorScheme: base.colorScheme.copyWith(primary: _accent),
+      textSelectionTheme: TextSelectionThemeData(
+        cursorColor: _accent,
+        selectionColor: _accent.withValues(alpha: 0.18),
+        selectionHandleColor: _accent,
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: fill,
+        isDense: true,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+        labelStyle: TextStyle(
+          color: muted,
+          fontWeight: FontWeight.w600,
+          fontSize: 13.5,
+        ),
+        floatingLabelStyle: TextStyle(
+          color: _accent,
+          fontWeight: FontWeight.w700,
+          fontSize: 13.5,
+        ),
+        hintStyle: TextStyle(
+          color: muted.withValues(alpha: 0.7),
+          fontWeight: FontWeight.w500,
+        ),
+        errorStyle: TextStyle(
+          color: erro,
+          fontWeight: FontWeight.w600,
+          fontSize: 11.5,
+        ),
+        errorMaxLines: 3,
+        border: b(Colors.transparent, 0),
+        enabledBorder: b(Colors.transparent, 0),
+        focusedBorder: b(_accent, 1.6),
+        errorBorder: b(erro.withValues(alpha: 0.75), 1.2),
+        focusedErrorBorder: b(erro, 1.6),
+      ),
+    );
   }
 
   // ─── Envio ───────────────────────────────────────────────────────────────
@@ -1058,13 +1204,30 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
           Container(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
             decoration: BoxDecoration(
-              border: Border(left: BorderSide(color: _warn, width: 3)),
-              color: _warn.withValues(alpha: 0.1),
+              color: _warn.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _warn.withValues(alpha: 0.3)),
             ),
-            child: Text(
-              'Esta ficha já tem assinaturas pendentes. Um novo envio cancela '
-              'os links anteriores no Autentique.',
-              style: t.bodySmall?.copyWith(height: 1.35),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: Icon(
+                    LucideIcons.triangleAlert,
+                    size: 15,
+                    color: _warn,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Esta ficha já tem assinaturas pendentes. Um novo envio '
+                    'cancela os links anteriores no Autentique.',
+                    style: t.bodySmall?.copyWith(height: 1.35),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -1078,7 +1241,6 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
           },
           decoration: InputDecoration(
             labelText: 'Nome no Autentique *',
-            border: const OutlineInputBorder(),
             errorText: nomeVazio ? 'Obrigatório' : null,
           ),
         ),
@@ -1091,7 +1253,6 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
             labelText: 'Mensagem (opcional)',
             hintText: 'Texto exibido ao abrir o link de assinatura',
             alignLabelWithHint: true,
-            border: OutlineInputBorder(),
           ),
         ),
         const SizedBox(height: 22),
@@ -1228,8 +1389,10 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
               ),
             ),
             style: FilledButton.styleFrom(
-              backgroundColor: _green,
+              backgroundColor: _greenFill,
               foregroundColor: Colors.white,
+              disabledBackgroundColor: _greenFill.withValues(alpha: 0.35),
+              disabledForegroundColor: Colors.white.withValues(alpha: 0.85),
               padding: const EdgeInsets.symmetric(vertical: 15),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -1253,40 +1416,49 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
 // ─── Peças ────────────────────────────────────────────────────────────────────
 
 class _SheetHeader extends StatelessWidget {
-  const _SheetHeader({required this.formNumber, required this.onClose});
+  const _SheetHeader({
+    required this.formNumber,
+    required this.onClose,
+    this.compacto = false,
+  });
   final String formNumber;
   final VoidCallback onClose;
+
+  /// Altura curta: some a alça e o sobretítulo.
+  final bool compacto;
 
   @override
   Widget build(BuildContext context) {
     final muted = ThemeHelpers.textSecondaryColor(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 10, 8, 4),
+      padding: EdgeInsets.fromLTRB(20, compacto ? 4 : 10, 8, compacto ? 0 : 4),
       child: Column(
         children: [
-          Container(
-            width: 38,
-            height: 4,
-            margin: const EdgeInsets.only(bottom: 10),
-            decoration: BoxDecoration(
-              color: muted.withValues(alpha: 0.25),
-              borderRadius: BorderRadius.circular(2),
+          if (!compacto)
+            Container(
+              width: 38,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 10),
+              decoration: BoxDecoration(
+                color: muted.withValues(alpha: 0.25),
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
-          ),
           Row(
             children: [
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'ASSINATURAS',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: muted,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 1.6,
-                          ),
-                    ),
+                    if (!compacto)
+                      Text(
+                        'ASSINATURAS',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: muted,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1.6,
+                            ),
+                      ),
                     Text(
                       formNumber.isEmpty
                           ? 'Ficha de venda'
@@ -1318,18 +1490,67 @@ class _SheetSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Mesma silhueta do Status: leituras + barra, ações, reenvio em par e
+    // linhas de signatário (ícone, nome, e-mail, pílula).
     return ListView(
       physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
       children: [
-        const SkeletonBox(height: 16, width: 220, borderRadius: 6),
+        Wrap(
+          spacing: 14,
+          runSpacing: 6,
+          children: const [
+            SkeletonBox(width: 70, height: 18, borderRadius: 6),
+            SkeletonBox(width: 90, height: 18, borderRadius: 6),
+            SkeletonBox(width: 100, height: 18, borderRadius: 6),
+          ],
+        ),
+        const SizedBox(height: 10),
+        const SkeletonBox(height: 5, borderRadius: 3),
         const SizedBox(height: 14),
-        const SkeletonBox(height: 40, borderRadius: 10),
+        Row(
+          children: const [
+            SkeletonBox(width: 110, height: 34, borderRadius: 10),
+            SizedBox(width: 8),
+            SkeletonBox(width: 110, height: 34, borderRadius: 10),
+          ],
+        ),
+        const SizedBox(height: 20),
+        const SkeletonBox(width: 130, height: 12, borderRadius: 6),
+        const SizedBox(height: 10),
+        Row(
+          children: const [
+            Expanded(child: SkeletonBox(height: 46, borderRadius: 12)),
+            SizedBox(width: 10),
+            Expanded(child: SkeletonBox(height: 46, borderRadius: 12)),
+          ],
+        ),
         const SizedBox(height: 22),
-        for (var i = 0; i < 4; i++) ...[
-          const SkeletonBox(height: 54, borderRadius: 10),
-          const SizedBox(height: 10),
-        ],
+        const SkeletonBox(width: 110, height: 12, borderRadius: 6),
+        const SizedBox(height: 6),
+        for (var i = 0; i < 3; i++)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                SkeletonBox(width: 16, height: 16, borderRadius: 4),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SkeletonBox(width: 150, height: 14, borderRadius: 6),
+                      SizedBox(height: 6),
+                      SkeletonBox(width: 180, height: 11, borderRadius: 6),
+                      SizedBox(height: 8),
+                      SkeletonBox(width: 86, height: 18, borderRadius: 999),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }
@@ -1486,14 +1707,13 @@ class _AutoSignerRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final isMandatory = signer.source == 'mandatory';
+    // Tons legíveis também no modo claro (texto do selo).
     final tone = isMandatory
-        ? (isDark ? AppColors.status.greenDarkMode : AppColors.status.green)
-        : (isDark ? AppColors.status.blueDarkMode : AppColors.status.blue);
-    final accent = isDark
-        ? AppColors.primary.primaryDarkMode
-        : AppColors.primary.primary;
+        ? SaleFormTom.sucesso(context).texto
+        : SaleFormTom.info(context).texto;
+    // "VOCÊ" na cor de assinar, como nas linhas do Status.
+    final accent = SaleFormTom.sucesso(context).texto;
     final badge = isMandatory ? 'EMPRESA' : 'PDF';
     final name = signer.name.trim().isEmpty ? signer.email : signer.name;
     return Container(
@@ -1606,6 +1826,37 @@ class _SignatureRow extends StatelessWidget {
     return warn;
   }
 
+  PopupMenuItem<String> _itemMenu(
+    BuildContext context,
+    String value,
+    IconData icon,
+    String label,
+    Color cor,
+  ) {
+    return PopupMenuItem<String>(
+      value: value,
+      height: 44,
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: cor),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                height: 1.2,
+                color: ThemeHelpers.textColor(context),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
@@ -1619,16 +1870,21 @@ class _SignatureRow extends StatelessWidget {
         st == 'expired';
     final nome = signature.signerName?.trim().isNotEmpty == true
         ? signature.signerName!.trim()
-        : (signature.signerEmail ?? '—');
+        : (signature.signerEmail ?? 'Signatário sem nome');
+    final assinadoEm = signature.isSigned && signature.signedAt != null
+        ? DateFormat('dd/MM/yyyy HH:mm', 'pt_BR')
+            .format(signature.signedAt!.toLocal())
+        : null;
+    final fill = SaleFormTom.verdeDeConfirmar();
     return Container(
-      padding: const EdgeInsets.fromLTRB(0, 10, 0, 10),
+      padding: const EdgeInsets.fromLTRB(0, 12, 0, 12),
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
         ),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1672,90 +1928,165 @@ class _SignatureRow extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: t.bodySmall?.copyWith(color: muted),
                       ),
-                    if (signature.isSigned && signature.signedAt != null)
-                      Text(
-                        'Assinado em ${DateFormat('dd/MM/yyyy HH:mm', 'pt_BR').format(signature.signedAt!.toLocal())}',
-                        style: t.labelSmall?.copyWith(color: green),
-                      ),
+                    const SizedBox(height: 6),
+                    // Status em pílula embaixo do nome: a linha de cima fica
+                    // livre para o nome em 320dp.
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        _StatusPill(label: signature.statusLabel, tone: tone),
+                        if (assinadoEm != null)
+                          Text(
+                            'em $assinadoEm',
+                            style: t.labelSmall?.copyWith(
+                              color: green,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                      ],
+                    ),
                   ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                signature.statusLabel.toUpperCase(),
-                style: t.labelSmall?.copyWith(
-                  color: tone,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.8,
                 ),
               ),
               if (!encerrada)
                 PopupMenuButton<String>(
-                    padding: EdgeInsets.zero,
-                    tooltip: 'Ações',
-                    icon: busy || emailing
-                        ? const _Spin()
-                        : Icon(LucideIcons.ellipsisVertical,
-                            size: 18, color: muted),
-                    itemBuilder: (ctx) => [
-                      const PopupMenuItem(
-                        value: 'copy',
-                        child: Text('Copiar link'),
+                  padding: EdgeInsets.zero,
+                  tooltip: 'Ações do signatário',
+                  color: ThemeHelpers.cardBackgroundColor(context),
+                  elevation: 12,
+                  shadowColor: Colors.black.withValues(alpha: 0.25),
+                  constraints:
+                      const BoxConstraints(minWidth: 220, maxWidth: 320),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    side: BorderSide(
+                      color: ThemeHelpers.borderColor(context)
+                          .withValues(alpha: 0.7),
+                    ),
+                  ),
+                  icon: busy || emailing
+                      ? const _Spin()
+                      : Icon(LucideIcons.ellipsisVertical,
+                          size: 18, color: muted),
+                  itemBuilder: (ctx) => [
+                    _itemMenu(
+                      ctx,
+                      'copy',
+                      LucideIcons.copy,
+                      'Copiar link',
+                      muted,
+                    ),
+                    if (onResendEmail != null)
+                      _itemMenu(
+                        ctx,
+                        'email',
+                        LucideIcons.mailPlus,
+                        'Enviar link por e-mail',
+                        blue,
                       ),
-                      if (onResendEmail != null)
-                        const PopupMenuItem(
-                          value: 'email',
-                          child: Text('Enviar link por e-mail'),
-                        ),
-                      const PopupMenuItem(
-                        value: 'wa',
-                        child: Text('Compartilhar no WhatsApp'),
+                    _itemMenu(
+                      ctx,
+                      'wa',
+                      LucideIcons.messageCircle,
+                      'Compartilhar no WhatsApp',
+                      green,
+                    ),
+                    if (onResendWhatsapp != null)
+                      _itemMenu(
+                        ctx,
+                        'resend',
+                        LucideIcons.send,
+                        'Reenviar pelo WhatsApp da empresa',
+                        green,
                       ),
-                      if (onResendWhatsapp != null)
-                        const PopupMenuItem(
-                          value: 'resend',
-                          child: Text('Reenviar pelo WhatsApp da empresa'),
-                        ),
-                    ],
-                    onSelected: (v) {
-                      switch (v) {
-                        case 'copy':
-                          onCopyLink();
-                          break;
-                        case 'email':
-                          onResendEmail?.call();
-                          break;
-                        case 'wa':
-                          onWhatsappManual();
-                          break;
-                        case 'resend':
-                          onResendWhatsapp?.call();
-                          break;
-                      }
-                    },
+                  ],
+                  onSelected: (v) {
+                    switch (v) {
+                      case 'copy':
+                        onCopyLink();
+                        break;
+                      case 'email':
+                        onResendEmail?.call();
+                        break;
+                      case 'wa':
+                        onWhatsappManual();
+                        break;
+                      case 'resend':
+                        onResendWhatsapp?.call();
+                        break;
+                    }
+                  },
                 ),
             ],
           ),
           if (ehVoce && !encerrada) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Padding(
               padding: const EdgeInsets.only(left: 26),
               child: FilledButton.icon(
                 onPressed: busy ? null : onAssinar,
-                icon: const Icon(LucideIcons.penLine, size: 16),
-                label: const Text('Assinar'),
+                icon: const Icon(LucideIcons.penLine, size: 17),
+                label: const FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    'Assinar agora',
+                    maxLines: 1,
+                    softWrap: false,
+                  ),
+                ),
                 style: FilledButton.styleFrom(
-                  backgroundColor: green,
+                  backgroundColor: fill,
                   foregroundColor: Colors.white,
-                  visualDensity: VisualDensity.compact,
+                  disabledBackgroundColor: fill.withValues(alpha: 0.35),
+                  disabledForegroundColor:
+                      Colors.white.withValues(alpha: 0.85),
+                  minimumSize: const Size(0, 46),
+                  elevation: 0,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
               ),
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// Status do signatário em pílula (tom = significado: assinado verde,
+/// visualizado azul, pendente âmbar, recusado vermelho, encerrado neutro).
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.label, required this.tone});
+  final String label;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: isDark ? 0.18 : 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: tone.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        label.toUpperCase(),
+        maxLines: 1,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: tone,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.6,
+              fontSize: 10,
+            ),
       ),
     );
   }
@@ -1866,30 +2197,47 @@ class _SignerFormRow extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 4),
-          TextField(
-            controller: form.name,
-            onChanged: (_) => onChanged(),
-            textCapitalization: TextCapitalization.words,
-            decoration: InputDecoration(
-              labelText: 'Nome no documento${obrigatorio ? ' *' : ''}',
-              hintText: obrigatorio
-                  ? 'Como aparece na assinatura'
-                  : 'Só se esta pessoa for assinar',
-              border: const OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: form.email,
-            onChanged: (_) => onChanged(),
-            keyboardType: TextInputType.emailAddress,
-            decoration: InputDecoration(
-              labelText: 'E-mail (opcional)',
-              hintText: 'Recebe o link por e-mail',
-              border: const OutlineInputBorder(),
-              errorText:
-                  duplicado ? 'Já está na inclusão automática' : null,
-            ),
+          LayoutBuilder(
+            builder: (context, c) {
+              final nome = TextField(
+                controller: form.name,
+                onChanged: (_) => onChanged(),
+                textCapitalization: TextCapitalization.words,
+                decoration: InputDecoration(
+                  labelText: 'Nome no documento${obrigatorio ? ' *' : ''}',
+                  hintText: obrigatorio
+                      ? 'Como aparece na assinatura'
+                      : 'Só se esta pessoa for assinar',
+                ),
+              );
+              final email = TextField(
+                controller: form.email,
+                onChanged: (_) => onChanged(),
+                keyboardType: TextInputType.emailAddress,
+                decoration: InputDecoration(
+                  labelText: 'E-mail (opcional)',
+                  hintText: 'Recebe o link por e-mail',
+                  errorText:
+                      duplicado ? 'Já está na inclusão automática' : null,
+                ),
+              );
+              // Duas colunas só quando cabem os rótulos inteiros (tablet /
+              // paisagem); no celular, um embaixo do outro.
+              if (c.maxWidth >= 520) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: nome),
+                    const SizedBox(width: 10),
+                    Expanded(child: email),
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [nome, const SizedBox(height: 10), email],
+              );
+            },
           ),
         ],
       ),
@@ -1910,6 +2258,7 @@ class _MemberPickerSheetState extends State<_MemberPickerSheet> {
   Timer? _debounce;
   bool _loading = true;
   String? _erro;
+  int _erroStatus = 0;
   List<SaleFormCompanyMember> _items = const [];
   int _seq = 0;
 
@@ -1942,6 +2291,7 @@ class _MemberPickerSheetState extends State<_MemberPickerSheet> {
       } else {
         _items = const [];
         _erro = res.message ?? 'Erro ao buscar membros da empresa.';
+        _erroStatus = res.statusCode;
       }
     });
   }
@@ -1955,6 +2305,97 @@ class _MemberPickerSheetState extends State<_MemberPickerSheet> {
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
     final muted = ThemeHelpers.textSecondaryColor(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accent =
+        isDark ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
+    final hair = ThemeHelpers.borderLightColor(context);
+    OutlineInputBorder borda(Color c, [double w = 1]) => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: c, width: w),
+        );
+
+    final Widget corpo;
+    if (_loading) {
+      // Esqueleto fiel às linhas (iniciais + nome + e-mail).
+      corpo = ListView(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+        children: [
+          for (var i = 0; i < 5; i++)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 9),
+              child: Row(
+                children: const [
+                  SkeletonBox(width: 34, height: 34, borderRadius: 17),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SkeletonBox(width: 150, height: 13, borderRadius: 6),
+                        SizedBox(height: 6),
+                        SkeletonBox(width: 190, height: 11, borderRadius: 6),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      );
+    } else if (_erro != null) {
+      corpo = SingleChildScrollView(
+        child: AppErrorState.fromApi(
+          message: _erro,
+          statusCode: _erroStatus,
+          onRetry: () => _buscar(_q.text),
+          dense: true,
+        ),
+      );
+    } else if (_items.isEmpty) {
+      corpo = SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(24, 12, 24, 28),
+        child: Column(
+          children: [
+            Icon(LucideIcons.searchX, size: 26, color: muted),
+            const SizedBox(height: 10),
+            Text(
+              _q.text.trim().isEmpty
+                  ? 'Nenhum membro da empresa para mostrar.'
+                  : 'Ninguém encontrado para "${_q.text.trim()}". Confira o '
+                      'nome ou busque pelo e-mail.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: muted, height: 1.4),
+            ),
+          ],
+        ),
+      );
+    } else {
+      corpo = ListView.separated(
+        shrinkWrap: true,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: const EdgeInsets.fromLTRB(0, 0, 0, 20),
+        itemCount: _items.length,
+        separatorBuilder: (ctx, i) => Divider(
+          height: 1,
+          indent: 62,
+          endIndent: 16,
+          color: ThemeHelpers.borderLightColor(context),
+        ),
+        itemBuilder: (ctx, i) {
+          final m = _items[i];
+          return _MembroLinha(
+            membro: m,
+            onTap: () => Navigator.of(context).pop(m),
+          );
+        },
+      );
+    }
+
     return Padding(
       padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
       child: ConstrainedBox(
@@ -1975,6 +2416,8 @@ class _MemberPickerSheetState extends State<_MemberPickerSheet> {
                     Expanded(
                       child: Text(
                         'Buscar na empresa',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.w900,
                             ),
@@ -1983,7 +2426,7 @@ class _MemberPickerSheetState extends State<_MemberPickerSheet> {
                     IconButton(
                       tooltip: 'Fechar',
                       onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(LucideIcons.x, size: 20),
+                      icon: Icon(LucideIcons.x, size: 20, color: muted),
                     ),
                   ],
                 ),
@@ -1994,76 +2437,98 @@ class _MemberPickerSheetState extends State<_MemberPickerSheet> {
                   controller: _q,
                   autofocus: true,
                   onChanged: _onChanged,
+                  textInputAction: TextInputAction.search,
                   decoration: InputDecoration(
                     isDense: true,
                     hintText: 'Nome ou e-mail…',
-                    prefixIcon: const Icon(LucideIcons.search, size: 18),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                    prefixIcon:
+                        Icon(LucideIcons.search, size: 18, color: accent),
+                    filled: true,
+                    fillColor: isDark
+                        ? AppColors.background.backgroundTertiaryDarkMode
+                        : AppColors.background.backgroundTertiary,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 13),
+                    border: borda(hair),
+                    enabledBorder: borda(hair),
+                    focusedBorder: borda(accent.withValues(alpha: 0.65), 1.4),
                   ),
                 ),
               ),
-              Flexible(
-                child: _loading
-                    ? ListView(
-                        shrinkWrap: true,
-                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
-                        children: [
-                          for (var i = 0; i < 5; i++) ...[
-                            const SkeletonBox(height: 40, borderRadius: 8),
-                            const SizedBox(height: 8),
-                          ],
-                        ],
-                      )
-                    : _erro != null || _items.isEmpty
-                        ? Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: Text(
-                              _erro ?? 'Ninguém encontrado.',
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(color: muted),
-                            ),
-                          )
-                        : ListView.separated(
-                            shrinkWrap: true,
-                            padding: const EdgeInsets.fromLTRB(0, 0, 0, 20),
-                            itemCount: _items.length,
-                            separatorBuilder: (ctx, i) => Divider(
-                              height: 1,
-                              indent: 16,
-                              endIndent: 16,
-                              color: ThemeHelpers.borderLightColor(context),
-                            ),
-                            itemBuilder: (ctx, i) {
-                              final m = _items[i];
-                              return ListTile(
-                                dense: true,
-                                title: Text(
-                                  m.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                subtitle: m.email.trim().isEmpty
-                                    ? null
-                                    : Text(
-                                        m.email,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                onTap: () => Navigator.of(context).pop(m),
-                              );
-                            },
-                          ),
-              ),
+              Flexible(child: corpo),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Linha de membro: iniciais + nome + e-mail (toque preenche o signatário).
+class _MembroLinha extends StatelessWidget {
+  const _MembroLinha({required this.membro, required this.onTap});
+  final SaleFormCompanyMember membro;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final partes = membro.name.trim().split(RegExp(r'\s+'));
+    final ini = partes.isEmpty || partes.first.isEmpty
+        ? '?'
+        : (partes.length == 1
+                ? partes.first[0]
+                : '${partes.first[0]}${partes.last[0]}')
+            .toUpperCase();
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 9, 16, 9),
+        child: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: muted.withValues(alpha: 0.14),
+                border: Border.all(color: muted.withValues(alpha: 0.3)),
+              ),
+              child: Text(
+                ini,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: ThemeHelpers.textColor(context),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    membro.name.trim().isEmpty ? membro.email : membro.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: ThemeHelpers.textColor(context),
+                    ),
+                  ),
+                  if (membro.email.trim().isNotEmpty)
+                    Text(
+                      membro.email,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: muted),
+                    ),
+                ],
+              ),
+            ),
+            Icon(LucideIcons.chevronRight, size: 18, color: muted),
+          ],
         ),
       ),
     );

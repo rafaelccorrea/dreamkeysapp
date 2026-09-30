@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../services/proposals_dashboard_service.dart';
 import 'pd_common.dart';
@@ -25,17 +26,22 @@ class PdSignatureRail extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = PdTones.of(context);
     final main = [
-      _Station('Em processamento', funnel.processing, t.blue),
-      _Station('Etapa 1 concluída', funnel.etapa1Concluida, t.amber),
-      _Station('Etapa 2 concluída', funnel.etapa2Concluida, t.amber),
-      _Station('Etapa 3 concluída', funnel.etapa3Concluida, t.green),
+      _Station('Em andamento', funnel.processing, t.blue),
+      _Station('Etapa 1 concluída · Comprador', funnel.etapa1Concluida, t.amber),
+      _Station(
+        'Etapa 2 concluída · Proprietário',
+        funnel.etapa2Concluida,
+        t.amber,
+      ),
+      _Station('Etapa 3 concluída · Corretor', funnel.etapa3Concluida, t.green),
       _Station('Finalizada', funnel.finalized, t.green),
     ];
     final exits = [
       _Station('Cancelada', funnel.canceled, t.amber),
       _Station('Excluída', funnel.excluida, t.red),
     ];
-    final max = [...main, ...exits].fold<int>(0, (m, s) => math.max(m, s.value));
+    final max =
+        [...main, ...exits].fold<int>(0, (m, s) => math.max(m, s.value));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -53,7 +59,9 @@ class PdSignatureRail extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(left: 28),
           child: Text(
-            'SAÍDAS',
+            'SAÍRAM DO CAMINHO',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 10.5,
               fontWeight: FontWeight.w800,
@@ -113,11 +121,12 @@ class PdSignatureRail extends StatelessWidget {
                       Expanded(
                         child: Text(
                           s.label,
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
+                            height: 1.25,
                             color: t.text,
                           ),
                         ),
@@ -125,6 +134,7 @@ class PdSignatureRail extends StatelessWidget {
                       const SizedBox(width: 8),
                       Text(
                         pdInt.format(s.value),
+                        maxLines: 1,
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w800,
@@ -198,7 +208,8 @@ class _StationPainter extends CustomPainter {
 }
 
 /// Assinaturas por etapa (assinadas / pendentes / canceladas) + prazos
-/// médios. Os prazos vêm em dias.
+/// médios. Os prazos vêm em dias. Cada etapa diz "x de y assinadas" em
+/// texto — a barra só confirma o que a frase já contou.
 class PdSignatureStages extends StatelessWidget {
   const PdSignatureStages({super.key, required this.signatures});
 
@@ -209,94 +220,52 @@ class PdSignatureStages extends StatelessWidget {
     final t = PdTones.of(context);
     final s = signatures;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: _figure(
-                  t,
-                  pdDays(s.tempoMedioPorSignatario),
-                  'por signatário, em média',
-                ),
-              ),
-              Container(
-                width: 1,
-                margin: const EdgeInsets.symmetric(horizontal: 14),
-                color: t.hairline,
-              ),
-              Expanded(
-                child: _figure(
-                  t,
-                  pdDays(s.tempoMedioAtePropostaConcluida),
-                  'até a proposta concluir',
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        if (s.porEtapa.isEmpty)
-          const PdEmptyLine('Nenhuma assinatura no período.')
-        else
-          for (final e in s.porEtapa)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        'Etapa ${e.etapa}',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w800,
-                          color: t.text,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          '${pdInt.format(e.signed)} assinadas · '
-                          '${pdInt.format(e.pending)} pendentes · '
-                          '${pdInt.format(e.cancelled)} canceladas',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.right,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: t.muted,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  PdStackedBar(
-                    height: 8,
-                    segments: [
-                      PdSegment(e.signed, t.green),
-                      PdSegment(e.pending, t.amber),
-                      PdSegment(e.cancelled, t.muted.withValues(alpha: 0.5)),
-                    ],
-                  ),
-                ],
-              ),
+        PdLedger(
+          gap: 14,
+          children: [
+            PdFigure(
+              value: pdDays(s.tempoMedioPorSignatario),
+              label: 'por signatário',
+              sub: 'tempo médio para cada um assinar',
+              tone: t.blue,
+              size: 22,
             ),
+            PdFigure(
+              value: pdDays(s.tempoMedioAtePropostaConcluida),
+              label: 'até concluir',
+              sub: 'tempo médio até a proposta concluir',
+              tone: t.green,
+              size: 22,
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        if (s.porEtapa.isEmpty)
+          const PdEmptyLine(
+            'Nenhuma assinatura no período.',
+            hint: 'Quando uma proposta for enviada para assinatura, cada '
+                'etapa aparece aqui com quantas já assinaram.',
+            icon: LucideIcons.penLine,
+          )
+        else
+          for (final e in s.porEtapa) _stage(t, e),
         Wrap(
           spacing: 14,
           runSpacing: 4,
           children: [
-            _legend(t, t.green, '${pdInt.format(s.totalAssinadas)} assinadas'),
-            _legend(t, t.amber, '${pdInt.format(s.totalPendentes)} pendentes'),
-            _legend(
-              t,
-              t.muted.withValues(alpha: 0.5),
-              '${pdInt.format(s.totalCanceladas)} canceladas',
+            PdLegendItem(
+              color: t.green,
+              label: pdPlural(s.totalAssinadas, 'assinada', 'assinadas'),
+            ),
+            PdLegendItem(
+              color: t.amber,
+              label: pdPlural(s.totalPendentes, 'pendente', 'pendentes'),
+            ),
+            PdLegendItem(
+              color: t.rest,
+              label: pdPlural(s.totalCanceladas, 'cancelada', 'canceladas'),
             ),
           ],
         ),
@@ -304,54 +273,82 @@ class PdSignatureStages extends StatelessWidget {
     );
   }
 
-  Widget _figure(PdTones t, String value, String label) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text(
-            value,
-            maxLines: 1,
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.5,
-              color: t.text,
+  Widget _stage(PdTones t, ProposalsSignatureStage e) {
+    final extras = <String>[
+      if (e.pending > 0) pdPlural(e.pending, 'pendente', 'pendentes'),
+      if (e.cancelled > 0) pdPlural(e.cancelled, 'cancelada', 'canceladas'),
+    ];
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: 'Etapa ${e.etapa}',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w800,
+                          color: t.text,
+                        ),
+                      ),
+                      TextSpan(
+                        text: ' · ${pdEtapaNome(e.etapa)}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: t.muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${pdInt.format(e.signed)} de ${pdInt.format(e.total)}',
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  color: t.text,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          PdStackedBar(
+            height: 8,
+            segments: [
+              PdSegment(e.signed, t.green),
+              PdSegment(e.pending, t.amber),
+              PdSegment(e.cancelled, t.rest),
+            ],
+          ),
+          if (extras.isNotEmpty) ...[
+            const SizedBox(height: 5),
+            Text(
+              extras.join(' · '),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: t.muted,
+              ),
             ),
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          label,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 11.5,
-            fontWeight: FontWeight.w600,
-            color: t.muted,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _legend(PdTones t, Color c, String label) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        PdDot(color: c),
-        const SizedBox(width: 5),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 11.5,
-            fontWeight: FontWeight.w700,
-            color: t.text,
-          ),
-        ),
-      ],
+          ],
+        ],
+      ),
     );
   }
 }

@@ -1,19 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import 'sale_form_row_rules.dart';
+import 'sale_form_tones.dart';
 
 /// Card de uma ficha de venda na listagem (mobile).
 ///
-/// Sem borda tingida (limitava a leitura): o status vem de uma **faixa de acento
-/// na lateral esquerda**, deixando o card flush e com espaço para informação
-/// rica — comprador, contexto do imóvel, valor + comissão, progresso de
-/// assinatura e rodapé (autoria, data, equipe).
+/// Card flush simples (sem faixa lateral de status — o status vive na
+/// pílula), com a informação que evita abrir a ficha: comprador, tipo e
+/// vendedor, contexto do imóvel, valor + comissão, assinaturas (com a ação
+/// principal ali mesmo: enviar ou revisar) e rodapé (autoria, data, equipe).
 class SaleFormCard extends StatelessWidget {
   const SaleFormCard({
     super.key,
@@ -38,13 +38,14 @@ class SaleFormCard extends StatelessWidget {
 
     final rules = SaleFormRowRules(saleForm);
 
-    final statusTone = _statusTone(context, saleForm.status);
+    final tom = SaleFormTom.doStatus(context, saleForm.status);
     final isCanceled = saleForm.status == SaleFormStatus.canceled;
+    final excluida = saleForm.deletedAt != null;
 
     final money = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
-    final priceText = saleForm.saleValue != null && saleForm.saleValue! > 0
-        ? money.format(saleForm.saleValue!)
-        : '—';
+    final temValor = saleForm.saleValue != null && saleForm.saleValue! > 0;
+    final priceText =
+        temValor ? money.format(saleForm.saleValue!) : 'Não informado';
     final commission = saleForm.totalCommission;
     final commissionText = commission != null && commission > 0
         ? money.format(commission)
@@ -66,8 +67,10 @@ class SaleFormCard extends StatelessWidget {
 
     final sigTotal = saleForm.assinaturasTotal;
     final sigDone = saleForm.assinaturasAssinadas;
-    final showSig = sigTotal > 0 && !isCanceled;
-
+    // Ação principal no próprio item: a mesma "Assinaturas" do menu, com a
+    // mesma regra (update + não finalizada/cancelada/excluída).
+    final podeAssinaturas = onAction != null && rules.showSignatures;
+    final showSig = (sigTotal > 0 && !isCanceled) || podeAssinaturas;
 
     return Material(
       color: Colors.transparent,
@@ -84,15 +87,8 @@ class SaleFormCard extends StatelessWidget {
                 context,
               ).withValues(alpha: isDark ? 0.9 : 0.8),
             ),
-            boxShadow: [
-              if (!isDark)
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 16,
-                  offset: const Offset(0, 5),
-                  spreadRadius: -8,
-                ),
-            ],
+            // Modo claro: só o crisp de 1px — quem separa é a borda.
+            boxShadow: isDark ? null : ThemeHelpers.cardShadow(context),
           ),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(15, 14, 8, 15),
@@ -107,19 +103,25 @@ class SaleFormCard extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
                               _NumberBadge(
                                 accent: accent,
                                 number: saleForm.formNumber,
                               ),
-                              const SizedBox(width: 8),
-                              Flexible(
-                                child: _StatusPill(
-                                  tone: statusTone,
-                                  label: saleForm.statusLabel.toUpperCase(),
-                                ),
+                              _StatusPill(
+                                tom: tom,
+                                label: saleForm.statusLabel.toUpperCase(),
                               ),
+                              if (excluida)
+                                _StatusPill(
+                                  tom: SaleFormTom.erro(context),
+                                  label: 'EXCLUÍDA',
+                                  icon: Icons.delete_outline_rounded,
+                                ),
                             ],
                           ),
                           const SizedBox(height: 8),
@@ -135,18 +137,14 @@ class SaleFormCard extends StatelessWidget {
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
-                          const SizedBox(height: 5),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 4,
-                            crossAxisAlignment: WrapCrossAlignment.center,
+                          const SizedBox(height: 6),
+                          Row(
                             children: [
                               _TypeBadge(label: saleForm.saleFormType.label),
-                              if (sellerName != null && sellerName.isNotEmpty)
-                                ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxWidth: 210,
-                                  ),
+                              if (sellerName != null &&
+                                  sellerName.isNotEmpty) ...[
+                                const SizedBox(width: 8),
+                                Flexible(
                                   child: Text(
                                     'Vendedor: $sellerName',
                                     style: theme.textTheme.bodySmall?.copyWith(
@@ -157,6 +155,7 @@ class SaleFormCard extends StatelessWidget {
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
+                              ],
                             ],
                           ),
                         ],
@@ -172,48 +171,74 @@ class SaleFormCard extends StatelessWidget {
 
                 if (hasPropertyContext) ...[
                   const SizedBox(height: 10),
-                  _PropertyContextLine(code: propCode, location: propLoc),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 7),
+                    child: _PropertyContextLine(
+                      code: propCode,
+                      location: propLoc,
+                    ),
+                  ),
                 ],
 
                 const SizedBox(height: 12),
-                Divider(
-                  height: 1,
-                  thickness: 1,
-                  color: ThemeHelpers.borderLightColor(
-                    context,
-                  ).withValues(alpha: 0.7),
+                Padding(
+                  padding: const EdgeInsets.only(right: 7),
+                  child: Divider(
+                    height: 1,
+                    thickness: 1,
+                    color: ThemeHelpers.borderLightColor(
+                      context,
+                    ).withValues(alpha: 0.7),
+                  ),
                 ),
                 const SizedBox(height: 12),
 
                 // ── Métricas: valor + comissão ─────────────────
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Expanded(
-                      child: _Metric(
-                        label: 'VALOR DA VENDA',
-                        value: priceText,
-                        emphasis: true,
+                Padding(
+                  padding: const EdgeInsets.only(right: 7),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: _Metric(
+                          label: 'VALOR DA VENDA',
+                          value: priceText,
+                          emphasis: true,
+                          vazio: !temValor,
+                        ),
                       ),
-                    ),
-                    if (commissionText != null) ...[
-                      const SizedBox(width: 12),
-                      _Metric(
-                        label: 'COMISSÃO',
-                        value: commissionText,
-                        alignEnd: true,
-                      ),
+                      if (commissionText != null) ...[
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 2,
+                          child: _Metric(
+                            label: 'COMISSÃO',
+                            value: commissionText,
+                            alignEnd: true,
+                          ),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
 
-                // ── Progresso de assinatura ────────────────────
+                // ── Assinaturas (estado + ação principal) ──────
                 if (showSig) ...[
                   const SizedBox(height: 13),
-                  _SignatureProgress(
-                    done: sigDone,
-                    total: sigTotal,
-                    tone: statusTone,
+                  Padding(
+                    padding: const EdgeInsets.only(right: 7),
+                    child: _AssinaturasFaixa(
+                      done: sigDone,
+                      total: sigTotal,
+                      tom: tom,
+                      acao: podeAssinaturas
+                          ? (rules.hasActiveSignatures ? 'Revisar' : 'Enviar')
+                          : null,
+                      onAcao: podeAssinaturas
+                          ? () => onAction!(SaleFormRowAction.assinaturas)
+                          : null,
+                    ),
                   ),
                 ],
 
@@ -234,24 +259,6 @@ class SaleFormCard extends StatelessWidget {
     );
   }
 
-  Color _statusTone(BuildContext context, SaleFormStatus s) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    switch (s) {
-      case SaleFormStatus.finalized:
-        return dark
-            ? AppColors.status.successDarkMode
-            : AppColors.status.success;
-      case SaleFormStatus.canceled:
-        return dark ? AppColors.status.errorDarkMode : AppColors.status.error;
-      case SaleFormStatus.processing:
-        return dark ? AppColors.status.infoDarkMode : AppColors.status.info;
-      case SaleFormStatus.waitingForSignature:
-        return dark
-            ? AppColors.status.warningDarkMode
-            : AppColors.status.warning;
-    }
-  }
-
   static Color? _parseHex(String? c) {
     if (c == null) return null;
     var s = c.trim();
@@ -265,8 +272,9 @@ class SaleFormCard extends StatelessWidget {
 }
 
 /// Placeholder de carregamento — **fiel** ao `SaleFormCard` (mesmo container e
-/// posições: cabeçalho Nº+status, comprador, tipo/vendedor, divisória, métricas
-/// valor+comissão e rodapé). Usado na listagem enquanto `_loading`.
+/// posições: Nº+status, comprador, tipo/vendedor, imóvel, divisória, valor +
+/// comissão, faixa de assinaturas e rodapé). Usado na listagem enquanto
+/// carrega e no fim da lista ao buscar a próxima página.
 class SaleFormCardSkeleton extends StatelessWidget {
   const SaleFormCardSkeleton({super.key});
 
@@ -282,29 +290,23 @@ class SaleFormCardSkeleton extends StatelessWidget {
             context,
           ).withValues(alpha: isDark ? 0.9 : 0.8),
         ),
-        boxShadow: [
-          if (!isDark)
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 16,
-              offset: const Offset(0, 5),
-              spreadRadius: -8,
-            ),
-        ],
+        boxShadow: isDark ? null : ThemeHelpers.cardShadow(context),
       ),
       padding: const EdgeInsets.fromLTRB(15, 14, 15, 15),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Cabeçalho: Nº + status pill
+          // Cabeçalho: Nº + status pill + menu
           Row(
             children: const [
               SkeletonBox(width: 58, height: 20, borderRadius: 6),
-              SizedBox(width: 8),
+              SizedBox(width: 6),
               SkeletonBox(width: 92, height: 20, borderRadius: 999),
+              Spacer(),
+              SkeletonBox(width: 34, height: 34, borderRadius: 10),
             ],
           ),
-          const SizedBox(height: 13),
+          const SizedBox(height: 8),
           // Comprador (título)
           Row(
             children: const [
@@ -322,15 +324,27 @@ class SaleFormCardSkeleton extends StatelessWidget {
               Spacer(flex: 4),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
+          // Imóvel
+          Row(
+            children: const [
+              SkeletonBox(width: 14, height: 14, borderRadius: 4),
+              SizedBox(width: 6),
+              SkeletonBox(width: 60, height: 14, borderRadius: 5),
+              SizedBox(width: 8),
+              Expanded(flex: 5, child: SkeletonText(height: 12)),
+              Spacer(flex: 2),
+            ],
+          ),
+          const SizedBox(height: 13),
           const SkeletonBox(width: double.infinity, height: 1),
-          const SizedBox(height: 14),
+          const SizedBox(height: 13),
           // Métricas: valor + comissão
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: const [
               Expanded(
-                flex: 5,
+                flex: 3,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -341,7 +355,7 @@ class SaleFormCardSkeleton extends StatelessWidget {
                 ),
               ),
               Expanded(
-                flex: 3,
+                flex: 2,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
@@ -353,7 +367,18 @@ class SaleFormCardSkeleton extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
+          // Faixa de assinaturas
+          Row(
+            children: const [
+              SkeletonBox(width: 120, height: 12, borderRadius: 6),
+              Spacer(),
+              SkeletonBox(width: 70, height: 26, borderRadius: 10),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const SkeletonBox(width: double.infinity, height: 5, borderRadius: 3),
+          const SizedBox(height: 15),
           // Rodapé
           Row(
             children: const [
@@ -381,7 +406,9 @@ class _NumberBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
-        number.isEmpty ? '—' : 'Nº $number',
+        number.isEmpty ? 'Sem nº' : 'Nº $number',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: Theme.of(context).textTheme.labelMedium?.copyWith(
           color: accent,
           fontWeight: FontWeight.w900,
@@ -393,29 +420,43 @@ class _NumberBadge extends StatelessWidget {
 }
 
 class _StatusPill extends StatelessWidget {
-  const _StatusPill({required this.tone, required this.label});
-  final Color tone;
+  const _StatusPill({required this.tom, required this.label, this.icon});
+  final SaleFormTom tom;
   final String label;
+  final IconData? icon;
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: tone.withValues(alpha: isDark ? 0.16 : 0.10),
+        color: tom.sinal.withValues(alpha: isDark ? 0.16 : 0.12),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: tone.withValues(alpha: isDark ? 0.4 : 0.28)),
-      ),
-      child: Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-          color: tone,
-          fontWeight: FontWeight.w900,
-          letterSpacing: 0.5,
-          fontSize: 10,
+        border: Border.all(
+          color: tom.sinal.withValues(alpha: isDark ? 0.4 : 0.45),
         ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 11, color: tom.texto),
+            const SizedBox(width: 4),
+          ],
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: tom.texto,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.5,
+                fontSize: 10,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -436,6 +477,7 @@ class _TypeBadge extends StatelessWidget {
       ),
       child: Text(
         label.toUpperCase(),
+        maxLines: 1,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
           color: muted,
           fontWeight: FontWeight.w900,
@@ -461,21 +503,27 @@ class _PropertyContextLine extends StatelessWidget {
         Icon(Icons.home_work_outlined, size: 14, color: muted),
         const SizedBox(width: 6),
         if (hasCode) ...[
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: ThemeHelpers.borderLightColor(
-                context,
-              ).withValues(alpha: 0.8),
-              borderRadius: BorderRadius.circular(5),
-            ),
-            child: Text(
-              'CÓD $code',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: muted,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 0.4,
-                fontSize: 9.5,
+          // Código longo não empurra a localização para fora do card.
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 130),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: ThemeHelpers.borderLightColor(
+                  context,
+                ).withValues(alpha: 0.8),
+                borderRadius: BorderRadius.circular(5),
+              ),
+              child: Text(
+                'CÓD $code',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: muted,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.4,
+                  fontSize: 9.5,
+                ),
               ),
             ),
           ),
@@ -498,22 +546,47 @@ class _PropertyContextLine extends StatelessWidget {
   }
 }
 
-/// Métrica destacada (rótulo pequeno + valor forte).
+/// Métrica destacada (rótulo pequeno + valor forte). O valor nunca vira
+/// reticências: em tela estreita ou fonte grande ele encolhe para caber.
 class _Metric extends StatelessWidget {
   const _Metric({
     required this.label,
     required this.value,
     this.emphasis = false,
     this.alignEnd = false,
+    this.vazio = false,
   });
   final String label;
   final String value;
   final bool emphasis;
   final bool alignEnd;
+  final bool vazio;
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final muted = ThemeHelpers.textSecondaryColor(context);
+    final TextStyle? style;
+    if (vazio) {
+      style = theme.textTheme.titleSmall?.copyWith(
+        fontWeight: FontWeight.w700,
+        color: muted,
+        height: 1.0,
+      );
+    } else if (emphasis) {
+      style = theme.textTheme.headlineSmall?.copyWith(
+        fontWeight: FontWeight.w900,
+        letterSpacing: -0.8,
+        height: 1.0,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      );
+    } else {
+      style = theme.textTheme.titleMedium?.copyWith(
+        fontWeight: FontWeight.w900,
+        letterSpacing: -0.3,
+        height: 1.0,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      );
+    }
     return Column(
       crossAxisAlignment: alignEnd
           ? CrossAxisAlignment.end
@@ -521,6 +594,8 @@ class _Metric extends StatelessWidget {
       children: [
         Text(
           label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: theme.textTheme.labelSmall?.copyWith(
             color: muted,
             fontWeight: FontWeight.w800,
@@ -528,94 +603,153 @@ class _Metric extends StatelessWidget {
             fontSize: 9.5,
           ),
         ),
-        const SizedBox(height: 3),
-        Text(
-          value,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: emphasis
-              ? theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.8,
-                  height: 1.0,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                )
-              : theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.3,
-                  height: 1.0,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
+        const SizedBox(height: 4),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: alignEnd ? Alignment.centerRight : Alignment.centerLeft,
+          child: Text(value, maxLines: 1, softWrap: false, style: style),
         ),
       ],
     );
   }
 }
 
-/// Progresso de assinatura — barra fina + contagem (done/total).
-class _SignatureProgress extends StatelessWidget {
-  const _SignatureProgress({
+/// Faixa de assinaturas: quantas assinaram (barra + contagem) e a ação
+/// principal da ficha no próprio card — "Enviar" (nada enviado ainda) ou
+/// "Revisar" (acompanhar/reenviar).
+class _AssinaturasFaixa extends StatelessWidget {
+  const _AssinaturasFaixa({
     required this.done,
     required this.total,
-    required this.tone,
+    required this.tom,
+    this.acao,
+    this.onAcao,
   });
   final int done;
   final int total;
-  final Color tone;
+  final SaleFormTom tom;
+  final String? acao;
+  final VoidCallback? onAcao;
+
   @override
   Widget build(BuildContext context) {
     final muted = ThemeHelpers.textSecondaryColor(context);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final frac = total == 0 ? 0.0 : (done / total).clamp(0.0, 1.0);
+    final text = ThemeHelpers.textColor(context);
+    final ok = SaleFormTom.sucesso(context);
+    final semEnvio = total == 0;
     final complete = total > 0 && done >= total;
-    final color = complete
-        ? (isDark ? AppColors.status.successDarkMode : AppColors.status.success)
-        : tone;
+    final cor = complete ? ok : tom;
+    final frac = total == 0 ? 0.0 : (done / total).clamp(0.0, 1.0);
+    final rotulo = semEnvio
+        ? 'Ainda não enviada para assinatura'
+        : complete
+        ? 'Assinaturas concluídas'
+        : 'Assinaturas';
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
             Icon(
               complete ? Icons.verified_rounded : Icons.draw_outlined,
-              size: 13,
-              color: color,
+              size: 14,
+              color: semEnvio ? muted : cor.texto,
             ),
             const SizedBox(width: 6),
-            Text(
-              complete ? 'ASSINATURAS CONCLUÍDAS' : 'ASSINATURAS',
-              style: TextStyle(
-                fontSize: 9.5,
-                fontWeight: FontWeight.w900,
-                color: muted,
-                letterSpacing: 1.0,
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(text: rotulo),
+                    if (!semEnvio)
+                      TextSpan(
+                        text: '  $done/$total',
+                        style: TextStyle(
+                          color: cor.texto,
+                          fontWeight: FontWeight.w900,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                  ],
+                ),
+                // Duas linhas: ao lado do botão, em 320dp, o rótulo quebra
+                // em vez de virar reticências.
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.25,
+                  fontWeight: FontWeight.w800,
+                  color: semEnvio ? muted : text,
+                ),
               ),
             ),
-            const Spacer(),
-            Text(
-              '$done/$total',
-              style: TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w900,
-                color: color,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
+            if (acao != null && onAcao != null) ...[
+              const SizedBox(width: 8),
+              _AcaoCompacta(label: acao!, tom: ok, onTap: onAcao!),
+            ],
           ],
         ),
-        const SizedBox(height: 6),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(3),
-          child: LinearProgressIndicator(
-            value: frac,
-            minHeight: 5,
-            backgroundColor: ThemeHelpers.borderLightColor(
-              context,
-            ).withValues(alpha: 0.9),
-            valueColor: AlwaysStoppedAnimation(color),
+        if (!semEnvio) ...[
+          const SizedBox(height: 7),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: frac,
+              minHeight: 5,
+              backgroundColor: ThemeHelpers.borderLightColor(
+                context,
+              ).withValues(alpha: 0.9),
+              valueColor: AlwaysStoppedAnimation(cor.sinal),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Botão tonal curto dentro do card (não compete com o toque do card).
+class _AcaoCompacta extends StatelessWidget {
+  const _AcaoCompacta({
+    required this.label,
+    required this.tom,
+    required this.onTap,
+  });
+  final String label;
+  final SaleFormTom tom;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Material(
+      color: tom.sinal.withValues(alpha: isDark ? 0.18 : 0.12),
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 6, 8, 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.draw_outlined, size: 14, color: tom.texto),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: tom.texto,
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, size: 16, color: tom.texto),
+            ],
           ),
         ),
-      ],
+      ),
     );
   }
 }
@@ -729,27 +863,26 @@ class SaleFormActionsMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     final muted = ThemeHelpers.textSecondaryColor(context);
     final textColor = ThemeHelpers.textColor(context);
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final danger =
-        dark ? AppColors.status.errorDarkMode : AppColors.status.error;
-    final warn =
-        dark ? AppColors.status.warningDarkMode : AppColors.status.warning;
-    final info = dark ? AppColors.status.infoDarkMode : AppColors.status.info;
-    final ok =
-        dark ? AppColors.status.successDarkMode : AppColors.status.success;
+    final danger = SaleFormTom.erro(context).texto;
+    final warn = SaleFormTom.aviso(context).texto;
+    final info = SaleFormTom.info(context).texto;
+    final ok = SaleFormTom.sucesso(context).texto;
     final role = ModuleAccessService.instance.userRole;
     final deleted = rules.form.deletedAt != null;
     final motivo = rules.auditMotivo;
 
     return PopupMenuButton<SaleFormRowAction>(
-      tooltip: 'Ações',
+      tooltip: 'Ações da ficha',
       padding: EdgeInsets.zero,
       splashRadius: 20,
       offset: const Offset(0, 10),
       color: ThemeHelpers.cardBackgroundColor(context),
       elevation: 12,
       shadowColor: Colors.black.withValues(alpha: 0.25),
-      constraints: const BoxConstraints(minWidth: 236, maxWidth: 300),
+      // Largo o bastante para "Cancelar assinaturas (reenvio)" inteiro; o
+      // overlay do menu já se limita à largura da tela. Rótulo que ainda
+      // assim não couber (fonte grande) quebra em 2 linhas.
+      constraints: const BoxConstraints(minWidth: 240, maxWidth: 320),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
@@ -857,19 +990,31 @@ class SaleFormActionsMenu extends StatelessWidget {
           Expanded(
             child: Text(
               label,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontWeight: FontWeight.w700, color: textColor),
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: textColor,
+                height: 1.2,
+              ),
             ),
           ),
           if (hint != null) ...[
             const SizedBox(width: 8),
-            Text(
-              hint,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: textColor,
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: textColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                hint,
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w800,
+                  color: textColor,
+                ),
               ),
             ),
           ],

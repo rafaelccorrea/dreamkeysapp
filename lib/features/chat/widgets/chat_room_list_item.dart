@@ -1,9 +1,22 @@
 import 'package:flutter/material.dart';
-import '../../../core/theme/theme_helpers.dart';
-import '../../../core/theme/app_colors.dart';
-import '../models/chat_models.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-/// Widget para item da lista de conversas
+import '../../../core/theme/theme_helpers.dart';
+import '../../whatsapp/widgets/whatsapp_conversation_card.dart'
+    show WhatsAppAvatar;
+import '../models/chat_models.dart';
+import 'chat_visual.dart';
+
+/// Linha da lista de conversas do chat interno (30/09/2026) — a gramática do
+/// WhatsApp do app: linha flush sem cartão, avatar com foto ou iniciais,
+/// nome em alto contraste, hora curta à direita, prévia da última mensagem e
+/// selo de não lidas. O filete começa depois do avatar, nunca embaixo dele.
+///
+/// Sinais que evitam um toque a mais: ícone de grupo antes do nome, sino
+/// cortado quando a conversa está silenciada (mensagem nova ali não acende o
+/// aviso do chat), hora e prévia em destaque quando há não lidas. Antes era
+/// um cartão com borda e um ponto verde de "online" fixo em toda conversa
+/// direta — que não dizia nada (não havia dado de presença por trás).
 class ChatRoomListItem extends StatelessWidget {
   final ChatRoom room;
   final String? currentUserId;
@@ -18,172 +31,157 @@ class ChatRoomListItem extends StatelessWidget {
     required this.onTap,
   });
 
-  String _formatDateTime(DateTime? dateTime) {
-    if (dateTime == null) return '';
-
-    // A data vem do backend em UTC, precisamos converter para local
-    // Se a data já está em UTC (isUtc = true), usar toLocal()
-    // Caso contrário, assumir que já está em local
-    final localTime = dateTime.isUtc ? dateTime.toLocal() : dateTime;
-    final now = DateTime.now();
-    final difference = now.difference(localTime);
-
-    if (difference.inDays == 0) {
-      // Hoje - mostrar apenas hora
-      return '${localTime.hour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}';
-    } else if (difference.inDays == 1) {
-      return 'Ontem';
-    } else if (difference.inDays < 7) {
-      // Esta semana - mostrar dia da semana
-      final days = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-      return days[localTime.weekday % 7];
-    } else {
-      // Mais antigo - mostrar data
-      return '${localTime.day}/${localTime.month}';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final ink = chatInk(context);
+
     final displayName = room.getDisplayName(currentUserId);
     final displayImage = room.getDisplayImage(currentUserId);
+    final unread = room.unreadCount ?? 0;
+    final hasUnread = unread > 0;
+    final isMuted = room.isMuted == true;
+    final isGroup = room.type == ChatRoomType.group;
+    final isSupport = room.type == ChatRoomType.support;
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8, left: 12, right: 12, top: 8),
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: isSelected
-              ? AppColors.primary.primary
-              : ThemeHelpers.borderLightColor(context),
-          width: isSelected ? 1.5 : 1,
-        ),
-      ),
-      color: isSelected
-          ? AppColors.primary.primary.withOpacity(0.05)
-          : ThemeHelpers.cardBackgroundColor(context),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            children: [
-              // Avatar
-              Stack(
-                children: [
-                  CircleAvatar(
-                    radius: 24,
-                    backgroundImage: displayImage != null
-                        ? NetworkImage(displayImage)
-                        : null,
-                    child: displayImage == null
-                        ? Text(
-                            displayName.isNotEmpty
-                                ? displayName[0].toUpperCase()
-                                : '?',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          )
-                        : null,
+    final preview = chatPreviewText(room.lastMessage);
+    final time = chatShortTime(room.lastMessageAt);
+
+    final semantics = StringBuffer(
+      isGroup ? 'Grupo $displayName' : 'Conversa com $displayName',
+    );
+    if (hasUnread) {
+      semantics.write(
+        unread == 1 ? ', 1 mensagem não lida' : ', $unread mensagens não lidas',
+      );
+    }
+    if (isMuted) semantics.write(', silenciada');
+
+    return Semantics(
+      button: true,
+      selected: isSelected,
+      label: semantics.toString(),
+      excludeSemantics: true,
+      child: Material(
+        color: isSelected ? chatSelectedFill(context) : Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: WhatsAppAvatar(
+                    name: displayName,
+                    imageUrl: displayImage,
+                    size: 52,
                   ),
-                  // Indicador de status online (para conversas diretas)
-                  if (room.type == ChatRoomType.direct)
-                    Positioned(
-                      right: 0,
-                      bottom: 0,
-                      child: Container(
-                        width: 14,
-                        height: 14,
-                        decoration: BoxDecoration(
-                          color: ThemeHelpers.backgroundColor(context),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Center(
-                          child: Container(
-                            width: 10,
-                            height: 10,
-                            decoration: const BoxDecoration(
-                              color: Colors.green,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        ),
-                      ),
+                ),
+                // O filete pertence à coluna de texto: começa depois do avatar
+                // e vai até a borda direita.
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(0, 13, 16, 13),
+                    decoration: BoxDecoration(
+                      border: Border(bottom: chatHairline(context)),
                     ),
-                ],
-              ),
-              const SizedBox(width: 12),
-              // Conteúdo
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          child: Text(
-                            displayName,
-                            style: theme.textTheme.bodyLarge?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: isSelected
-                                  ? AppColors.primary.primary
-                                  : ThemeHelpers.textColor(context),
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (room.lastMessageAt != null)
-                          Text(
-                            _formatDateTime(room.lastMessageAt),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: ThemeHelpers.textSecondaryColor(context),
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            room.lastMessage ?? 'Nenhuma mensagem',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: ThemeHelpers.textSecondaryColor(context),
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (room.unreadCount != null && room.unreadCount! > 0)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.primary.primary,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              room.unreadCount! > 99
-                                  ? '99+'
-                                  : '${room.unreadCount}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            if (isGroup || isSupport) ...[
+                              Icon(
+                                isGroup
+                                    ? LucideIcons.usersRound
+                                    : LucideIcons.lifeBuoy,
+                                size: 14,
+                                color: secondary,
+                              ),
+                              const SizedBox(width: 5),
+                            ],
+                            Expanded(
+                              child: Text(
+                                displayName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: hasUnread
+                                      ? FontWeight.w800
+                                      : FontWeight.w700,
+                                  color: textColor,
+                                  letterSpacing: -0.3,
+                                  height: 1.2,
+                                ),
                               ),
                             ),
-                          ),
+                            if (time.isNotEmpty) ...[
+                              const SizedBox(width: 8),
+                              Text(
+                                time,
+                                maxLines: 1,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: hasUnread ? ink : secondary,
+                                  fontWeight: hasUnread
+                                      ? FontWeight.w800
+                                      : FontWeight.w500,
+                                  height: 1.2,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                preview.isNotEmpty
+                                    ? preview
+                                    : 'Nenhuma mensagem ainda',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: hasUnread ? textColor : secondary,
+                                  fontWeight: hasUnread
+                                      ? FontWeight.w600
+                                      : FontWeight.w400,
+                                  height: 1.3,
+                                  letterSpacing: -0.1,
+                                ),
+                              ),
+                            ),
+                            if (isMuted) ...[
+                              const SizedBox(width: 6),
+                              Tooltip(
+                                message: 'Silenciada: não acende o aviso',
+                                child: Icon(
+                                  LucideIcons.bellOff,
+                                  size: 15,
+                                  color: secondary,
+                                ),
+                              ),
+                            ],
+                            if (hasUnread) ...[
+                              const SizedBox(width: 8),
+                              ChatUnreadBadge(count: unread),
+                            ],
+                          ],
+                        ),
                       ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
