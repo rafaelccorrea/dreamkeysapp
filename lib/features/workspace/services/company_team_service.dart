@@ -104,11 +104,16 @@ class CompanyTeamService {
     String? description,
     required String color,
     List<Map<String, String>> members = const [],
+    String? unitId,
   }) async {
     try {
       final body = <String, dynamic>{
         'name': name,
         'color': color,
+        // Obrigatório no back (`CreateTeamDto.unitId`): toda equipe pertence
+        // a uma unidade (filial).
+        if (unitId != null && unitId.trim().isNotEmpty)
+          'unitId': unitId.trim(),
         if (description != null && description.trim().isNotEmpty)
           'description': description.trim(),
         if (members.isNotEmpty) 'members': members,
@@ -141,10 +146,14 @@ class CompanyTeamService {
     bool? isActive,
     bool? useInSaleForms,
     List<Map<String, String>>? members,
+    String? unitId,
   }) async {
     try {
       final body = <String, dynamic>{};
       if (name != null) body['name'] = name;
+      if (unitId != null && unitId.trim().isNotEmpty) {
+        body['unitId'] = unitId.trim();
+      }
       if (description != null) body['description'] = description;
       if (color != null) body['color'] = color;
       if (isActive != null) body['isActive'] = isActive;

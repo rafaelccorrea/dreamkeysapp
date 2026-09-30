@@ -6,6 +6,8 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../../../../shared/services/cep_service.dart';
 import '../../../../shared/services/property_service.dart';
+import '../utils/property_status_visual.dart';
+import '../utils/property_type_visual.dart';
 
 /// Drawer de filtros avançados — identidade visual alinhada com o painel
 /// "Atalhos do corretor" do hero da `PropertiesPage`:
@@ -661,35 +663,11 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
     );
   }
 
-  IconData _propertyTypeIcon(PropertyType type) {
-    switch (type) {
-      case PropertyType.house:
-        return LucideIcons.home;
-      case PropertyType.apartment:
-        return LucideIcons.building2;
-      case PropertyType.commercial:
-        return LucideIcons.store;
-      case PropertyType.land:
-        return LucideIcons.trees;
-      case PropertyType.rural:
-        return LucideIcons.trees;
-    }
-  }
+  // Os 16 tipos do back (paridade `PropertyTypeOptions` do web).
+  IconData _propertyTypeIcon(PropertyType type) =>
+      PropertyTypeVisual.lucide(type);
 
-  Color _propertyTypeTone(PropertyType type) {
-    switch (type) {
-      case PropertyType.house:
-        return const Color(0xFF10B981);
-      case PropertyType.apartment:
-        return const Color(0xFF3B82F6);
-      case PropertyType.commercial:
-        return const Color(0xFFF59E0B);
-      case PropertyType.land:
-        return const Color(0xFF84CC16);
-      case PropertyType.rural:
-        return const Color(0xFFA16207);
-    }
-  }
+  Color _propertyTypeTone(PropertyType type) => PropertyTypeVisual.tone(type);
 
   IconData _propertyStatusIcon(PropertyStatus status) {
     switch (status) {
@@ -707,6 +685,9 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
         return LucideIcons.tag;
       case PropertyStatus.maintenance:
         return LucideIcons.wrench;
+      default:
+        // Aguardando publicação e etapas do funil de locação.
+        return PropertyStatusVisual.of(status).icon;
     }
   }
 
@@ -725,6 +706,8 @@ class _PropertyFiltersDrawerState extends State<PropertyFiltersDrawer> {
         return const Color(0xFF8B5CF6);
       case PropertyStatus.maintenance:
         return const Color(0xFFEF4444);
+      default:
+        return PropertyStatusVisual.of(status).color;
     }
   }
 }

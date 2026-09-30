@@ -134,8 +134,13 @@ class _PublicSitePageState extends State<PublicSitePage> {
         return isDark
             ? AppColors.status.warningDarkMode
             : AppColors.status.warning;
+      // 29/09/2026: "Emitindo HTTPS" é processamento do nosso lado (azul,
+      // como a revisão); "Falhou" é erro (vermelho). Sem estes casos o
+      // switch exaustivo não compila desde que o enum ganhou os dois.
+      case PublicSiteDomainStatus.pendingSsl:
       case PublicSiteDomainStatus.pendingReview:
         return isDark ? AppColors.status.infoDarkMode : AppColors.status.info;
+      case PublicSiteDomainStatus.failed:
       case PublicSiteDomainStatus.disabled:
         return isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
     }
@@ -314,24 +319,40 @@ class _PublicSitePageState extends State<PublicSitePage> {
     );
   }
 
+  /// Formato mínimo de e-mail (algo@dominio.tld) — o `@IsEmail` do back é a
+  /// palavra final; isto só evita a ida e volta no erro óbvio.
+  static final RegExp _emailPattern = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
+
   Future<void> _saveContent() async {
     final cfg = _config;
     if (cfg == null || _contentSaving) return;
+
+    // 29/09/2026 (integ-03): o e-mail NÃO é obrigatório (igual ao web e ao
+    // DTO, `@IsOptional`). Só é validado quando preenchido; vazio vai como
+    // `null` (o toJson cuida) e o save passa. Antes o app mandava '' e o
+    // `@IsEmail` do back devolvia 400 — empresa sem e-mail não salvava nada
+    // desta aba.
+    final email = _emailController.text.trim();
+    if (email.isNotEmpty && !_emailPattern.hasMatch(email)) {
+      _showSnack('E-mail inválido — corrija ou deixe o campo vazio');
+      return;
+    }
     setState(() => _contentSaving = true);
 
-    final content = PublicSiteContent(
+    // Parte do conteúdo carregado; o toJson manda só os campos desta aba e o
+    // merge raso do back preserva o resto (redes sociais, endereço, selos,
+    // cabeçalho, GA…) do jeito que o web salvou.
+    final content = cfg.content.copyWith(
       tagline: _taglineController.text.trim(),
       aboutText: _aboutController.text.trim(),
       whatsapp: _whatsappController.text.trim(),
       phone: _phoneController.text.trim(),
-      email: _emailController.text.trim(),
-      socialLinks: cfg.content.socialLinks,
+      email: email,
       ctaText: _ctaController.text.trim(),
     );
-    final seo = PublicSiteSeo(
+    final seo = cfg.seo.copyWith(
       title: _seoTitleController.text.trim(),
       description: _seoDescriptionController.text.trim(),
-      gaMeasurementId: cfg.seo.gaMeasurementId,
     );
 
     final res = await PublicSiteService.instance.updateConfig({
@@ -365,9 +386,13 @@ class _PublicSitePageState extends State<PublicSitePage> {
       _domainSaving = false;
       if (res.success && res.data != null) _applyConfig(res.data!);
     });
+    // 29/09/2026 (integ-02): o sucesso dizia "configure o CNAME"; agora diz
+    // os registros que o back pede de verdade (A em www e em @ hoje).
+    final dns = _dns ?? PublicSiteDnsInstructions.fromJson(null);
     _showSnack(
       res.success
-          ? 'Domínio salvo — configure o CNAME e verifique a propagação'
+          ? 'Domínio salvo — crie ${dns.recordsToCreateLabel} e toque em '
+                '"Verificar DNS"'
           : (res.message ?? 'Erro ao salvar domínio'),
     );
   }
@@ -386,7 +411,8 @@ class _PublicSitePageState extends State<PublicSitePage> {
             ? res.data!.message
             : (res.data!.verified
                   ? 'Domínio verificado e ativo'
-                  : 'CNAME ainda não propagou — tente de novo em alguns minutos'),
+                  : 'O DNS ainda não propagou — tente de novo em alguns '
+                        'minutos'),
       );
     } else {
       setState(() => _dnsVerifying = false);
@@ -1036,7 +1062,7 @@ class _PublicSitePageState extends State<PublicSitePage> {
         return (
           icon: LucideIcons.globe,
           title: 'Endereço do site',
-          hint: 'Aponte o seu domínio com um CNAME e ative automaticamente.',
+          hint: 'Aponte o seu domínio com os registros DNS e ative automaticamente.',
         );
     }
   }
@@ -1586,6 +1612,14 @@ class _PublicSitePageState extends State<PublicSitePage> {
     final domainTone = _domainStatusColor(context, cfg.domainStatus);
     final dns = _dns ?? PublicSiteDnsInstructions.fromJson(null);
     final isActive = cfg.domainStatus == PublicSiteDomainStatus.active;
+    // 29/09/2026 (integ-02): o aviso dizia "Aguardando o CNAME propagar"
+    // logo acima dos cartões de registro A. Agora cita o que o back pede:
+    // hoje, registro A em www E em @ (criados juntos).
+    final twoARecords = dns.needsRootRecord;
+    final pendingHint =
+        'Crie ${dns.recordsToCreateLabel} no seu provedor e toque em '
+        '"Verificar DNS" — quando o DNS propagar, o domínio é ativado '
+        'sozinho.';
 
     return _panelShell(context, _SiteTab.domain, [
       if (!_canManage)
@@ -1698,8 +1732,7 @@ class _PublicSitePageState extends State<PublicSitePage> {
                       isActive
                           ? 'Domínio ativo — o site responde em '
                                 '${cfg.customDomain!.trim()}.'
-                          : 'Aguardando o CNAME propagar. Salve o registro no '
-                                'seu provedor e toque em "Verificar DNS".',
+                          : pendingHint,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: secondary,
                         height: 1.35,
@@ -1713,54 +1746,32 @@ class _PublicSitePageState extends State<PublicSitePage> {
         ),
       ],
       const SizedBox(height: 18),
-      const SiteSubsectionHeader(
-        label: 'Registro CNAME',
+      // 29/09/2026 (integ-02): tipo, host e valor vêm do payload do back
+      // (`recordType/recordHost/recordValue`). Hoje é registro A para o IP,
+      // em `www` E em `@` (raiz), criados juntos — o card antigo mostrava
+      // "CNAME → sites.intellisysbr.com" fixo e o domínio nunca ativava.
+      SiteSubsectionHeader(
+        label: twoARecords ? 'Registros A' : 'Registro ${dns.recordType}',
         icon: LucideIcons.network,
       ),
       const SizedBox(height: 12),
-      SiteCard(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        child: Column(
-          children: [
-            SiteInfoRow(icon: LucideIcons.tag, label: 'Tipo', value: 'CNAME'),
-            Divider(height: 1, color: ThemeHelpers.borderLightColor(context)),
-            SiteInfoRow(
-              icon: LucideIcons.atSign,
-              label: 'Host / Nome',
-              value: 'www',
-              actions: [
-                SiteRowAction(
-                  icon: LucideIcons.copy,
-                  tooltip: 'Copiar host',
-                  tone: tone,
-                  onTap: () => _copyText('www', feedback: 'Host copiado'),
-                ),
-              ],
-            ),
-            Divider(height: 1, color: ThemeHelpers.borderLightColor(context)),
-            SiteInfoRow(
-              icon: LucideIcons.arrowRight,
-              label: 'Aponta para',
-              value: dns.cnameTarget,
-              actions: [
-                SiteRowAction(
-                  icon: LucideIcons.copy,
-                  tooltip: 'Copiar destino',
-                  tone: tone,
-                  onTap: () =>
-                      _copyText(dns.cnameTarget, feedback: 'Destino copiado'),
-                ),
-              ],
-            ),
-            Divider(height: 1, color: ThemeHelpers.borderLightColor(context)),
-            SiteInfoRow(
-              icon: LucideIcons.timer,
-              label: 'TTL recomendado',
-              value: dns.ttlRecommendation,
-            ),
-          ],
-        ),
+      _buildDnsRecordCard(
+        context,
+        dns: dns,
+        host: dns.recordHost,
+        tone: tone,
+        caption: twoARecords ? 'Registro 1 · subdomínio' : null,
       ),
+      if (twoARecords) ...[
+        const SizedBox(height: 10),
+        _buildDnsRecordCard(
+          context,
+          dns: dns,
+          host: '@',
+          tone: tone,
+          caption: 'Registro 2 · domínio raiz (crie junto)',
+        ),
+      ],
       const SizedBox(height: 10),
       Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1786,7 +1797,155 @@ class _PublicSitePageState extends State<PublicSitePage> {
       ),
       const SizedBox(height: 12),
       for (final step in dns.steps) _buildDnsStep(context, step, tone),
+      if (dns.providerHints.isNotEmpty) ...[
+        const SizedBox(height: 6),
+        const SiteSubsectionHeader(
+          label: 'Onde criar, por provedor',
+          icon: LucideIcons.server,
+        ),
+        const SizedBox(height: 12),
+        for (final hint in dns.providerHints)
+          _buildProviderHint(context, hint, tone),
+      ],
     ]);
+  }
+
+  /// Cartão de um registro DNS (tipo · host · valor · TTL), com copiar em
+  /// host e valor. Usado duas vezes no registro A: `www` e `@`.
+  Widget _buildDnsRecordCard(
+    BuildContext context, {
+    required PublicSiteDnsInstructions dns,
+    required String host,
+    required Color tone,
+    String? caption,
+  }) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (caption != null) ...[
+          Text(
+            caption,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: secondary,
+              letterSpacing: 0.2,
+            ),
+          ),
+          const SizedBox(height: 6),
+        ],
+        SiteCard(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          child: Column(
+            children: [
+              SiteInfoRow(
+                icon: LucideIcons.tag,
+                label: 'Tipo',
+                value: dns.recordType,
+              ),
+              Divider(height: 1, color: ThemeHelpers.borderLightColor(context)),
+              SiteInfoRow(
+                icon: LucideIcons.atSign,
+                label: 'Host / Nome',
+                value: host,
+                actions: [
+                  SiteRowAction(
+                    icon: LucideIcons.copy,
+                    tooltip: 'Copiar host',
+                    tone: tone,
+                    onTap: () => _copyText(host, feedback: 'Host copiado'),
+                  ),
+                ],
+              ),
+              Divider(height: 1, color: ThemeHelpers.borderLightColor(context)),
+              SiteInfoRow(
+                icon: LucideIcons.arrowRight,
+                label: dns.isARecord ? 'Aponta para (IP)' : 'Aponta para',
+                value: dns.recordValue,
+                actions: [
+                  SiteRowAction(
+                    icon: LucideIcons.copy,
+                    tooltip: 'Copiar valor',
+                    tone: tone,
+                    onTap: () => _copyText(
+                      dns.recordValue,
+                      feedback: 'Valor copiado',
+                    ),
+                  ),
+                ],
+              ),
+              Divider(height: 1, color: ThemeHelpers.borderLightColor(context)),
+              SiteInfoRow(
+                icon: LucideIcons.timer,
+                label: 'TTL recomendado',
+                value: dns.ttlRecommendation,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProviderHint(
+    BuildContext context,
+    PublicSiteDnsProviderHint hint,
+    Color tone,
+  ) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final url = hint.url?.trim() ?? '';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Icon(LucideIcons.server, size: 14, color: tone),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  hint.name,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: ThemeHelpers.textColor(context),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  hint.hint,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: secondary,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (url.isNotEmpty)
+            SiteRowAction(
+              icon: LucideIcons.externalLink,
+              tooltip: 'Abrir ${hint.name}',
+              tone: tone,
+              onTap: () async {
+                final uri = Uri.tryParse(url);
+                if (uri == null) return;
+                final ok = await launchUrl(
+                  uri,
+                  mode: LaunchMode.externalApplication,
+                );
+                if (!ok) _showSnack('Não foi possível abrir ${hint.name}');
+              },
+            ),
+        ],
+      ),
+    );
   }
 
   Widget _buildDnsStep(

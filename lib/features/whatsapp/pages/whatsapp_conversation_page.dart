@@ -1,30 +1,44 @@
 import 'dart:async';
+import 'dart:math' show max;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
+import '../../../shared/services/secure_storage_service.dart';
+import '../../../shared/utils/jwt_utils.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../notifications/services/notification_websocket_service.dart';
+import '../models/whatsapp_anexos.dart';
+import '../models/whatsapp_midia.dart';
 import '../models/whatsapp_models.dart';
 import '../services/whatsapp_service.dart';
+import '../widgets/whatsapp_bandeja_de_anexos.dart';
 import '../widgets/whatsapp_conversation_card.dart'
     show WhatsAppAvatar, whatsAppSourceIcon;
 import '../widgets/whatsapp_message_bubble.dart';
 import '../widgets/whatsapp_send_template_sheet.dart';
 
 /// Tela **Conversa do WhatsApp** (`/whatsapp/:phoneNumber`) — thread de
-/// mensagens de um contato, com envio de texto (canal oficial ou QR Code) e
-/// de template quando a janela de 24h da API oficial está fechada.
+/// mensagens de um contato, com envio de texto e anexos (canal oficial ou
+/// QR Code) e de template quando a janela de 24h da API oficial está fechada.
 ///
 /// Paridade com o `WhatsAppConversationViewer.tsx` do painel:
 /// - mensagens do backend em ordem desc (paginação por offset);
 /// - marca as recebidas como lidas ao abrir;
-/// - texto livre só com QR Code ativo OU janela de 24h aberta;
+/// - texto livre e anexos só com QR Code ativo OU janela de 24h aberta;
+/// - anexos em fila (até 30), cada um uma mensagem, texto como legenda do
+///   primeiro (29/09/2026);
+/// - mídia recebida: imagem em tela cheia, áudio/vídeo tocam, documento abre
+///   (29/09/2026);
+/// - "Assumir conversa" para quem não é o responsável (29/09/2026);
 /// - "Finalizar conversa" tira a thread das abas ativas.
 class WhatsAppConversationPage extends StatefulWidget {
   final String phoneNumber;
@@ -61,10 +75,53 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
   WhatsAppIntegrationStatus? _integrationStatus;
   Timer? _pollTimer;
 
+  /// Usuário logado — decide se "Assumir conversa" aparece (29/09/2026).
+  String? _currentUserId;
+  bool _assumindo = false;
+
+  /// Fila de anexos do composer, na ordem de envio (29/09/2026).
+  List<WhatsAppAnexo> _anexos = const [];
+  bool _preparandoAnexos = false;
+
+  /// Progresso do lote em envio ("Enviando 2 de 5"); null fora do envio.
+  ({int atual, int total})? _progressoDoLote;
+
+  /// O back recusou um envio por janela de 24h fechada (ex.: o cliente
+  /// escreveu para outro número da empresa): guarda a última recebida daquele
+  /// momento. A caixa trava e o caminho vira template até chegar uma nova
+  /// mensagem do cliente — paridade com `setIs24HoursWindowOpen(false)`.
+  String? _janelaFechadaNaInbound;
+
+  /// Renovações de URL de mídia em andamento, uma por mensagem.
+  final Map<String, Future<String?>> _renovacoes = {};
+
+  final ImagePicker _imagePicker = ImagePicker();
+
   bool get _hasOlder => _messages.length < _total;
 
   bool get _canSend =>
       ModuleAccessService.instance.hasPermission('whatsapp:send');
+
+  bool get _canViewMessages =>
+      ModuleAccessService.instance.hasPermission('whatsapp:view_messages');
+
+  /// Responsável atual da conversa — paridade com
+  /// `getConversationAssignedSdrId` do web: a mensagem mais recente que tem
+  /// responsável.
+  String get _responsavelAtualId {
+    for (var i = _messages.length - 1; i >= 0; i--) {
+      final id = (_messages[i].assignedToId ?? '').trim();
+      if (id.isNotEmpty) return id;
+    }
+    return '';
+  }
+
+  /// "Assumir conversa": com whatsapp:view_messages, conversa com mensagens e
+  /// responsável diferente de quem está logado (a fila não tem responsável).
+  bool get _podeAssumir =>
+      _canViewMessages &&
+      _messages.isNotEmpty &&
+      _responsavelAtualId != _currentUserId;
 
   /// Canal não oficial (QR Code) ativo para o atendimento?
   bool get _usesUnofficial => _integrationStatus?.usesUnofficialChat ?? false;
@@ -85,8 +142,17 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     return DateTime.now().difference(last.toLocal()).inHours < 24;
   }
 
-  /// Texto livre permitido? QR Code sempre; oficial exige janela aberta.
-  bool get _canSendFreeText => _usesUnofficial || _is24hWindowOpen;
+  /// O último envio voltou com erro de janela e o cliente ainda não escreveu
+  /// de novo.
+  bool get _janelaFechadaNoEnvio {
+    final marca = _janelaFechadaNaInbound;
+    return marca != null && marca == _lastInbound?.id;
+  }
+
+  /// Texto livre (e anexo) permitido? QR Code sempre; oficial exige janela
+  /// aberta — e não recusada pelo back no último envio.
+  bool get _canSendFreeText =>
+      _usesUnofficial || (_is24hWindowOpen && !_janelaFechadaNoEnvio);
 
   String get _displayName {
     final c = widget.conversation;
@@ -106,6 +172,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
   void initState() {
     super.initState();
     _bootstrap();
+    unawaited(_resolverUsuarioAtual());
     // Poll leve enquanto a thread está aberta (o painel usa socket/poll).
     _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       if (mounted && !_loading && !_sending) _syncLatest();
@@ -157,6 +224,25 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     await _loadMessages();
   }
 
+  /// Id do usuário logado: o do ModuleAccessService (lido do JWT no login)
+  /// ou, se ainda não carregou, o do próprio token — mesmo caminho da caixa.
+  Future<void> _resolverUsuarioAtual() async {
+    var id = ModuleAccessService.instance.userId;
+    if (id == null || id.isEmpty) {
+      try {
+        final token = await SecureStorageService.instance.getAccessToken();
+        if (token != null) {
+          final payload = JwtUtils.decodeToken(token);
+          id = payload?['sub']?.toString() ?? payload?['userId']?.toString();
+        }
+      } catch (e) {
+        debugPrint('❌ [WHATSAPP] _resolverUsuarioAtual: $e');
+      }
+    }
+    if (!mounted) return;
+    setState(() => _currentUserId = id);
+  }
+
   Future<void> _loadIntegrationStatus() async {
     final status = await WhatsAppService.instance.getIntegrationStatus();
     if (!mounted) return;
@@ -179,7 +265,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
       _loading = false;
       if (res.success && res.data != null) {
         // Backend devolve desc (mais recente primeiro) → inverte p/ cronológica.
-        _messages = res.data!.messages.reversed.toList();
+        _messages = _manterUrlsValidas(res.data!.messages.reversed.toList());
         _total = res.data!.total;
       } else {
         _error = res.message ?? 'Erro ao carregar mensagens';
@@ -187,6 +273,81 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
       }
     });
     if (res.success) _markInboundAsRead();
+  }
+
+  /// A cada releitura o back assina as URLs de novo e a imagem recarregava
+  /// (piscando) a cada 20 s. Mantém a URL já carregada enquanto ela vale
+  /// (29/09/2026); troca quando vence ou quando a antiga não era assinada.
+  List<WhatsAppMessage> _manterUrlsValidas(List<WhatsAppMessage> novas) {
+    if (_messages.isEmpty) return novas;
+    final antigas = {for (final m in _messages) m.id: m};
+    return [for (final n in novas) _comUrlMantida(antigas[n.id], n)];
+  }
+
+  static WhatsAppMessage _comUrlMantida(
+    WhatsAppMessage? antiga,
+    WhatsAppMessage nova,
+  ) {
+    final url = urlDeMidiaParaManter(antiga?.mediaUrl, nova.mediaUrl);
+    if (url == null || url == nova.mediaUrl) return nova;
+    return nova.copyWith(mediaUrl: url);
+  }
+
+  /// Renova a URL assinada de uma mídia (vale 1 h no S3). O web chama
+  /// GET /whatsapp/messages/:id, rota que o back ainda não tem (404); sem
+  /// ela, relê a janela da thread onde a mensagem está — a lista devolve as
+  /// URLs assinadas de novo. Uma renovação por mensagem por vez.
+  Future<String?> _renovarMidia(WhatsAppMessage m) {
+    final emCurso = _renovacoes[m.id];
+    if (emCurso != null) return emCurso;
+    final futuro =
+        _executarRenovacao(m).whenComplete(() => _renovacoes.remove(m.id));
+    _renovacoes[m.id] = futuro;
+    return futuro;
+  }
+
+  Future<String?> _executarRenovacao(WhatsAppMessage m) async {
+    // O web só pede a mensagem de novo com whatsapp:view_messages.
+    if (!_canViewMessages) return null;
+    final atual = (m.mediaUrl ?? '').trim();
+    String? nova;
+
+    final direta = await WhatsAppService.instance.getMessage(m.id);
+    final urlDireta = (direta?.mediaUrl ?? '').trim();
+    if (urlDireta.isNotEmpty && urlDireta != atual) nova = urlDireta;
+
+    if (nova == null) {
+      final i = _messages.indexWhere((x) => x.id == m.id);
+      if (i >= 0) {
+        // Posição a partir da mais recente (a ordem do back); a janela de 25
+        // cobre mensagens que chegaram depois e deslocaram o offset.
+        final aPartirDaMaisRecente = _messages.length - 1 - i;
+        final res = await WhatsAppService.instance.getMessages(
+          phoneNumber: widget.phoneNumber,
+          limit: 25,
+          offset: max(0, aPartirDaMaisRecente - 12),
+        );
+        if (res.success && res.data != null) {
+          for (final x in res.data!.messages) {
+            final u = (x.mediaUrl ?? '').trim();
+            if (x.id == m.id && u.isNotEmpty && u != atual) {
+              nova = u;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (nova == null || !mounted) return nova;
+    final url = nova;
+    setState(() {
+      _messages = [
+        for (final x in _messages)
+          x.id == m.id ? x.copyWith(mediaUrl: url) : x,
+      ];
+    });
+    return url;
   }
 
   /// Ressincroniza a primeira página sem "piscar" a tela (poll / pós-envio).
@@ -197,7 +358,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
       offset: 0,
     );
     if (!mounted || !res.success || res.data == null) return;
-    final latest = res.data!.messages.reversed.toList();
+    final latest = _manterUrlsValidas(res.data!.messages.reversed.toList());
     // Preserva as páginas antigas já carregadas: mantém as mensagens que não
     // estão na primeira página e anexa a página nova.
     final latestIds = latest.map((m) => m.id).toSet();
@@ -245,24 +406,361 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
 
   // ─── Ações ───────────────────────────────────────────────────────────────
 
-  Future<void> _sendText() async {
-    final text = _composerController.text.trim();
-    if (text.isEmpty || _sending) return;
-    setState(() => _sending = true);
-    final res = await WhatsAppService.instance.sendText(
-      to: widget.phoneNumber,
-      message: text,
-      clientId: _clientId,
-      viaUnofficial: _usesUnofficial,
-    );
-    if (!mounted) return;
-    setState(() => _sending = false);
-    if (res.success) {
+  /// Mesma leitura do web (`ehErroDeJanela24h`): a frase do back fala da
+  /// janela de 24 horas.
+  static bool _ehErroDeJanela24h(String mensagem) {
+    final m = mensagem.toLowerCase();
+    return m.contains('janela de 24 horas') ||
+        m.contains('24 horas') ||
+        m.contains('24h');
+  }
+
+  /// Por que não dá para anexar agora (mesmas frases do web).
+  String? _motivoDeNaoAnexar() {
+    if (_sending) return 'Aguarde o envio terminar para anexar mais.';
+    if (!_canSend) {
+      return 'Você não tem permissão para enviar mensagens WhatsApp.';
+    }
+    if (!_usesUnofficial && _lastInbound == null) {
+      return 'Aguarde o cliente enviar a primeira mensagem para anexar.';
+    }
+    if (!_canSendFreeText) {
+      return _janelaFechadaNoEnvio
+          ? 'Não é possível anexar: a janela de 24 horas não está aberta no número que envia. Envie um template.'
+          : 'Não é possível anexar: a janela de 24 horas expirou.';
+    }
+    return null;
+  }
+
+  /// Por que não dá para enviar agora (a janela venceu com a caixa aberta).
+  String _motivoDeNaoEnviar() {
+    if (!_usesUnofficial && _lastInbound == null) {
+      return 'Aguarde o cliente enviar a primeira mensagem.';
+    }
+    if (_janelaFechadaNoEnvio) {
+      return 'Janela de 24 horas fechada no número que envia: envie um template.';
+    }
+    return 'Não é possível enviar: janela de 24 horas expirada.';
+  }
+
+  /// Envia o que está no composer: texto e/ou a fila de anexos, uma mensagem
+  /// por anexo, na ordem da bandeja (29/09/2026). Paridade com
+  /// `handleSendMessage` do web:
+  ///  - o texto vai como legenda do 1º anexo (ou antes, como mensagem
+  ///    própria, se passar de 1024 caracteres ou se o 1º for áudio);
+  ///  - erro de janela de 24h PARA o lote: o que não saiu volta para a
+  ///    bandeja, o texto volta para a caixa e a conversa passa a pedir
+  ///    template;
+  ///  - falha comum não para o lote: o que falhou volta para a bandeja e o
+  ///    aviso traz a frase do back;
+  ///  - sem resposta do servidor (timeout, queda), o anexo NÃO volta: ele pode
+  ///    ter saído, e reenviar duplicaria na cliente.
+  Future<void> _enviar() async {
+    if (_sending || _preparandoAnexos) return;
+    final texto = _composerController.text.trim();
+    final lote = List<WhatsAppAnexo>.of(_anexos);
+    if (texto.isEmpty && lote.isEmpty) return;
+    if (!_canSend) {
+      _showSnack(
+        'Você não tem permissão para enviar mensagens WhatsApp.',
+        isError: true,
+      );
+      return;
+    }
+    if (!_canSendFreeText) {
+      _showSnack(_motivoDeNaoEnviar(), isError: true);
+      return;
+    }
+
+    final trabalhos = montarTrabalhosDeEnvio(lote, texto);
+    final temAnexo = lote.isNotEmpty;
+    final viaQrCode = _usesUnofficial;
+    final clientId = _clientId;
+    setState(() {
+      _sending = true;
+      _anexos = const [];
       _composerController.clear();
+      if (temAnexo) _progressoDoLote = (atual: 1, total: trabalhos.length);
+    });
+
+    var enviouAlguma = false;
+    var houveNaoConfirmado = false;
+    var janelaFechou = false;
+    final falhas = <String>[];
+    final devolver = <WhatsAppAnexo>[];
+    String? textoDevolvido;
+
+    for (var i = 0; i < trabalhos.length; i++) {
+      final trabalho = trabalhos[i];
+      final anexo = trabalho.anexo;
+      if (temAnexo && mounted) {
+        setState(
+            () => _progressoDoLote = (atual: i + 1, total: trabalhos.length));
+      }
+      final res = anexo == null
+          ? await WhatsAppService.instance.sendText(
+              to: widget.phoneNumber,
+              message: trabalho.texto,
+              clientId: clientId,
+              viaUnofficial: viaQrCode,
+            )
+          : await WhatsAppService.instance.sendMedia(
+              to: widget.phoneNumber,
+              anexo: anexo,
+              caption: trabalho.texto,
+              clientId: clientId,
+              viaUnofficial: viaQrCode,
+            );
+      if (res.success) {
+        enviouAlguma = true;
+        // Lote: a bolha de cada envio aparece enquanto os outros sobem.
+        if (trabalhos.length > 1 && mounted) unawaited(_syncLatest());
+        continue;
+      }
+      final motivo = (res.message ?? '').trim();
+      if (!viaQrCode && _ehErroDeJanela24h(motivo)) {
+        for (final resto in trabalhos.skip(i)) {
+          final a = resto.anexo;
+          if (a != null) devolver.add(a);
+        }
+        if (trabalho.texto.isNotEmpty) textoDevolvido = trabalho.texto;
+        janelaFechou = true;
+        falhas
+          ..clear()
+          ..add(motivo);
+        break;
+      }
+      final erro = res.error;
+      if (anexo != null && erro is Map && erro['naoConfirmado'] == true) {
+        houveNaoConfirmado = true;
+        continue;
+      }
+      falhas.add(motivo.isNotEmpty
+          ? motivo
+          : (anexo == null
+              ? 'Não foi possível enviar a mensagem.'
+              : 'Não foi possível enviar "${anexo.nome}".'));
+      if (anexo != null) devolver.add(anexo);
+      if (trabalho.texto.isNotEmpty) textoDevolvido ??= trabalho.texto;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _sending = false;
+      _progressoDoLote = null;
+      if (devolver.isNotEmpty) _anexos = [...devolver, ..._anexos];
+      final t = textoDevolvido;
+      if (t != null && _composerController.text.trim().isEmpty) {
+        _composerController.text = t;
+      }
+      if (janelaFechou) _janelaFechadaNaInbound = _lastInbound?.id ?? '';
+    });
+
+    if (falhas.length == 1) {
+      _showSnack(falhas.first, isError: true);
+    } else if (falhas.length > 1) {
+      _showSnack(
+        '${falhas.length} de ${trabalhos.length} não foram enviadas. O que '
+        'falhou voltou para a caixa: toque em enviar para tentar de novo.',
+        isError: true,
+      );
+    }
+    if (houveNaoConfirmado) {
+      _showSnack(
+        'A resposta do servidor não chegou para uma ou mais mensagens. Elas '
+        'podem ter saído: confira a conversa antes de reenviar.',
+        isError: true,
+      );
+    }
+    if (enviouAlguma || houveNaoConfirmado) {
       await _syncLatest();
       _scrollToBottom();
+    }
+  }
+
+  // ─── Anexos ──────────────────────────────────────────────────────────────
+
+  /// Botão de clipe: câmera, galeria ou arquivo, com a regra do canal.
+  Future<void> _abrirMenuDeAnexo() async {
+    final motivo = _motivoDeNaoAnexar();
+    if (motivo != null) {
+      _showSnack(motivo, isError: true);
+      return;
+    }
+    if (_anexos.length >= kMaximoDeAnexos) {
+      _showSnack('Máximo de $kMaximoDeAnexos arquivos por envio.',
+          isError: true);
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    final origem = await WhatsAppOrigemDoAnexoSheet.show(
+      context,
+      naoOficial: _usesUnofficial,
+    );
+    if (origem == null || !mounted) return;
+    switch (origem) {
+      case WhatsAppOrigemDoAnexo.camera:
+        await _anexarDaCamera();
+        break;
+      case WhatsAppOrigemDoAnexo.galeria:
+        await _anexarDaGaleria();
+        break;
+      case WhatsAppOrigemDoAnexo.arquivo:
+        await _anexarArquivos();
+        break;
+    }
+  }
+
+  /// Foto da câmera. `imageQuality`/tamanho máximo: o iPhone entrega HEIC
+  /// (a Meta recusa) e fotos de 12MP passam dos 5MB da API oficial — a
+  /// recompressão sai em JPEG, como o WhatsApp faz ao enviar.
+  Future<void> _anexarDaCamera() async {
+    try {
+      final foto = await _imagePicker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 85,
+        maxWidth: 2560,
+        maxHeight: 2560,
+        requestFullMetadata: false,
+      );
+      if (foto == null) return;
+      await _acrescentar([_ArquivoEscolhido(foto.path, foto.name)]);
+    } on PlatformException catch (e) {
+      _avisarFalhaDoSeletor(e, camera: true);
+    } catch (e) {
+      _showSnack('Não foi possível abrir a câmera: $e', isError: true);
+    }
+  }
+
+  /// Galeria: só fotos na API oficial; fotos e vídeos no QR Code.
+  Future<void> _anexarDaGaleria() async {
+    final restante = kMaximoDeAnexos - _anexos.length;
+    if (restante <= 0) return;
+    try {
+      final List<XFile> itens = _usesUnofficial
+          ? await _imagePicker.pickMultipleMedia(
+              imageQuality: 85,
+              maxWidth: 2560,
+              maxHeight: 2560,
+              limit: restante,
+              requestFullMetadata: false,
+            )
+          : await _imagePicker.pickMultiImage(
+              imageQuality: 85,
+              maxWidth: 2560,
+              maxHeight: 2560,
+              limit: restante,
+              requestFullMetadata: false,
+            );
+      if (itens.isEmpty) return;
+      await _acrescentar([
+        for (final x in itens) _ArquivoEscolhido(x.path, x.name),
+      ]);
+    } on PlatformException catch (e) {
+      _avisarFalhaDoSeletor(e);
+    } catch (e) {
+      _showSnack('Não foi possível abrir a galeria: $e', isError: true);
+    }
+  }
+
+  /// Arquivo: na API oficial, documentos e áudios da lista da Meta (o mesmo
+  /// `accept` do clipe do web); no QR Code, qualquer tipo.
+  Future<void> _anexarArquivos() async {
+    try {
+      final resultado = _usesUnofficial
+          ? await FilePicker.pickFiles(type: FileType.any)
+          : await FilePicker.pickFiles(
+              type: FileType.custom,
+              allowedExtensions: kExtensoesDoAnexoOficial,
+            );
+      if (resultado == null || resultado.files.isEmpty) return;
+      final escolhidos = <_ArquivoEscolhido>[];
+      for (final f in resultado.files) {
+        final caminho = f.path;
+        if (caminho == null || caminho.isEmpty) continue;
+        escolhidos.add(_ArquivoEscolhido(caminho, f.name, f.size));
+      }
+      await _acrescentar(escolhidos);
+    } on PlatformException catch (e) {
+      _avisarFalhaDoSeletor(e);
+    } catch (e) {
+      _showSnack('Não foi possível abrir os arquivos: $e', isError: true);
+    }
+  }
+
+  void _avisarFalhaDoSeletor(PlatformException e, {bool camera = false}) {
+    final codigo = e.code.toLowerCase();
+    if (codigo.contains('denied') || codigo.contains('permission')) {
+      _showSnack(
+        camera
+            ? 'Sem acesso à câmera. Libere a permissão do Intellisys nas configurações do aparelho.'
+            : 'Sem acesso às fotos e arquivos. Libere a permissão do Intellisys nas configurações do aparelho.',
+        isError: true,
+      );
+      return;
+    }
+    final detalhe = (e.message ?? '').trim().isNotEmpty ? e.message! : e.code;
+    _showSnack(
+      '${camera ? 'Não foi possível abrir a câmera' : 'Não foi possível abrir o seletor'}: $detalhe',
+      isError: true,
+    );
+  }
+
+  /// Lê os arquivos escolhidos e acrescenta ao FIM da fila; o que foge da
+  /// regra do canal vira UM aviso resumido (mesmas frases do web).
+  Future<void> _acrescentar(List<_ArquivoEscolhido> escolhidos) async {
+    if (escolhidos.isEmpty || !mounted) return;
+    setState(() => _preparandoAnexos = true);
+    final novos = <WhatsAppAnexo>[];
+    for (final e in escolhidos) {
+      final anexo = await WhatsAppAnexo.doArquivo(
+        e.caminho,
+        nome: e.nome,
+        tamanho: e.tamanho,
+      );
+      if (anexo != null) novos.add(anexo);
+    }
+    if (!mounted) return;
+    final regra = regraDoCanal(_usesUnofficial);
+    final resultado = acrescentarAnexos(_anexos, novos, regra);
+    setState(() {
+      _preparandoAnexos = false;
+      _anexos = resultado.fila;
+    });
+    final aviso = resumoDosRecusados(resultado.recusados, regra);
+    final ilegiveis = escolhidos.length - novos.length;
+    if (aviso != null) {
+      _showSnack(aviso, isError: true);
+    } else if (ilegiveis > 0) {
+      _showSnack(
+        ilegiveis == 1
+            ? 'Não foi possível ler 1 arquivo escolhido.'
+            : 'Não foi possível ler $ilegiveis arquivos escolhidos.',
+        isError: true,
+      );
+    }
+  }
+
+  void _removerAnexo(String id) {
+    setState(() => _anexos = _anexos.where((a) => a.id != id).toList());
+  }
+
+  // ─── Assumir conversa ────────────────────────────────────────────────────
+
+  /// Pega para si a conversa da fila — paridade com "Assumir conversa" do
+  /// web: usa a última mensagem da thread e relê em seguida.
+  Future<void> _assumirConversa() async {
+    if (_assumindo || _messages.isEmpty) return;
+    setState(() => _assumindo = true);
+    final res =
+        await WhatsAppService.instance.claimConversation(_messages.last.id);
+    if (!mounted) return;
+    setState(() => _assumindo = false);
+    if (res.success) {
+      _showSnack('Conversa assumida. Agora ela é sua.');
+      await _syncLatest();
     } else {
-      _showSnack(res.message ?? 'Erro ao enviar mensagem', isError: true);
+      _showSnack(res.message ?? 'Erro ao assumir conversa.', isError: true);
     }
   }
 
@@ -335,6 +833,8 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
   }
 
   void _showSnack(String message, {bool isError = false}) {
+    // Seletores e envios terminam depois de awaits: a tela pode ter fechado.
+    if (!mounted) return;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -470,6 +970,9 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
             color: ThemeHelpers.cardBackgroundColor(context),
             onSelected: (value) {
               switch (value) {
+                case 'claim':
+                  _assumirConversa();
+                  break;
                 case 'template':
                   _openTemplateSheet();
                   break;
@@ -482,6 +985,15 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
               }
             },
             itemBuilder: (ctx) => [
+              // Fila manual: a conversa fica em Aguardando até alguém pegar
+              // (29/09/2026). Some para quem já é o responsável.
+              if (_podeAssumir)
+                PopupMenuItem(
+                  value: 'claim',
+                  enabled: !_assumindo,
+                  child: _menuRow(
+                      ctx, LucideIcons.userPlus, 'Assumir conversa'),
+                ),
               if (_canSend)
                 PopupMenuItem(
                   value: 'template',
@@ -540,6 +1052,7 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     // mensagens sequenciais do mesmo remetente; inverte no final — com
     // `reverse: true` a mensagem mais recente fica colada no composer.
     final children = <Widget>[];
+    final nomeDoContato = _displayName;
     DateTime? currentDay;
     for (var i = 0; i < _messages.length; i++) {
       final m = _messages[i];
@@ -574,9 +1087,15 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
       }
 
       children.add(WhatsAppMessageBubble(
+        // Chave pela mensagem: quando chega uma nova, as bolhas mudam de
+        // posição e a mídia de cada uma (imagem carregada, renovação em
+        // curso) precisa seguir a SUA mensagem.
+        key: ValueKey('msg-${m.id.isEmpty ? 'pos-$i' : m.id}'),
         message: m,
         isFirstInGroup: isFirst,
         isLastInGroup: isLast,
+        onRenovarMidia: _renovarMidia,
+        contactLabel: nomeDoContato,
       ));
     }
 
@@ -816,7 +1335,10 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
   }
 
   /// Composer estilo iOS: campo arredondado em superfície clara + botão de
-  /// enviar circular VERDE (identidade WhatsApp), seta pra cima.
+  /// enviar circular VERDE (identidade WhatsApp), seta pra cima. Acima dele,
+  /// a bandeja de anexos e, durante o lote, "Enviando 2 de 5" (29/09/2026).
+  /// O clipe fica dentro do campo, como no WhatsApp, para não estreitar a
+  /// caixa em telas pequenas.
   Widget _buildComposer(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final green =
@@ -825,16 +1347,92 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     final fieldFill = ThemeHelpers.cardBackgroundColor(context);
     final hairline = ThemeHelpers.borderLightColor(context);
     final hasText = _composerController.text.trim().isNotEmpty;
+    final temConteudo = hasText || _anexos.isNotEmpty;
+    final progresso = _progressoDoLote;
 
     return Container(
       decoration: BoxDecoration(
         color: ThemeHelpers.backgroundColor(context),
         border: Border(top: BorderSide(color: hairline)),
       ),
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
       child: SafeArea(
         top: false,
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (progresso != null)
+              WhatsAppProgressoDoLote(
+                atual: progresso.atual,
+                total: progresso.total,
+              ),
+            WhatsAppBandejaDeAnexos(
+              anexos: _anexos,
+              onRemover: _removerAnexo,
+              onAdicionar: _abrirMenuDeAnexo,
+              desabilitado: _sending,
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              child: _buildComposerRow(
+                context,
+                isDark: isDark,
+                green: green,
+                secondary: secondary,
+                fieldFill: fieldFill,
+                hairline: hairline,
+                temConteudo: temConteudo,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Botão de clipe dentro do campo (abre câmera, galeria ou arquivo).
+  Widget _buildBotaoAnexar(BuildContext context, Color secondary) {
+    final ocupado = _preparandoAnexos;
+    return Semantics(
+      button: true,
+      label: _usesUnofficial ? 'Anexar arquivo' : 'Anexar foto, documento ou áudio',
+      child: InkResponse(
+        radius: 20,
+        onTap: ocupado || _sending ? null : _abrirMenuDeAnexo,
+        child: SizedBox(
+          width: 36,
+          height: 36,
+          child: Center(
+            child: ocupado
+                ? SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: secondary,
+                    ),
+                  )
+                : Icon(
+                    LucideIcons.paperclip,
+                    size: 19,
+                    color: _sending ? secondary.withValues(alpha: 0.4) : secondary,
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildComposerRow(
+    BuildContext context, {
+    required bool isDark,
+    required Color green,
+    required Color secondary,
+    required Color fieldFill,
+    required Color hairline,
+    required bool temConteudo,
+  }) {
+    return Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             // Atalho de template (sempre disponível no canal oficial).
@@ -962,4 +1560,14 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
 
 extension<T> on Iterable<T> {
   T? get lastOrNull => isEmpty ? null : last;
+}
+
+/// Arquivo vindo de um seletor (câmera, galeria ou arquivos), antes de virar
+/// anexo: o seletor já informa nome e, às vezes, tamanho.
+class _ArquivoEscolhido {
+  final String caminho;
+  final String? nome;
+  final int? tamanho;
+
+  const _ArquivoEscolhido(this.caminho, [this.nome, this.tamanho]);
 }

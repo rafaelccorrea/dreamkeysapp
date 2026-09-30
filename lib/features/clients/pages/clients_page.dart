@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -8,6 +10,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/shell_visual_tokens.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/module_access_service.dart';
 import '../../../shared/utils/masks.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
@@ -20,8 +23,29 @@ import '../services/client_service.dart';
 import '../widgets/async_excel_import_modal.dart';
 import '../widgets/client_filters_drawer.dart';
 import '../widgets/transfer_client_modal.dart';
+import '../utils/client_spreadsheet.dart';
 
 final _compactIntFormatter = NumberFormat.decimalPattern('pt_BR');
+
+/// Permissões das ações de cliente — as mesmas do web
+/// (`PermissionButton`/`PermissionMenuItem` em `ClientsPage.tsx`).
+const String _kPermClientCreate = 'client:create';
+const String _kPermClientUpdate = 'client:update';
+const String _kPermClientTransfer = 'client:transfer';
+const String _kPermClientDelete = 'client:delete';
+const String _kPermClientExport = 'client:export';
+
+/// Rótulos de origem usados na exportação (`CLIENT_SOURCE_LABELS` do web).
+const Map<String, String> _kExportSourceLabels = {
+  'whatsapp': 'WhatsApp',
+  'social_media': 'Redes Sociais',
+  'phone': 'Telefone',
+  'olx': 'OLX',
+  'zap_imoveis': 'Zap Imóveis',
+  'viva_real': 'VivaReal',
+  'dream_keys': 'Intellisys - Site',
+  'other': 'Outros',
+};
 
 /// Métricas agregadas a partir da listagem carregada (página atual).
 class _ListedClientMetrics {
@@ -89,6 +113,12 @@ class _ClientsPageState extends State<ClientsPage> {
   String _searchQuery = '';
   ClientStatistics? _statistics;
 
+  /// Debounce da busca (400 ms, igual ao web) e contador de requisição para
+  /// descartar respostas que chegam fora de ordem.
+  Timer? _searchDebounce;
+  int _loadSeq = 0;
+  bool _exporting = false;
+
   /// Chave usada para preservar estado (busca + filtros) ao sair e voltar.
   static const String _stateCacheKey = 'clients:list';
 
@@ -103,6 +133,7 @@ class _ClientsPageState extends State<ClientsPage> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _persistState();
     _searchController.dispose();
     _scrollController
@@ -148,6 +179,7 @@ class _ClientsPageState extends State<ClientsPage> {
   // ───────────────────────── Networking ─────────────────────────
 
   Future<void> _loadClients({bool refresh = false}) async {
+    final seq = ++_loadSeq;
     if (refresh) {
       setState(() {
         _currentPage = 1;
@@ -172,7 +204,7 @@ class _ClientsPageState extends State<ClientsPage> {
 
       final response = await _clientService.getClients(filters: filters);
 
-      if (!mounted) return;
+      if (!mounted || seq != _loadSeq) return;
 
       if (response.success && response.data != null) {
         final pagination = response.data!.pagination;
@@ -197,7 +229,7 @@ class _ClientsPageState extends State<ClientsPage> {
         });
       }
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || seq != _loadSeq) return;
       setState(() {
         _errorMessage = 'Erro ao conectar com o servidor';
         _errorStatus = 0;
@@ -229,12 +261,49 @@ class _ClientsPageState extends State<ClientsPage> {
     }
   }
 
+  /// Busca só com 0 ou 3+ caracteres, como o web: com 1–2 letras o back
+  /// responde 400 ("Informe ao menos 2 caracteres para busca textual").
+  bool _isSearchable(String query) {
+    final q = query.trim();
+    return q.isEmpty || q.length >= 3;
+  }
+
   Future<void> _handleSearch(String query) async {
+    _searchDebounce?.cancel();
+    if (!_isSearchable(query)) return;
+    if (query.trim() == _searchQuery.trim() && _clients.isNotEmpty) return;
     setState(() {
       _searchQuery = query;
     });
     _persistState();
     await _loadClients(refresh: true);
+  }
+
+  void _onSearchChanged(String query) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 400), () {
+      if (!mounted) return;
+      _handleSearch(query);
+    });
+  }
+
+  // ───────────────────────── Permissões ─────────────────────────
+
+  bool _can(String permission) =>
+      ModuleAccessService.instance.hasPermission(permission);
+
+  /// Regra da casa: a ação aparece travada (cadeado) em vez de sumir.
+  bool _guard(String permission) {
+    if (_can(permission)) return true;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text(
+          'Você não tem permissão para esta ação. Fale com um administrador.',
+        ),
+        backgroundColor: AppColors.status.warning,
+      ),
+    );
+    return false;
   }
 
   // ───────────────────────── Build ─────────────────────────
@@ -321,18 +390,34 @@ class _ClientsPageState extends State<ClientsPage> {
           final pmt = Theme.of(menuCtx).popupMenuTheme;
           final labelStyle = pmt.textStyle ?? Theme.of(menuCtx).textTheme.bodyMedium;
           final iconColor = pmt.iconColor ?? ThemeHelpers.textSecondaryColor(menuCtx);
+          final lockedStyle = labelStyle?.copyWith(
+            color: ThemeHelpers.textSecondaryColor(menuCtx)
+                .withValues(alpha: 0.6),
+          );
+          final canCreate = _can(_kPermClientCreate);
+          final canExport = _can(_kPermClientExport);
           return [
             PopupMenuItem(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               value: 'new',
+              enabled: canCreate,
               child: Text.rich(
                 TextSpan(children: [
                   WidgetSpan(
                     alignment: PlaceholderAlignment.middle,
-                    child: Icon(Icons.person_add_alt_1, size: 20, color: iconColor),
+                    child: Icon(
+                      canCreate
+                          ? Icons.person_add_alt_1
+                          : Icons.lock_outline_rounded,
+                      size: 20,
+                      color: iconColor,
+                    ),
                   ),
                   const WidgetSpan(child: SizedBox(width: 10)),
-                  TextSpan(text: 'Novo cliente', style: labelStyle),
+                  TextSpan(
+                    text: 'Novo cliente',
+                    style: canCreate ? labelStyle : lockedStyle,
+                  ),
                 ]),
               ),
             ),
@@ -386,28 +471,46 @@ class _ClientsPageState extends State<ClientsPage> {
             PopupMenuItem(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               value: 'import',
+              enabled: canCreate,
               child: Text.rich(
                 TextSpan(children: [
                   WidgetSpan(
                     alignment: PlaceholderAlignment.middle,
-                    child: Icon(Icons.upload_file, size: 20, color: iconColor),
+                    child: Icon(
+                      canCreate ? Icons.upload_file : Icons.lock_outline_rounded,
+                      size: 20,
+                      color: iconColor,
+                    ),
                   ),
                   const WidgetSpan(child: SizedBox(width: 10)),
-                  TextSpan(text: 'Importar Excel', style: labelStyle),
+                  TextSpan(
+                    text: 'Importar Excel',
+                    style: canCreate ? labelStyle : lockedStyle,
+                  ),
                 ]),
               ),
             ),
             PopupMenuItem(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               value: 'export',
+              enabled: canExport && !_exporting,
               child: Text.rich(
                 TextSpan(children: [
                   WidgetSpan(
                     alignment: PlaceholderAlignment.middle,
-                    child: Icon(Icons.download_outlined, size: 20, color: iconColor),
+                    child: Icon(
+                      canExport
+                          ? Icons.download_outlined
+                          : Icons.lock_outline_rounded,
+                      size: 20,
+                      color: iconColor,
+                    ),
                   ),
                   const WidgetSpan(child: SizedBox(width: 10)),
-                  TextSpan(text: 'Exportar dados', style: labelStyle),
+                  TextSpan(
+                    text: _exporting ? 'Exportando…' : 'Exportar dados',
+                    style: canExport ? labelStyle : lockedStyle,
+                  ),
                 ]),
               ),
             ),
@@ -502,7 +605,9 @@ class _ClientsPageState extends State<ClientsPage> {
         final quickActions = <Widget>[
           _buildQuickActionButton(
             context,
-            icon: Icons.person_add_alt_1,
+            icon: _can(_kPermClientCreate)
+                ? Icons.person_add_alt_1
+                : Icons.lock_outline_rounded,
             label: 'Novo cliente',
             isPrimary: true,
             onPressed: _navigateToCreate,
@@ -1404,7 +1509,7 @@ class _ClientsPageState extends State<ClientsPage> {
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 6, vertical: 14),
                 ),
-                onChanged: _handleSearch,
+                onChanged: _onSearchChanged,
                 textInputAction: TextInputAction.search,
                 onSubmitted: _handleSearch,
               ),
@@ -2025,6 +2130,7 @@ class _ClientsPageState extends State<ClientsPage> {
             _loadClients(refresh: true);
             break;
           case 'edit':
+            if (!_guard(_kPermClientUpdate)) break;
             await Navigator.pushNamed(
               context,
               AppRoutes.clientEdit(client.id),
@@ -2039,9 +2145,11 @@ class _ClientsPageState extends State<ClientsPage> {
             );
             break;
           case 'transfer':
+            if (!_guard(_kPermClientTransfer)) break;
             if (mounted) await _showTransferModal(context, client);
             break;
           case 'delete':
+            if (!_guard(_kPermClientDelete)) break;
             if (mounted) await _showDeleteConfirmation(context, client);
             break;
         }
@@ -2055,13 +2163,11 @@ class _ClientsPageState extends State<ClientsPage> {
             Text('Abrir'),
           ]),
         ),
-        const PopupMenuItem(
+        _lockableMenuItem(
           value: 'edit',
-          child: Row(children: [
-            Icon(Icons.edit_outlined, size: 18),
-            SizedBox(width: 10),
-            Text('Editar'),
-          ]),
+          icon: Icons.edit_outlined,
+          label: 'Editar',
+          permission: _kPermClientUpdate,
         ),
         // Matches oculto no app: item fora do menu.
         if (FeatureVisibility.matchesEnabled)
@@ -2073,24 +2179,55 @@ class _ClientsPageState extends State<ClientsPage> {
               Text('Ver matches'),
             ]),
           ),
-        const PopupMenuItem(
+        _lockableMenuItem(
           value: 'transfer',
-          child: Row(children: [
-            Icon(Icons.swap_horiz_rounded, size: 18),
-            SizedBox(width: 10),
-            Text('Transferir'),
-          ]),
+          icon: Icons.swap_horiz_rounded,
+          label: 'Transferir',
+          permission: _kPermClientTransfer,
         ),
         const PopupMenuDivider(),
-        const PopupMenuItem(
+        _lockableMenuItem(
           value: 'delete',
-          child: Row(children: [
-            Icon(Icons.delete_outline, size: 18, color: Colors.red),
-            SizedBox(width: 10),
-            Text('Excluir', style: TextStyle(color: Colors.red)),
-          ]),
+          icon: Icons.delete_outline,
+          label: 'Excluir',
+          permission: _kPermClientDelete,
+          destructive: true,
         ),
       ],
+    );
+  }
+
+  /// Item de menu que trava (cadeado + desabilitado) sem a permissão.
+  PopupMenuItem<String> _lockableMenuItem({
+    required String value,
+    required IconData icon,
+    required String label,
+    required String permission,
+    bool destructive = false,
+  }) {
+    final allowed = _can(permission);
+    final color = !allowed
+        ? ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.6)
+        : (destructive ? AppColors.status.error : null);
+    return PopupMenuItem<String>(
+      value: value,
+      enabled: allowed,
+      child: Row(children: [
+        Icon(
+          allowed ? icon : Icons.lock_outline_rounded,
+          size: 18,
+          color: color,
+        ),
+        const SizedBox(width: 10),
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: color),
+          ),
+        ),
+      ]),
     );
   }
 
@@ -2506,6 +2643,7 @@ class _ClientsPageState extends State<ClientsPage> {
   // ───────────────────────── Ações ─────────────────────────
 
   void _navigateToCreate() {
+    if (!_guard(_kPermClientCreate)) return;
     Navigator.pushNamed(context, AppRoutes.clientCreate).then((created) {
       if (!mounted) return;
       if (created != null) {
@@ -2723,6 +2861,7 @@ class _ClientsPageState extends State<ClientsPage> {
                 'Editar dados',
                 'Atualizar informações cadastrais',
                 () => Navigator.pop(ctx, 'edit'),
+                locked: !_can(_kPermClientUpdate),
               ),
               // Matches oculto no app: linha fora do sheet de ações.
               if (FeatureVisibility.matchesEnabled)
@@ -2739,6 +2878,7 @@ class _ClientsPageState extends State<ClientsPage> {
                 'Transferir',
                 'Atribuir a outro responsável',
                 () => Navigator.pop(ctx, 'transfer'),
+                locked: !_can(_kPermClientTransfer),
               ),
               _actionRow(
                 ctx,
@@ -2747,6 +2887,7 @@ class _ClientsPageState extends State<ClientsPage> {
                 'Remoção permanente do registro',
                 () => Navigator.pop(ctx, 'delete'),
                 destructive: true,
+                locked: !_can(_kPermClientDelete),
               ),
             ],
           ),
@@ -2788,14 +2929,24 @@ class _ClientsPageState extends State<ClientsPage> {
     String subtitle,
     VoidCallback onTap, {
     bool destructive = false,
+    bool locked = false,
   }) {
     final theme = Theme.of(context);
     final muted = ThemeHelpers.textSecondaryColor(context);
-    final fg = destructive ? AppColors.status.error : ThemeHelpers.textColor(context);
-    final iconColor = destructive ? AppColors.status.error : _accentColor(context);
+    final fg = locked
+        ? muted
+        : (destructive ? AppColors.status.error : ThemeHelpers.textColor(context));
+    final iconColor = locked
+        ? muted
+        : (destructive ? AppColors.status.error : _accentColor(context));
+    if (locked) {
+      icon = Icons.lock_outline_rounded;
+      subtitle = 'Sem permissão para esta ação';
+      destructive = false;
+    }
 
     return InkWell(
-      onTap: onTap,
+      onTap: locked ? null : onTap,
       borderRadius: BorderRadius.circular(14),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
@@ -2944,6 +3095,7 @@ class _ClientsPageState extends State<ClientsPage> {
   }
 
   Future<void> _showImportModal() async {
+    if (!_guard(_kPermClientCreate)) return;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -2962,136 +3114,122 @@ class _ClientsPageState extends State<ClientsPage> {
     );
   }
 
+  /// Exportação igual à do web (`handleExportClients`): planilha enxuta com
+  /// NOME, TELEFONE (principal → WhatsApp → secundário, só dígitos com 55) e
+  /// MÍDIA DE ORIGEM, gerada a partir da lista filtrada/buscada da tela e
+  /// aberta na folha de compartilhar para salvar ou enviar.
   Future<void> _exportClients() async {
-    final format = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 22),
-        decoration: BoxDecoration(
-          color: ThemeHelpers.cardBackgroundColor(ctx),
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 42,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 12),
-                decoration: BoxDecoration(
-                  color: ThemeHelpers.borderColor(ctx).withValues(alpha: 0.55),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-              ),
-              Text(
-                'Exportar carteira',
-                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w900,
-                    ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Os filtros atuais serão aplicados ao arquivo gerado.',
-                textAlign: TextAlign.center,
-                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(ctx),
-                    ),
-              ),
-              const SizedBox(height: 16),
-              _actionRow(
-                ctx,
-                Icons.table_chart_outlined,
-                'Excel (.xlsx)',
-                'Planilha completa com todos os campos',
-                () => Navigator.pop(ctx, 'xlsx'),
-              ),
-              _actionRow(
-                ctx,
-                Icons.description_outlined,
-                'CSV (.csv)',
-                'Formato leve, ideal para integrações',
-                () => Navigator.pop(ctx, 'csv'),
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton(
-                onPressed: () => Navigator.pop(ctx),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: const Text('Cancelar'),
-              ),
-            ],
+    if (!_guard(_kPermClientExport) || _exporting) return;
+    final messenger = ScaffoldMessenger.of(context);
+
+    if (_clients.isEmpty) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: const Text(
+            'Não há clientes para exportar. Crie alguns clientes primeiro.',
           ),
+          backgroundColor: AppColors.status.warning,
         ),
-      ),
-    );
+      );
+      return;
+    }
 
-    if (format == null || !mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
+    setState(() => _exporting = true);
+    messenger.showSnackBar(
       const SnackBar(
-        content: Row(
-          children: [
-            SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            SizedBox(width: 16),
-            Text('Exportando clientes...'),
-          ],
-        ),
-        duration: Duration(seconds: 30),
+        content: Text('Iniciando exportação... Aguarde.'),
+        duration: Duration(seconds: 3),
       ),
     );
 
     try {
-      final response = await _clientService.exportClients(
+      final response = await _clientService.fetchAllClients(
         filters: _filters,
-        format: format,
+        search: _searchQuery,
       );
-
       if (!mounted) return;
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
-      if (response.success && response.data != null) {
-        final size = response.data!.length;
-        final readable = size >= 1024 * 1024
-            ? '${(size / (1024 * 1024)).toStringAsFixed(1)} MB'
-            : '${(size / 1024).toStringAsFixed(1)} KB';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Exportação pronta · $readable. Em breve será possível baixar diretamente.',
-            ),
-            backgroundColor: AppColors.status.success,
-          ),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
+      if (!response.success || response.data == null) {
+        messenger.hideCurrentSnackBar();
+        messenger.showSnackBar(
           SnackBar(
             content: Text(response.message ?? 'Erro ao exportar clientes'),
             backgroundColor: AppColors.status.error,
           ),
         );
+        return;
       }
+
+      final clients = response.data!;
+      final rows = <List<Object?>>[
+        ['NOME', 'TELEFONE', 'MÍDIA DE ORIGEM'],
+        for (final c in clients)
+          [
+            c.name,
+            _exportPhoneDigits(c),
+            _exportSourceLabel(c),
+          ],
+      ];
+      final bytes = ClientSpreadsheet.buildXlsx(
+        sheetName: 'Clientes',
+        rows: rows,
+        columnWidths: const [40, 16, 28],
+      );
+      final date = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final fileName =
+          'Clientes_Exportados_${date}_${clients.length}registros.xlsx';
+
+      await ClientSpreadsheet.shareBytes(
+        bytes: bytes,
+        fileName: fileName,
+        subject: 'Exportação de clientes',
+      );
+      if (!mounted) return;
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('${clients.length} clientes exportados com sucesso!'),
+          backgroundColor: AppColors.status.success,
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
         SnackBar(
-          content: Text('Erro ao exportar: ${e.toString()}'),
+          content: Text('Erro ao exportar clientes: ${e.toString()}'),
           backgroundColor: AppColors.status.error,
         ),
       );
+    } finally {
+      if (mounted) setState(() => _exporting = false);
     }
+  }
+
+  /// `formatPhoneForExportDigitsBR` do web.
+  String _exportPhoneDigits(Client c) {
+    String pick(String? v) => (v ?? '').trim();
+    final raw = pick(c.phone).isNotEmpty
+        ? pick(c.phone)
+        : (pick(c.whatsapp).isNotEmpty
+            ? pick(c.whatsapp)
+            : pick(c.secondaryPhone));
+    var d = raw.replaceAll(RegExp(r'\D'), '');
+    if (d.isEmpty) return '';
+    while (d.startsWith('0') && d.length > 1) {
+      d = d.substring(1);
+    }
+    if (d.startsWith('55')) {
+      return d.length > 13 ? d.substring(0, 13) : d;
+    }
+    if (d.length == 10 || d.length == 11) return '55$d';
+    return d;
+  }
+
+  String _exportSourceLabel(Client c) {
+    final src = c.leadSource;
+    if (src == null) return '';
+    return _kExportSourceLabels[src.value] ?? src.label;
   }
 
   // ───────────────────────── Helpers ─────────────────────────

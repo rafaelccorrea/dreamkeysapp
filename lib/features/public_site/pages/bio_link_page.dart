@@ -464,6 +464,11 @@ class _BioLinkPageState extends State<BioLinkPage> {
     if (_linksSaving) return;
     setState(() => _linksSaving = true);
     _reindexLinks();
+    // 29/09/2026 (integ-01): cada link vai inteiro — `kind`, `icon`,
+    // `subtitle`, cores e campos que o app não conhece (`extras`) — e o
+    // botão de captação vai com `url: ''`, igual ao save do web. Antes o
+    // `sanitizeLinks` do back recebia o link sem `kind`, descartava o botão
+    // de captação e zerava ícone e subtítulo feitos no web.
     final res = await BioPageService.instance.update({
       'links': [for (final l in _linksDraft) l.toJson()],
     });
@@ -1397,7 +1402,7 @@ class _BioLinkPageState extends State<BioLinkPage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(_linkIcon(link.url), size: 10, color: fg),
+          Icon(_iconForLink(link), size: 10, color: fg),
           const SizedBox(width: 5),
           Flexible(
             child: Text(
@@ -2189,6 +2194,11 @@ class _BioLinkPageState extends State<BioLinkPage> {
     ]);
   }
 
+  /// Botão de captação não tem URL — ganha ícone próprio (o web marca com a
+  /// tag "Captação"); os demais seguem a detecção pela URL.
+  IconData _iconForLink(BioPageLink link) =>
+      link.isLeadForm ? LucideIcons.userRoundPlus : _linkIcon(link.url);
+
   IconData _linkIcon(String url) {
     final u = url.toLowerCase();
     if (u.contains('wa.me') || u.contains('whatsapp')) {
@@ -2274,7 +2284,7 @@ class _BioLinkPageState extends State<BioLinkPage> {
                                     alpha: isDark ? 0.14 : 0.09,
                                   )),
                     ),
-                    child: Icon(_linkIcon(link.url), size: 18, color: plateFg),
+                    child: Icon(_iconForLink(link), size: 18, color: plateFg),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -2310,13 +2320,27 @@ class _BioLinkPageState extends State<BioLinkPage> {
                           ],
                         ),
                         const SizedBox(height: 2),
+                        // Botão de captação não tem URL: a segunda linha diz
+                        // o que ele faz (em vez de "—", que parecia link
+                        // quebrado e convidava a apagar o botão).
                         Text(
-                          displayUrl.isEmpty ? '—' : displayUrl,
+                          link.isLeadForm
+                              ? 'Captação · formulário de nome e telefone'
+                              : (displayUrl.isEmpty ? '—' : displayUrl),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodySmall?.copyWith(
-                            color: secondary,
+                            // No claro, o acento escurecido segura o
+                            // contraste do texto pequeno sobre o branco.
+                            color: link.isLeadForm && active
+                                ? (isDark
+                                      ? violet
+                                      : Color.lerp(violet, Colors.black, 0.28)!)
+                                : secondary,
                             fontSize: 11.5,
+                            fontWeight: link.isLeadForm
+                                ? FontWeight.w700
+                                : null,
                           ),
                         ),
                         if (clicks != null) ...[

@@ -29,6 +29,9 @@ import '../models/property_wizard_pop_result.dart';
 import '../services/property_local_draft_storage.dart';
 import '../widgets/property_creation_setup_modal.dart';
 import '../widgets/finalidade_picker.dart';
+import '../widgets/property_duplicate_sheet.dart';
+import '../utils/property_status_visual.dart';
+import '../utils/property_type_visual.dart';
 import '../../../shared/utils/property_finalidade.dart';
 import 'package:intl/intl.dart';
 import '../../../../shared/utils/property_form_config.dart';
@@ -111,6 +114,9 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   final _cityController = TextEditingController();
   final _stateController = TextEditingController();
   final _zipCodeController = TextEditingController();
+  /// "Sem CEP (não se aplica)" — paridade com `zipCodeNotApplicable` do web:
+  /// o CEP deixa de ser exigido e vai como 'N/A' (o back normaliza).
+  bool _zipCodeNotApplicable = false;
   final _sectorController = TextEditingController();
 
   // Etapa 3: Características
@@ -262,7 +268,20 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   bool _isFeatured = false;
 
   /// Edição — snapshot para `preservePublicationOnEdit` (omitir campos quando inalterados).
+  /// Guarda o valor CRU da API (`Property.statusRaw`), inclusive os status do
+  /// funil de locação e `pending_publication`.
   String? _loadedPropertyStatus;
+
+  /// Edição — tipo cru carregado (`Property.typeRaw`). Se o back devolveu um
+  /// tipo que o app não conhece, `type` fica FORA do PATCH até a pessoa
+  /// escolher um tipo de verdade — antes o fallback 'house' era regravado.
+  String? _loadedTypeRaw;
+  bool _typeTouched = false;
+
+  /// Duplicidade de endereço (paridade `runAddressDuplicateGate` do web):
+  /// chave do endereço que a pessoa já viu e decidiu seguir no wizard.
+  String? _addressDuplicateAckKey;
+  bool _checkingDuplicate = false;
   bool? _loadedPropertyIsAvailableForSite;
   int _serverImageCountAtLoad = 0;
 
@@ -665,6 +684,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       // Veio de escolha explícita: deixa de ser dedução.
       _finalidadeInferida = false;
       _selectedType = r.type;
+      _typeTouched = true;
       _selectedTeamId = r.teamId;
       _addressMode = r.addressMode;
       _selectedCondominiumId =
@@ -951,6 +971,8 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _titleController.text = property.title;
     _descriptionController.text = property.description;
     _selectedType = property.type;
+    _loadedTypeRaw = property.typeRaw;
+    _typeTouched = false;
 
     _streetController.text = property.street;
     _numberController.text = property.number;
@@ -958,7 +980,8 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _neighborhoodController.text = property.neighborhood;
     _cityController.text = property.city;
     _stateController.text = property.state;
-    _zipCodeController.text = property.zipCode;
+    _zipCodeNotApplicable = property.zipCode.trim().toUpperCase() == 'N/A';
+    _zipCodeController.text = _zipCodeNotApplicable ? '' : property.zipCode;
 
     _sectorController.text = property.sector ?? '';
     _internalNotesController.text = property.internalNotes ?? '';
@@ -1037,10 +1060,11 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       _ownerAddressController.text = property.owner!.address ?? '';
     }
 
-    _listingStatusIsDraft = property.status == PropertyStatus.draft;
+    // Valor cru: status desconhecido não vira "Rascunho" (imoveis-02).
+    _listingStatusIsDraft = property.statusRaw == PropertyStatus.draft.value;
     _publishToSite = property.isAvailableForSite ?? false;
     _isFeatured = property.isFeatured;
-    _loadedPropertyStatus = property.status.value;
+    _loadedPropertyStatus = property.statusRaw;
     _loadedPropertyIsAvailableForSite = property.isAvailableForSite ?? false;
     final imgList = property.images;
     final fromList = imgList == null
@@ -1253,7 +1277,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
 
     try {
       final request = GenerateDescriptionRequest(
-        type: _selectedType.value,
+        type: _typeValueForForm,
         city: _cityController.text.trim(),
         neighborhood: _neighborhoodController.text.trim().isEmpty
             ? null
@@ -1522,7 +1546,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           return false;
         }
         final cep = _zipCodeController.text.replaceAll(RegExp(r'[^0-9]'), '');
-        if (cep.isEmpty || cep.length != 8) {
+        if (!_zipCodeNotApplicable && (cep.isEmpty || cep.length != 8)) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: const Text(
@@ -1536,62 +1560,41 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         return true;
 
       case 2: // Etapa 3: Características
-        if (_totalAreaController.text.trim().isEmpty) {
+        // Paridade com validateSection(2) do web: área TOTAL é opcional (se
+        // preenchida, > 0); área CONSTRUÍDA é obrigatória, exceto terreno.
+        // Sem comparação construída ≤ total e com o teto do back (99.999.999,99).
+        const tetoArea = 99999999.99;
+        final totalTxt = _totalAreaController.text.trim();
+        final builtTxt = _builtAreaController.text.trim();
+        final totalNum = _parseBrazilianAreaToNumber(totalTxt);
+        final builtNum = _parseBrazilianAreaToNumber(builtTxt);
+        if (totalTxt.isNotEmpty && (totalNum == null || totalNum <= 0 || totalNum > tetoArea)) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: const Text('Por favor, preencha a área total'),
+              content: const Text('Área total: informe um valor maior que zero'),
               backgroundColor: AppColors.status.error,
             ),
           );
           return false;
         }
-        final totalArea = double.tryParse(_totalAreaController.text);
-        if (totalArea == null || totalArea <= 0) {
+        final builtObrigatoria = _selectedType != PropertyType.land;
+        if (builtObrigatoria && builtTxt.isEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: const Text('Área total deve ser maior que zero'),
+              content: const Text('Por favor, preencha a área construída'),
               backgroundColor: AppColors.status.error,
             ),
           );
           return false;
         }
-        if (totalArea >= 1000000) {
+        if (builtTxt.isNotEmpty && (builtNum == null || builtNum <= 0 || builtNum > tetoArea)) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: const Text(
-                  'Área total deve ser menor que 1.000.000 m²'),
+              content: const Text('Área construída: informe um valor maior que zero'),
               backgroundColor: AppColors.status.error,
             ),
           );
           return false;
-        }
-        // Validar área construída se preenchida
-        if (_builtAreaController.text.trim().isNotEmpty) {
-          final builtArea = double.tryParse(_builtAreaController.text);
-          if (builtArea != null) {
-            if (builtArea <= 0 || builtArea >= 1000000) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: const Text(
-                      'Área construída inválida (verifique valor e máximo permitido)',
-                  ),
-                  backgroundColor: AppColors.status.error,
-                ),
-              );
-              return false;
-            }
-            if (builtArea > totalArea) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: const Text(
-                    'Área construída não pode ser maior que área total',
-                  ),
-                  backgroundColor: AppColors.status.error,
-                ),
-              );
-              return false;
-            }
-          }
         }
         if (_bedroomsController.text.trim().isNotEmpty) {
           final bedrooms = int.tryParse(_bedroomsController.text);
@@ -1635,44 +1638,39 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         return true;
 
       case 3: // Etapa 4: Valores
-        // Se aceita negociação, deve ter preço mínimo de venda OU aluguel
-        if (_acceptsNegotiation) {
-          // Só cobra o mínimo do lado que a finalidade anuncia. Sem isso,
-          // um valor residual de venda num imóvel que virou locação exige
-          // um campo que nem está na tela — erro invisível.
-          final hasSalePrice =
-              _anunciaVenda && _salePriceController.text.trim().isNotEmpty;
-          final hasRentPrice = _anunciaLocacao &&
-              _rentPriceController.text.trim().isNotEmpty;
-          final hasMinSalePrice = _minSalePriceController.text
-              .trim()
-              .isNotEmpty;
-          final hasMinRentPrice = _minRentPriceController.text
-              .trim()
-              .isNotEmpty;
-
-          if (hasSalePrice && !hasMinSalePrice) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: const Text(
-                  'Ao aceitar negociação, é obrigatório informar o preço mínimo de venda quando há preço de venda',
-                ),
-                backgroundColor: AppColors.status.error,
-              ),
-            );
-            return false;
+        // Paridade com validateSection(3) do web: aceitar negociação NÃO
+        // obriga preço mínimo. Se um mínimo for informado, precisa do preço
+        // correspondente e tem de ser menor que ele.
+        {
+          final venda = _salePriceController.text.trim().isEmpty
+              ? 0
+              : Masks.unmaskMoney(_salePriceController.text);
+          final aluguel = _rentPriceController.text.trim().isEmpty
+              ? 0
+              : Masks.unmaskMoney(_rentPriceController.text);
+          final minVenda = _minSalePriceController.text.trim().isEmpty
+              ? 0
+              : Masks.unmaskMoney(_minSalePriceController.text);
+          final minAluguel = _minRentPriceController.text.trim().isEmpty
+              ? 0
+              : Masks.unmaskMoney(_minRentPriceController.text);
+          if (minVenda > 0 && (venda <= 0 || minVenda >= venda)) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('O preço mínimo de venda precisa ser menor que o preço de venda'),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+          return false;
           }
-
-          if (hasRentPrice && !hasMinRentPrice) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: const Text(
-                  'Ao aceitar negociação, é obrigatório informar o preço mínimo de aluguel quando há preço de aluguel',
-                ),
-                backgroundColor: AppColors.status.error,
-              ),
-            );
-            return false;
+          if (minAluguel > 0 && (aluguel <= 0 || minAluguel >= aluguel)) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('O preço mínimo de aluguel precisa ser menor que o preço de aluguel'),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+          return false;
           }
         }
         return true;
@@ -1809,10 +1807,89 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     }
   }
 
-  void _nextStep() {
+  /// Corpo do `POST /properties/duplicate-check` — espelho de
+  /// `buildDuplicateCheckPayload` do web (complemento cortado em 100
+  /// caracteres, o `@MaxLength` do DTO). O app não tem unidade/lote
+  /// (`propertyUnity`), então ele não vai.
+  Map<String, dynamic> _duplicateCheckPayload() {
+    final comp = _complementController.text.trim();
+    final cid = _selectedCondominiumId?.trim() ?? '';
+    return {
+      'street': _streetController.text.trim(),
+      'number': _numberController.text.trim(),
+      'neighborhood': _neighborhoodController.text.trim(),
+      'city': _cityController.text.trim(),
+      'state': _stateController.text.trim().toUpperCase(),
+      if (_addressMode == PropertyCreationAddressMode.condominium &&
+          cid.isNotEmpty)
+        'condominiumId': cid,
+      if (comp.isNotEmpty)
+        'complement': comp.length > 100 ? comp.substring(0, 100) : comp,
+      'type': _selectedType.value,
+    };
+  }
+
+  /// Mesma chave de `buildAddressDuplicateAckKey` do web: mudou qualquer dado
+  /// do endereço (ou o tipo), a checagem volta a valer.
+  String _duplicateAckKey(Map<String, dynamic> p) => [
+        p['street'],
+        p['number'],
+        p['neighborhood'],
+        p['city'],
+        p['state'],
+        p['condominiumId'] ?? '',
+        p['complement'] ?? '',
+        p['type'] ?? '',
+      ].join('|');
+
+  /// Portão de duplicidade ao sair da etapa de Localização (só no cadastro),
+  /// igual ao `runAddressDuplicateGate` do web. Falha na checagem não trava o
+  /// cadastro: avisa e segue (o back ainda barra com 409 ao gravar).
+  Future<bool> _runAddressDuplicateGate() async {
+    final payload = _duplicateCheckPayload();
+    final ackKey = _duplicateAckKey(payload);
+    if (_addressDuplicateAckKey == ackKey) return true;
+
+    setState(() => _checkingDuplicate = true);
+    final res = await _propertyService.checkDuplicate(payload);
+    if (!mounted) return false;
+    setState(() => _checkingDuplicate = false);
+
+    if (!res.success || res.data == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            'Não foi possível verificar duplicidade de endereço. '
+            'Você pode continuar o cadastro.',
+          ),
+        ),
+      );
+      return true;
+    }
+    if (!res.data!.hasDuplicate) return true;
+
+    final seguir = await showPropertyDuplicateSheet(
+      context: context,
+      duplicates: res.data!.duplicates,
+      submitPhase: false,
+    );
+    if (!mounted || !seguir) return false;
+    _addressDuplicateAckKey = ackKey;
+    return true;
+  }
+
+  Future<void> _nextStep() async {
+    if (_checkingDuplicate) return;
     // Validar etapa atual antes de avançar
     if (!_validateCurrentStep()) {
       return; // Não avança se houver erro
+    }
+
+    // Cadastro novo: checa duplicidade de endereço ao sair da Localização.
+    if (widget.propertyId == null && _currentStep == 1) {
+      final podeSeguir = await _runAddressDuplicateGate();
+      if (!mounted || !podeSeguir) return;
     }
 
     if (_currentStep < _totalSteps - 1) {
@@ -1848,7 +1925,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
 
     try {
       final request = GenerateDescriptionRequest(
-        type: _selectedType.value,
+        type: _typeValueForForm,
         city: _cityController.text.trim(),
         neighborhood: _neighborhoodController.text.trim().isEmpty
             ? null
@@ -1922,6 +1999,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       'city': _cityController.text,
       'state': _stateController.text,
       'zipCode': _zipCodeController.text,
+      'zipCodeNotApplicable': _zipCodeNotApplicable,
       'totalArea': _totalAreaController.text,
       'builtArea': _builtAreaController.text,
       'bedrooms': _bedroomsController.text,
@@ -1987,6 +2065,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     setIfPresent(_cityController, 'city');
     setIfPresent(_stateController, 'state');
     setIfPresent(_zipCodeController, 'zipCode');
+    if (s('zipCodeNotApplicable') == 'true') _zipCodeNotApplicable = true;
     setIfPresent(_sectorController, 'sector');
     setIfPresent(_internalNotesController, 'internalNotes');
     setIfPresent(_totalAreaController, 'totalArea');
@@ -2415,6 +2494,24 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     }
   }
 
+  /// Edição de imóvel cujo tipo cru o app não reconhece, ainda sem escolha
+  /// de outro tipo: o PATCH não leva `type` (imoveis-01).
+  bool get _loadedTypeUnknownUntouched {
+    final raw = _loadedTypeRaw;
+    return widget.propertyId != null &&
+        !_typeTouched &&
+        raw != null &&
+        raw.isNotEmpty &&
+        PropertyType.fromString(raw) == null;
+  }
+
+  /// Valor de tipo efetivo do formulário (cru quando desconhecido).
+  String get _typeValueForForm =>
+      _loadedTypeUnknownUntouched ? _loadedTypeRaw! : _selectedType.value;
+
+  /// Rótulo do tipo exibido no wizard.
+  String get _typeDisplayLabel => PropertyType.labelOf(_typeValueForForm);
+
   String _resolvedApiStatus(bool saveAsDraft) {
     if (saveAsDraft) return 'draft';
     final isEditing = widget.propertyId != null;
@@ -2577,13 +2674,13 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     // ============================ Step 1 ============================
     final zipDigits =
         _zipCodeController.text.replaceAll(RegExp(r'[^0-9]'), '');
-    if (zipDigits.isEmpty) {
+    if (!_zipCodeNotApplicable && zipDigits.isEmpty) {
       return const _StepValidationFailure(
         step: 1,
         message: 'Informe o CEP do imóvel.',
       );
     }
-    if (zipDigits.length != 8) {
+    if (!_zipCodeNotApplicable && zipDigits.length != 8) {
       return const _StepValidationFailure(
         step: 1,
         message: 'O CEP deve ter 8 dígitos.',
@@ -2706,17 +2803,30 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     }
 
     // ============================ Step 2 ============================
-    final totalArea = _parseBrazilianAreaToNumber(_totalAreaController.text);
-    if (totalArea == null || totalArea <= 0) {
+    // Paridade com validateSection(2) do web: total opcional (> 0 se
+    // preenchida); construída obrigatória exceto terreno; teto do back.
+    final totalTxt2 = _totalAreaController.text.trim();
+    final builtTxt2 = _builtAreaController.text.trim();
+    final totalArea = _parseBrazilianAreaToNumber(totalTxt2);
+    final builtArea2 = _parseBrazilianAreaToNumber(builtTxt2);
+    if (totalTxt2.isNotEmpty &&
+        (totalArea == null || totalArea <= 0 || totalArea > 99999999.99)) {
       return const _StepValidationFailure(
         step: 2,
-        message: 'Informe a área total do imóvel.',
+        message: 'Área total: informe um valor maior que zero.',
       );
     }
-    if (totalArea >= 1000000) {
+    if (_selectedType != PropertyType.land && builtTxt2.isEmpty) {
       return const _StepValidationFailure(
         step: 2,
-        message: 'A área total deve ser menor que 1.000.000 m².',
+        message: 'Informe a área construída do imóvel.',
+      );
+    }
+    if (builtTxt2.isNotEmpty &&
+        (builtArea2 == null || builtArea2 <= 0 || builtArea2 > 99999999.99)) {
+      return const _StepValidationFailure(
+        step: 2,
+        message: 'Área construída: informe um valor maior que zero.',
       );
     }
     if (_formRequiredKeys.contains('features') && _selectedFeatures.isEmpty) {
@@ -2825,26 +2935,17 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         );
       }
     }
-    if (_acceptsNegotiation) {
-      // O lado desligado pela finalidade não cobra mínimo: o campo nem
-      // está na tela, e reprovar por ele trava o formulário sem explicação.
-      if (saleText.isNotEmpty && _anunciaVenda) {
-        final minS = _minSalePriceController.text.trim();
-        if (minS.isEmpty) {
-          return const _StepValidationFailure(
-            step: 3,
-            message: 'Informe o valor mínimo de venda (negociação ativada).',
-          );
-        }
-        final minPrice = Masks.unmaskMoney(minS) / 100.0;
-        if (minPrice <= 0) {
-          return const _StepValidationFailure(
-            step: 3,
-            message: 'Preço mínimo de venda deve ser positivo.',
-          );
-        }
-        final salePrice = Masks.unmaskMoney(saleText) / 100.0;
-        if (minPrice >= salePrice) {
+    // Paridade com validateSection(3) do web: o preço mínimo é OPCIONAL
+    // (aceitar negociação não obriga). Informado, precisa do preço
+    // correspondente e tem de ser menor que ele. O lado desligado pela
+    // finalidade não é checado (o campo nem está na tela).
+    {
+      final minS = _minSalePriceController.text.trim();
+      final minVenda = minS.isEmpty ? 0.0 : Masks.unmaskMoney(minS) / 100.0;
+      if (_anunciaVenda && minVenda > 0) {
+        final venda =
+            saleText.isEmpty ? 0.0 : Masks.unmaskMoney(saleText) / 100.0;
+        if (venda <= 0 || minVenda >= venda) {
           return const _StepValidationFailure(
             step: 3,
             message:
@@ -2852,24 +2953,12 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           );
         }
       }
-      if (rentText.isNotEmpty && _anunciaLocacao) {
-        final minR = _minRentPriceController.text.trim();
-        if (minR.isEmpty) {
-          return const _StepValidationFailure(
-            step: 3,
-            message:
-                'Informe o valor mínimo de aluguel (negociação ativada).',
-          );
-        }
-        final minPrice = Masks.unmaskMoney(minR) / 100.0;
-        if (minPrice <= 0) {
-          return const _StepValidationFailure(
-            step: 3,
-            message: 'Preço mínimo de aluguel deve ser positivo.',
-          );
-        }
-        final rentPrice = Masks.unmaskMoney(rentText) / 100.0;
-        if (minPrice >= rentPrice) {
+      final minR = _minRentPriceController.text.trim();
+      final minAluguel = minR.isEmpty ? 0.0 : Masks.unmaskMoney(minR) / 100.0;
+      if (_anunciaLocacao && minAluguel > 0) {
+        final aluguel =
+            rentText.isEmpty ? 0.0 : Masks.unmaskMoney(rentText) / 100.0;
+        if (aluguel <= 0 || minAluguel >= aluguel) {
           return const _StepValidationFailure(
             step: 3,
             message:
@@ -3130,21 +3219,33 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       final sectorTrim = _sectorController.text.trim();
       final internalTrim = _internalNotesController.text.trim();
 
-      final omitStatusPatch = isEditing &&
-          _preservePublicationOnEdit &&
-          _loadedPropertyStatus != null &&
-          resolvedStatus == _loadedPropertyStatus;
+      // Paridade com `omitWorkflowFieldsOnEdit` do web
+      // (buildCreatePropertyApiPayload.ts): na EDIÇÃO o status nunca é
+      // reenviado, salvo quando a pessoa pede "salvar como rascunho". Antes o
+      // app derivava o status e mandava 'available' para imóvel vendido,
+      // alugado ou em manutenção — o back zerava soldAt/rentedAt, reativava e
+      // republicava no site. O app também não conhece todos os status do funil
+      // de locação, então reenviar o carregado podia gravar 'draft' por engano.
+      final omitStatusPatch = isEditing && !saveAsDraft;
 
-      final omitPubPatch = isEditing &&
-          _preservePublicationOnEdit &&
-          _loadedPropertyIsAvailableForSite != null &&
-          _publishToSite == _loadedPropertyIsAvailableForSite!;
+      // Publicação: igual ao web — com "manter publicação" ligado nunca vai no
+      // PATCH de edição; desligado, só vai quando a pessoa MUDOU o interruptor.
+      final omitWorkflowFieldsOnEdit =
+          isEditing && _preservePublicationOnEdit && !saveAsDraft;
+      final omitPubPatch = omitWorkflowFieldsOnEdit ||
+          (isEditing &&
+              !saveAsDraft &&
+              _loadedPropertyIsAvailableForSite != null &&
+              _publishToSite == _loadedPropertyIsAvailableForSite!);
 
       final data = <String, dynamic>{
         'title': _titleController.text.trim(),
         'description': _descriptionController.text.trim(),
         'internalNotes': internalTrim.isEmpty ? null : internalTrim,
-        'type': _selectedType.value,
+        // Tipo cru desconhecido e intocado não vai no PATCH: o enum só tem um
+        // fallback de exibição, e reenviá-lo trocava loja/cobertura por
+        // "Casa" no banco (imoveis-01).
+        if (!_loadedTypeUnknownUntouched) 'type': _selectedType.value,
         'address': fullAddress,
         'street': street,
         'number': number,
@@ -3153,7 +3254,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         'sector': sectorTrim.isEmpty ? null : sectorTrim,
         'city': _cityController.text.trim(),
         'state': _stateController.text.trim().toUpperCase(),
-        'zipCode': _zipCodeController.text.trim(),
+        'zipCode': _zipCodeNotApplicable ? 'N/A' : _zipCodeController.text.trim(),
         if (totalAreaParsed != null && totalAreaParsed >= 0.01)
           'totalArea': totalAreaParsed,
         'builtArea': builtParsed ?? 0,
@@ -3204,15 +3305,20 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           'ownerAddress': _ownerAddressController.text.trim(),
         // Campos extras alinhados a `buildCreatePropertyApiPayload.ts`
         'isFeatured': _isFeatured,
-        'isHighStandard': false,
-        'hasPlaque': false,
-        'hasExclusivity': false,
-        'isPrivate': false,
-        'bail': false,
-        'suretyBond': false,
-        'bondApplication': false,
-        'credpagoGuarantee': false,
-        'guarantor': false,
+        // O app não edita estes marcadores. Na EDIÇÃO eles não vão no PATCH:
+        // mandar false apagava Exclusividade, Placa, Alto padrão e garantias
+        // de locação marcados no web. Na criação o padrão é false, como no web.
+        if (!isEditing) ...{
+          'isHighStandard': false,
+          'hasPlaque': false,
+          'hasExclusivity': false,
+          'isPrivate': false,
+          'bail': false,
+          'suretyBond': false,
+          'bondApplication': false,
+          'credpagoGuarantee': false,
+          'guarantor': false,
+        },
       };
 
       if (!omitStatusPatch) {
@@ -3230,8 +3336,12 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       } else {
         final cap = _loadedCapturedById;
         if (cap != null && cap.isNotEmpty) {
-          data['capturedById'] = cap;
-          data['capturedByIds'] = [cap];
+          // Captadores NÃO vão no PATCH de edição: `capturedByIds` faz o back
+          // regravar a lista inteira (replacePropertyCaptors) — sumia quem foi
+          // incluído como captador pelo web — e troca de captador é campo
+          // protegido, abrindo pedido de alteração que ninguém pediu. Só a
+          // reclassificação de papel (captorAssignments sem capturedByIds) é
+          // aplicada direto pelo back, mantendo os mesmos captadores.
           // TROCAR a finalidade exige papel de captador compatível: o
           // backend recusa 'ambos' sem captador de locação
           // (assertCaptorsMatchFinalidade). O papel JÁ GRAVADO vence o
@@ -3294,14 +3404,28 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         }
         return true;
       }).toList();
-      final cfgErr = configurableFieldsErrorPt(effectiveRequired, data);
+      // A checagem local olha o imóvel como ele fica depois do PATCH: o que
+      // não vai no corpo da edição (tipo cru desconhecido, captadores) segue
+      // gravado no back e não pode reprovar como "campo vazio".
+      final loadedCap = _loadedCapturedById ?? '';
+      final cfgView = <String, dynamic>{
+        ...data,
+        if (!data.containsKey('type')) 'type': _typeValueForForm,
+        if (isEditing &&
+            !data.containsKey('capturedById') &&
+            loadedCap.isNotEmpty) ...{
+          'capturedById': loadedCap,
+          'capturedByIds': [loadedCap],
+        },
+      };
+      final cfgErr = configurableFieldsErrorPt(effectiveRequired, cfgView);
       if (cfgErr != null) {
         // Identificar o primeiro key obrigatório que está vazio para
         // saltar até o step correspondente — paridade com a navegação
         // automática nos validadores acima.
         int? targetStep;
         for (final key in effectiveRequired) {
-          if (!isConfigurableFieldPresent(key, data)) {
+          if (!isConfigurableFieldPresent(key, cfgView)) {
             targetStep = _fieldStepMap[key];
             if (targetStep != null) break;
           }
@@ -3316,9 +3440,59 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         return;
       }
 
-      final response = isEditing
+      // Duplicidade de endereço antes de gravar (paridade com
+      // `handleCreateProperty` do web): mesmo quem já seguiu na etapa 2
+      // confirma aqui; só então vai `duplicateConfirmedByUser = true`.
+      var duplicidadeConfirmada = false;
+      if (!isEditing) {
+        final dup = await _propertyService.checkDuplicate(
+          _duplicateCheckPayload(),
+        );
+        if (!mounted) return;
+        // Falha da checagem não trava: o back barra com 409 e tratamos abaixo.
+        if (dup.success && dup.data != null && dup.data!.hasDuplicate) {
+          final seguir = await showPropertyDuplicateSheet(
+            context: context,
+            duplicates: dup.data!.duplicates,
+            submitPhase: true,
+          );
+          if (!mounted || !seguir) return;
+          duplicidadeConfirmada = true;
+          data['duplicateConfirmedByUser'] = true;
+        }
+      }
+
+      var response = isEditing
           ? await _propertyService.updateProperty(widget.propertyId!, data)
           : await _propertyService.createProperty(data);
+
+      // 409 PROPERTY_DUPLICATE_DETECTED (ex.: outro imóvel gravado entre a
+      // checagem e o POST): mostra os candidatos e, confirmado, reenvia com
+      // `duplicateConfirmedByUser = true`. O corpo do 409 chega sem a lista
+      // (o filtro global do back a descarta), então ela é buscada de novo.
+      if (!isEditing &&
+          !duplicidadeConfirmada &&
+          mounted &&
+          PropertyService.isDuplicateConflict(response)) {
+        var candidatos = PropertyService.duplicatesFromConflict(response);
+        if (candidatos.isEmpty) {
+          final again = await _propertyService.checkDuplicate(
+            _duplicateCheckPayload(),
+          );
+          if (again.success && again.data != null) {
+            candidatos = again.data!.duplicates;
+          }
+        }
+        if (!mounted) return;
+        final seguir = await showPropertyDuplicateSheet(
+          context: context,
+          duplicates: candidatos,
+          submitPhase: true,
+        );
+        if (!mounted || !seguir) return;
+        data['duplicateConfirmedByUser'] = true;
+        response = await _propertyService.createProperty(data);
+      }
 
       if (mounted) {
         if (response.success && response.data != null) {
@@ -4314,20 +4488,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             ? '· Endereço pelo empreendimento'
             : '· Endereço próprio (CEP)';
 
-    IconData typeIcon(PropertyType t) {
-      switch (t) {
-        case PropertyType.house:
-          return Icons.home_rounded;
-        case PropertyType.apartment:
-          return Icons.apartment_rounded;
-        case PropertyType.commercial:
-          return Icons.business_rounded;
-        case PropertyType.land:
-          return Icons.location_on_rounded;
-        case PropertyType.rural:
-          return Icons.cottage_rounded;
-      }
-    }
+    IconData typeIcon(PropertyType t) => PropertyTypeVisual.rounded(t);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
@@ -4360,7 +4521,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _selectedType.label,
+                  _typeDisplayLabel,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyMedium?.copyWith(
@@ -4696,18 +4857,32 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                 : Wrap(
                     spacing: 8,
                     runSpacing: 8,
-                    children: PropertyType.values.map((type) {
-                      final isSelected = _selectedType == type;
-                      return ChoiceChip(
-                        label: Text(type.label),
-                        selected: isSelected,
-                        onSelected: (selected) {
-                          if (selected) {
-                            _setStateAndPersist(() => _selectedType = type);
-                          }
-                        },
-                      );
-                    }).toList(),
+                    children: [
+                      // Tipo gravado que o app não conhece: aparece como veio
+                      // e continua marcado até a pessoa escolher outro.
+                      if (_loadedTypeUnknownUntouched)
+                        ChoiceChip(
+                          label: Text(_typeDisplayLabel),
+                          selected: true,
+                          onSelected: (_) {},
+                        ),
+                      ...PropertyType.values.map((type) {
+                        final isSelected = !_loadedTypeUnknownUntouched &&
+                            _selectedType == type;
+                        return ChoiceChip(
+                          label: Text(type.label),
+                          selected: isSelected,
+                          onSelected: (selected) {
+                            if (selected) {
+                              _setStateAndPersist(() {
+                                _selectedType = type;
+                                _typeTouched = true;
+                              });
+                            }
+                          },
+                        );
+                      }),
+                    ],
                   ),
           ),
           if (_formRequiredKeys.contains('teamId') || _formTeams.isNotEmpty) ...[
@@ -4830,11 +5005,13 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
               children: [
                 CustomTextField(
                   controller: _zipCodeController,
-                  label: 'CEP *',
+                  label: _zipCodeNotApplicable ? 'CEP' : 'CEP *',
+                  enabled: !_zipCodeNotApplicable,
                   hint: '00000-000',
                   keyboardType: TextInputType.number,
                   inputFormatters: [CepInputFormatter()],
                   validator: (value) {
+                    if (_zipCodeNotApplicable) return null;
                     if (value == null || value.trim().isEmpty) {
                       return 'CEP é obrigatório';
                     }
@@ -4851,6 +5028,20 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                     ),
                     onPressed: _searchCep,
                     tooltip: 'Buscar CEP',
+                  ),
+                ),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: _zipCodeNotApplicable,
+                  onChanged: (v) => setState(() {
+                    _zipCodeNotApplicable = v ?? false;
+                    if (_zipCodeNotApplicable) _zipCodeController.text = '';
+                  }),
+                  title: const Text('Sem CEP (não se aplica)'),
+                  subtitle: const Text(
+                    'Imóvel rural, terreno ou loteamento sem CEP: preencha o endereço à mão.',
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -5208,7 +5399,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             theme,
             icon: Icons.straighten_rounded,
             title: 'Metragens',
-            subtitle: 'Informe pelo menos a área total livre útil quando souber.',
+            subtitle: 'A área construída é obrigatória (exceto terreno); a total é opcional.',
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -5216,7 +5407,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                   child: _buildFormField(
                     theme,
                     controller: _totalAreaController,
-                    label: 'Área total (m²) *',
+                    label: 'Área total (m²)',
                     hint: '0.0',
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
@@ -5227,15 +5418,11 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                       ),
                     ],
                     validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'Área total é obrigatória';
-                      }
+                      // Opcional no web; se preenchida, > 0.
+                      if (value == null || value.trim().isEmpty) return null;
                       final area = double.tryParse(value);
                       if (area == null || area <= 0) {
                         return 'Área deve ser maior que zero';
-                      }
-                      if (area >= 1000000) {
-                        return 'Área total deve ser menor que 1.000.000 m²';
                       }
                       return null;
                     },
@@ -5246,7 +5433,9 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                   child: _buildFormField(
                     theme,
                     controller: _builtAreaController,
-                    label: 'Área construída (m²)',
+                    label: _selectedType == PropertyType.land
+                        ? 'Área construída (m²)'
+                        : 'Área construída (m²) *',
                     hint: '0.0',
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
@@ -5257,22 +5446,15 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                       ),
                     ],
                     validator: (value) {
-                      if (value != null && value.trim().isNotEmpty) {
-                        final area = double.tryParse(value);
-                        if (area != null) {
-                          if (area <= 0) {
-                            return 'Área construída deve ser positiva';
-                          }
-                          if (area >= 1000000) {
-                            return 'Área construída deve ser menor que 1.000.000 m²';
-                          }
-                          final totalArea = double.tryParse(
-                            _totalAreaController.text,
-                          );
-                          if (totalArea != null && area > totalArea) {
-                            return 'Não pode exceder a área total';
-                          }
-                        }
+                      // Obrigatória exceto terreno (web); se preenchida, > 0.
+                      if (value == null || value.trim().isEmpty) {
+                        return _selectedType == PropertyType.land
+                            ? null
+                            : 'Área construída é obrigatória';
+                      }
+                      final area = double.tryParse(value);
+                      if (area == null || area <= 0) {
+                        return 'Área construída deve ser positiva';
                       }
                       return null;
                     },
@@ -6678,11 +6860,45 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                         (_requireApprovalToPublishOnSite &&
                             (_publishToSite || !_listingStatusIsDraft)))
                     ? 'Esta empresa pode exigir fila de aprovação, autorização do proprietário e/ou aprovação de publicação — o backend define os status efetivos ao salvar, como no Intellisys web.'
-                    : 'Escolha como o imóvel entra no CRM e se deseja solicitar publicação no site.',
+                    : widget.propertyId != null
+                        ? 'O status atual é mantido ao salvar; aqui você ajusta destaque e publicação no site.'
+                        : 'Escolha como o imóvel entra no CRM e se deseja solicitar publicação no site.',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (_approvalSettingsLoaded &&
+                // Edição: o status não vai no PATCH (só "salvar como
+                // rascunho" o envia), então mostra o status REAL carregado —
+                // inclusive funil de locação e aguardando publicação — em vez
+                // de um seletor Rascunho/Disponível que não teria efeito.
+                if (widget.propertyId != null) ...[
+                  Text(
+                    'STATUS ATUAL',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.0,
+                      fontSize: 10,
+                      color: ThemeHelpers.textSecondaryColor(context),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: PropertyStatusPill(
+                      status: PropertyStatus.fromString(_loadedPropertyStatus) ??
+                          PropertyStatus.draft,
+                      rawStatus: _loadedPropertyStatus,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Salvar a edição não muda o status. Ele muda pelas ações do imóvel.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: ThemeHelpers.textSecondaryColor(context),
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                ] else if (_approvalSettingsLoaded &&
                     !_requireApprovalToBeAvailable &&
                     !_requireOwnerAuthorizationToBeAvailable) ...[
                   Text(
@@ -6791,7 +7007,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       _ReviewTileData(
         icon: Icons.home_rounded,
         label: 'Tipo',
-        value: _selectedType.label,
+        value: _typeDisplayLabel,
       ),
       if (loc.isNotEmpty)
         _ReviewTileData(
@@ -7089,6 +7305,8 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                         ? CustomButton(
                             text: 'Continuar',
                             onPressed: _nextStep,
+                            // Checando duplicidade de endereço (etapa 2).
+                            isLoading: _checkingDuplicate,
                             icon: Icons.arrow_forward_rounded,
                           )
                         : widget.propertyId != null

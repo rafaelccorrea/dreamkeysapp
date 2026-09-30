@@ -589,19 +589,26 @@ class DocumentService {
   /// Lista todas as assinaturas
   Future<ApiResponse<SignatureListResponse>> getSignatures({
     DocumentSignatureStatus? status,
+    String? search,
     int page = 1,
     int limit = 20,
   }) async {
     try {
       debugPrint('✍️ [DOCUMENT_SERVICE] Buscando assinaturas...');
 
+      // Mesma ordenação da tela de assinaturas do web (AllSignaturesPage).
       final queryParams = <String, String>{
         'page': page.toString(),
         'limit': limit.toString(),
+        'sortBy': 'createdAt',
+        'sortOrder': 'DESC',
       };
 
       if (status != null) {
         queryParams['status'] = status.value;
+      }
+      if (search != null && search.trim().isNotEmpty) {
+        queryParams['search'] = search.trim();
       }
 
       final response = await _apiService.get<dynamic>(
@@ -724,6 +731,241 @@ class DocumentService {
       );
     }
   }
+
+  // ─── Assinaturas de um documento (paridade `documentSignatureApi.ts`) ───
+  //
+  // O web ainda anexa `?companyId=` nessas rotas, mas o back ignora a query
+  // ("Empresa validada pelo CompanyGuard, nunca a query string") e usa o
+  // header `X-Company-ID`, que o `ApiService` já envia.
+
+  /// Lista as assinaturas do documento — `GET /documents/:id/signatures`.
+  Future<ApiResponse<List<DocumentSignature>>> getDocumentSignatures(
+    String documentId,
+  ) async {
+    try {
+      final response = await _apiService.get<dynamic>(
+        ApiConstants.documentSignatures(documentId),
+      );
+      if (response.success && response.data != null) {
+        final raw = response.data is List
+            ? response.data as List<dynamic>
+            : (response.data is Map
+                ? ((response.data as Map)['signatures'] ??
+                        (response.data as Map)['data'])
+                    as List<dynamic>?
+                : null);
+        final list = <DocumentSignature>[];
+        for (final e in raw ?? const <dynamic>[]) {
+          if (e is Map) {
+            list.add(DocumentSignature.fromJson(Map<String, dynamic>.from(e)));
+          }
+        }
+        return ApiResponse.success(data: list, statusCode: response.statusCode);
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao carregar assinaturas',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [DOCUMENT_SERVICE] Erro: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Estatísticas — `GET /documents/:id/signatures/stats`.
+  Future<ApiResponse<DocumentSignatureStats>> getDocumentSignatureStats(
+    String documentId,
+  ) async {
+    try {
+      final response = await _apiService.get<Map<String, dynamic>>(
+        ApiConstants.documentSignaturesStats(documentId),
+      );
+      if (response.success && response.data != null) {
+        return ApiResponse.success(
+          data: DocumentSignatureStats.fromJson(response.data!),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao carregar estatísticas',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Cria uma assinatura avulsa — `POST /documents/:id/signatures`.
+  Future<ApiResponse<DocumentSignature>> createSignature({
+    required String documentId,
+    required SignatureSignerInput signer,
+    DateTime? expiresAt,
+  }) async {
+    try {
+      final response = await _apiService.post<Map<String, dynamic>>(
+        ApiConstants.documentSignatures(documentId),
+        body: {
+          ...signer.toJson(),
+          if (expiresAt != null)
+            'expiresAt': expiresAt.toUtc().toIso8601String(),
+        },
+      );
+      if (response.success && response.data != null) {
+        return ApiResponse.success(
+          data: DocumentSignature.fromJson(response.data!),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao criar assinatura',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Envio em lote (o caminho que o web usa) —
+  /// `POST /documents/:id/signatures/batch`.
+  Future<ApiResponse<BatchSignatureResult>> createSignaturesBatch({
+    required String documentId,
+    required List<SignatureSignerInput> signers,
+    DateTime? expiresAt,
+    bool sendEmail = true,
+  }) async {
+    try {
+      final response = await _apiService.post<Map<String, dynamic>>(
+        ApiConstants.documentSignaturesBatch(documentId),
+        body: {
+          'signers': signers.map((s) => s.toJson()).toList(),
+          if (expiresAt != null)
+            'expiresAt': expiresAt.toUtc().toIso8601String(),
+          'sendEmail': sendEmail,
+        },
+      );
+      if (response.success && response.data != null) {
+        return ApiResponse.success(
+          data: BatchSignatureResult.fromJson(response.data!),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message:
+            response.message ?? 'Erro ao enviar documento para assinatura',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Envia o link por e-mail —
+  /// `POST /documents/:id/signatures/:signatureId/send-email`.
+  Future<ApiResponse<void>> sendSignatureEmail(
+    String documentId,
+    String signatureId,
+  ) async {
+    try {
+      final response = await _apiService.post<dynamic>(
+        ApiConstants.documentSignatureSendEmail(documentId, signatureId),
+      );
+      if (response.success) {
+        return ApiResponse.success(statusCode: response.statusCode);
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao enviar email',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Reenvia o link por e-mail (reusa a URL existente) —
+  /// `POST /documents/:id/signatures/:signatureId/resend-email`.
+  Future<ApiResponse<void>> resendSignatureEmail(
+    String documentId,
+    String signatureId,
+  ) async {
+    try {
+      final response = await _apiService.post<dynamic>(
+        ApiConstants.documentSignatureResendEmail(documentId, signatureId),
+      );
+      if (response.success) {
+        return ApiResponse.success(statusCode: response.statusCode);
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao reenviar email',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Usuários ativos da empresa para o signatário "Usuário do sistema" —
+  /// mesmo filtro do web (`getUsers({ limit: 100, active: true,
+  /// allCompanyUsers: true })` → `GET /admin/users`).
+  Future<ApiResponse<List<SignerUserOption>>> getSignerUsers() async {
+    try {
+      final response = await _apiService.get<dynamic>(
+        ApiConstants.adminUsers,
+        queryParameters: const {
+          'page': '1',
+          'limit': '100',
+          'active': 'true',
+          'allCompanyUsers': 'true',
+          'compact': 'true',
+        },
+      );
+      if (response.success && response.data != null) {
+        final data = response.data;
+        final raw = data is List
+            ? data
+            : (data is Map ? data['data'] as List<dynamic>? : null);
+        final users = <SignerUserOption>[];
+        for (final e in raw ?? const <dynamic>[]) {
+          if (e is! Map) continue;
+          final m = Map<String, dynamic>.from(e);
+          // Web: `filterActiveCompanyUsers` — só vínculo ativo na empresa.
+          if (m['isActiveInCompany'] == false) continue;
+          final u = SignerUserOption.fromJson(m);
+          if (u.id.isNotEmpty) users.add(u);
+        }
+        users.sort(
+          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+        );
+        return ApiResponse.success(data: users, statusCode: response.statusCode);
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao carregar usuários',
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
 }
 
 /// Resposta de Lista de Assinaturas
@@ -737,14 +979,30 @@ class SignatureListResponse {
   });
 
   factory SignatureListResponse.fromJson(Map<String, dynamic> json) {
+    // `GET /signatures` devolve `{ signatures, total, page, limit }` (o web lê
+    // `response.signatures`); versões antigas usavam `data`. Ler só `data`
+    // deixava a tela de assinaturas sempre vazia.
+    final raw = json['signatures'] as List<dynamic>? ??
+        json['data'] as List<dynamic>?;
+    DocumentPagination? pagination;
+    if (json['pagination'] != null) {
+      pagination = DocumentPagination.fromJson(json['pagination']);
+    } else if (json['total'] != null) {
+      final total = int.tryParse(json['total'].toString()) ?? 0;
+      final limit = int.tryParse(json['limit']?.toString() ?? '') ?? 20;
+      pagination = DocumentPagination(
+        currentPage: int.tryParse(json['page']?.toString() ?? '') ?? 1,
+        totalPages: limit > 0 ? (total / limit).ceil() : 1,
+        totalItems: total,
+        itemsPerPage: limit,
+      );
+    }
     return SignatureListResponse(
-      data: (json['data'] as List<dynamic>?)
+      data: raw
               ?.map((e) => DocumentSignature.fromJson(e as Map<String, dynamic>))
               .toList() ??
           [],
-      pagination: json['pagination'] != null
-          ? DocumentPagination.fromJson(json['pagination'])
-          : null,
+      pagination: pagination,
     );
   }
 }

@@ -85,7 +85,7 @@ class PublicSiteService {
   }
 
   /// `PATCH /public-site-config/custom-domain` — salva o domínio próprio e
-  /// dispara o registro do hostname (ativação automática quando o CNAME
+  /// dispara o registro do hostname (ativação automática quando o registro
   /// propagar).
   Future<ApiResponse<PublicSiteConfig>> updateCustomDomain(
     String customDomain,
@@ -107,7 +107,7 @@ class PublicSiteService {
   }
 
   /// `POST /public-site-config/custom-domain/verify-dns` — verifica a
-  /// propagação do CNAME e ativa o domínio quando resolvido.
+  /// propagação do registro DNS e ativa o domínio quando resolvido.
   Future<ApiResponse<VerifyCustomDomainDnsResult>> verifyCustomDomainDns()
       async {
     try {
@@ -200,7 +200,7 @@ class PublicSiteService {
     }
   }
 
-  /// `GET /public-site-config/dns-instructions` — instruções de CNAME.
+  /// `GET /public-site-config/dns-instructions` — registros A/CNAME a criar.
   /// Nunca falha: payload parcial/erro cai nos defaults (paridade com a
   /// normalização do web).
   Future<PublicSiteDnsInstructions> getDnsInstructions() async {

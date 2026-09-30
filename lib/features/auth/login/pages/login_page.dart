@@ -17,6 +17,7 @@ import '../../../../shared/widgets/image_curve_clipper.dart';
 import '../../../../shared/widgets/loading_overlay.dart';
 import '../../../../shared/utils/validators.dart';
 import '../widgets/biometric_enrollment_dialog.dart';
+import '../../two_factor/pages/two_factor_setup_page.dart';
 
 /// Permite scroll apenas quando há overflow real (biometria, teclado, telas baixas).
 class _LoginViewportScrollPhysics extends ScrollPhysics {
@@ -146,6 +147,23 @@ class _LoginPageState extends State<LoginPage> {
               'password': result.password ?? _passwordController.text,
               'tempToken': result.tempToken ?? '',
             },
+          );
+        }
+        return false;
+      }
+
+      // Empresa exige 2FA e o usuário ainda não configurou: abre o setup
+      // (QR + código) — paridade com o TwoFactorSetupModal do web.
+      if (result.requires2FASetup) {
+        if (mounted) {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => TwoFactorSetupPage(
+                email: result.email ?? email,
+                password: result.password ?? _passwordController.text,
+                rememberMe: result.rememberMe ?? false,
+              ),
+            ),
           );
         }
         return false;

@@ -74,7 +74,57 @@ class PropertyStatusVisual {
           color: const Color(0xFFEF4444),
           icon: LucideIcons.wrench,
         );
+      // Cores do `PropertyStatusIcon` do web.
+      case PropertyStatus.pendingPublication:
+        return _v(status, const Color(0xFF2563EB), LucideIcons.clock);
+      case PropertyStatus.inService:
+        return _v(status, const Color(0xFF0EA5E9), LucideIcons.headphones);
+      case PropertyStatus.visitScheduled:
+        return _v(status, const Color(0xFF6366F1), LucideIcons.calendarCheck);
+      case PropertyStatus.inVisit:
+        return _v(status, const Color(0xFF8B5CF6), LucideIcons.doorOpen);
+      case PropertyStatus.inNegotiation:
+        return _v(status, const Color(0xFFA855F7), LucideIcons.handshake);
+      case PropertyStatus.proposalReceived:
+        return _v(status, const Color(0xFFD946EF), LucideIcons.inbox);
+      case PropertyStatus.registrationAnalysis:
+        return _v(status, const Color(0xFFEC4899), LucideIcons.clipboardCheck);
+      case PropertyStatus.documentation:
+        return _v(status, const Color(0xFFF43F5E), LucideIcons.fileText);
+      case PropertyStatus.contractDrafting:
+        return _v(status, const Color(0xFFF97316), LucideIcons.clipboardList);
+      case PropertyStatus.signature:
+        return _v(status, const Color(0xFFEAB308), LucideIcons.penLine);
     }
+  }
+
+  /// Resolve a partir do valor cru da API. Status que o app não conhece sai
+  /// neutro, com o próprio valor como rótulo (regra do
+  /// `translatePropertyStatus` do web) — nunca disfarçado de "Rascunho".
+  factory PropertyStatusVisual.ofRaw(PropertyStatus status, String? raw) {
+    final r = raw?.trim() ?? '';
+    if (r.isEmpty || PropertyStatus.fromString(r) != null) {
+      return PropertyStatusVisual.of(PropertyStatus.fromString(r) ?? status);
+    }
+    return PropertyStatusVisual(
+      label: r,
+      shortLabel: r,
+      color: const Color(0xFF6B7280),
+      icon: LucideIcons.helpCircle,
+    );
+  }
+
+  static PropertyStatusVisual _v(
+    PropertyStatus status,
+    Color color,
+    IconData icon,
+  ) {
+    return PropertyStatusVisual(
+      label: status.label,
+      shortLabel: status.shortLabel,
+      color: color,
+      icon: icon,
+    );
   }
 }
 
@@ -87,6 +137,7 @@ class PropertyStatusPill extends StatelessWidget {
   const PropertyStatusPill({
     super.key,
     required this.status,
+    this.rawStatus,
     this.short = false,
     this.solid = false,
     this.dense = false,
@@ -96,6 +147,10 @@ class PropertyStatusPill extends StatelessWidget {
 
   /// Status do imóvel.
   final PropertyStatus status;
+
+  /// Valor cru da API (`Property.statusRaw`). Quando informado e desconhecido,
+  /// a pill mostra o próprio valor em tom neutro.
+  final String? rawStatus;
 
   /// Quando `true`, usa o label curto (ex.: "Aguard. proprietário").
   /// Útil em cards estreitos.
@@ -116,7 +171,7 @@ class PropertyStatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final v = PropertyStatusVisual.of(status);
+    final v = PropertyStatusVisual.ofRaw(status, rawStatus);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     if (solid) {

@@ -7,6 +7,7 @@ import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/shell_visual_tokens.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/module_access_service.dart';
 import '../../../shared/utils/masks.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
@@ -120,13 +121,11 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
                   }
                 },
                 itemBuilder: (_) => [
-                  const PopupMenuItem(
+                  _lockableMenuItem(
                     value: 'edit',
-                    child: Row(children: [
-                      Icon(Icons.edit_outlined, size: 18),
-                      SizedBox(width: 10),
-                      Text('Editar'),
-                    ]),
+                    icon: Icons.edit_outlined,
+                    label: 'Editar',
+                    permission: 'client:update',
                   ),
                   // Matches oculto no app: item fora do menu.
                   if (FeatureVisibility.matchesEnabled)
@@ -138,22 +137,19 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
                         Text('Ver matches'),
                       ]),
                     ),
-                  const PopupMenuItem(
+                  _lockableMenuItem(
                     value: 'transfer',
-                    child: Row(children: [
-                      Icon(Icons.swap_horiz_rounded, size: 18),
-                      SizedBox(width: 10),
-                      Text('Transferir'),
-                    ]),
+                    icon: Icons.swap_horiz_rounded,
+                    label: 'Transferir',
+                    permission: 'client:transfer',
                   ),
                   const PopupMenuDivider(),
-                  const PopupMenuItem(
+                  _lockableMenuItem(
                     value: 'delete',
-                    child: Row(children: [
-                      Icon(Icons.delete_outline, size: 18, color: Colors.red),
-                      SizedBox(width: 10),
-                      Text('Excluir', style: TextStyle(color: Colors.red)),
-                    ]),
+                    icon: Icons.delete_outline,
+                    label: 'Excluir',
+                    permission: 'client:delete',
+                    destructive: true,
                   ),
                 ],
               ),
@@ -207,6 +203,41 @@ class _ClientDetailsPageState extends State<ClientDetailsPage> {
                         ),
                       ),
                     ),
+    );
+  }
+
+  /// Mesmas permissões do web (`client:update`, `client:transfer`,
+  /// `client:delete`); sem ela o item fica travado com cadeado.
+  PopupMenuItem<String> _lockableMenuItem({
+    required String value,
+    required IconData icon,
+    required String label,
+    required String permission,
+    bool destructive = false,
+  }) {
+    final allowed = ModuleAccessService.instance.hasPermission(permission);
+    final color = !allowed
+        ? ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.6)
+        : (destructive ? AppColors.status.error : null);
+    return PopupMenuItem<String>(
+      value: value,
+      enabled: allowed,
+      child: Row(children: [
+        Icon(
+          allowed ? icon : Icons.lock_outline_rounded,
+          size: 18,
+          color: color,
+        ),
+        const SizedBox(width: 10),
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: color),
+          ),
+        ),
+      ]),
     );
   }
 

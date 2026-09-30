@@ -3,13 +3,38 @@ import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/profile_service.dart';
 import '../../../shared/utils/input_formatters.dart';
+import '../../../shared/utils/masks.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/custom_text_field.dart';
+import '../../../shared/widgets/skeleton_box.dart';
 import '../models/client_model.dart';
 import '../services/client_service.dart';
+import '../utils/client_phone_rules.dart';
+import '../widgets/client_date_field.dart';
+import '../widgets/spouse_form.dart';
+
+/// Características desejadas — mesmas chaves e rótulos do
+/// `DesiredFeaturesInput` do web (`types/match.ts › DesiredFeatures`).
+const List<(String, String, IconData)> _kDesiredFeatures = [
+  ('hasGarage', 'Garagem', Icons.garage_outlined),
+  ('hasPool', 'Piscina', Icons.pool_outlined),
+  ('hasGarden', 'Jardim', Icons.yard_outlined),
+  ('hasBalcony', 'Varanda', Icons.balcony_outlined),
+  ('hasGrill', 'Churrasqueira', Icons.outdoor_grill_outlined),
+  ('hasElevator', 'Elevador', Icons.elevator_outlined),
+  ('isFurnished', 'Mobiliado', Icons.chair_outlined),
+  ('petsAllowed', 'Aceita Pets', Icons.pets_outlined),
+  ('hasAirConditioning', 'Ar Condicionado', Icons.ac_unit_outlined),
+  ('hasGatedCommunity', 'Condomínio Fechado', Icons.fence_outlined),
+  ('hasSportsArea', 'Área de Esportes', Icons.sports_soccer_outlined),
+  ('hasPartyRoom', 'Salão de Festas', Icons.celebration_outlined),
+  ('hasPlayground', 'Playground', Icons.toys_outlined),
+  ('hasSecurity', 'Segurança 24h', Icons.security_outlined),
+];
 
 /// Página de criação / edição de cliente.
 class ClientFormPage extends StatefulWidget {
@@ -81,6 +106,27 @@ class _ClientFormPageState extends State<ClientFormPage> {
   final _mcmvCadunicoNumberController = TextEditingController();
   final _notesController = TextEditingController();
 
+  // Características desejadas ("Outras características", separadas por vírgula)
+  final _otherFeaturesController = TextEditingController();
+  Map<String, dynamic> _desiredFeatures = {};
+
+  // Vida profissional (datas) e crédito — paridade com o web
+  DateTime? _jobStartDate;
+  DateTime? _jobEndDate;
+  bool _isCurrentlyWorking = true;
+  DateTime? _lastCreditCheck;
+
+  // Captador: o do cadastro; só na falta dele usa o usuário atual (web).
+  String? _capturedById;
+  List<UserInfo> _users = [];
+  bool _loadingUsers = false;
+
+  // Cônjuge (seção aparece na edição, com Casado(a) ou União Estável)
+  Spouse? _spouse;
+
+  /// Regra do web: havendo renda, exigir situação profissional ou aposentado.
+  String? _employmentError;
+
   // Estado
   ClientType _selectedType = ClientType.general;
   ClientStatus _selectedStatus = ClientStatus.active;
@@ -115,7 +161,24 @@ class _ClientFormPageState extends State<ClientFormPage> {
   void initState() {
     super.initState();
     _loadCurrentUserId();
+    _loadUsers();
     if (widget.clientId != null) _loadClient();
+  }
+
+  bool get _hasFormPermission => ModuleAccessService.instance.hasPermission(
+        widget.clientId == null ? 'client:create' : 'client:update',
+      );
+
+  Future<void> _loadUsers() async {
+    setState(() => _loadingUsers = true);
+    final response = await ClientService.instance.getCompanyUsers();
+    if (!mounted) return;
+    setState(() {
+      _loadingUsers = false;
+      if (response.success && response.data != null) {
+        _users = response.data!;
+      }
+    });
   }
 
   @override
@@ -140,7 +203,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
       _minValueController, _maxValueController,
       _minAreaController, _maxAreaController,
       _dependentsNotesController, _mcmvCadunicoNumberController,
-      _notesController,
+      _notesController, _otherFeaturesController,
     ];
     for (final c in controllers) {
       c.dispose();
@@ -161,7 +224,12 @@ class _ClientFormPageState extends State<ClientFormPage> {
     try {
       final response = await ProfileService.instance.getProfile();
       if (response.success && response.data != null && mounted) {
-        setState(() => _currentUserId = response.data!.id);
+        setState(() {
+          _currentUserId = response.data!.id;
+          // Novo cadastro: captador padrão = usuário atual. Na edição o
+          // `_loadClient` sobrescreve com o captador gravado.
+          _capturedById ??= response.data!.id;
+        });
       }
     } catch (e) {
       debugPrint('Erro ao carregar ID do usuário: $e');
@@ -190,12 +258,15 @@ class _ClientFormPageState extends State<ClientFormPage> {
 
           _nameController.text = c.name;
           _emailController.text = c.email;
-          _cpfController.text = c.cpf;
-          _phoneController.text = c.phone;
-          _secondaryPhoneController.text = c.secondaryPhone ?? '';
-          _whatsappController.text = c.whatsapp ?? '';
+          _cpfController.text =
+              c.cpf.trim().isEmpty ? '' : Masks.cpf(c.cpf);
+          _phoneController.text = ClientPhoneRules.maskAuto(c.phone);
+          _secondaryPhoneController.text =
+              ClientPhoneRules.maskAuto(c.secondaryPhone);
+          _whatsappController.text = ClientPhoneRules.maskAuto(c.whatsapp);
           _rgController.text = c.rg ?? '';
-          _zipCodeController.text = c.zipCode;
+          _zipCodeController.text =
+              c.zipCode.trim().isEmpty ? '' : Masks.cep(c.zipCode);
           _addressController.text = c.address;
           _cityController.text = c.city;
           _stateController.text = c.state;
@@ -218,16 +289,32 @@ class _ClientFormPageState extends State<ClientFormPage> {
           _companyNameController.text = c.companyName ?? '';
           _jobPositionController.text = c.jobPosition ?? '';
           _contractTypeController.text = c.contractType ?? '';
-          _monthlyIncomeController.text = c.monthlyIncome?.toString() ?? '';
-          _grossSalaryController.text = c.grossSalary?.toString() ?? '';
-          _netSalaryController.text = c.netSalary?.toString() ?? '';
-          _thirteenthSalaryController.text =
-              c.thirteenthSalary?.toString() ?? '';
-          _vacationPayController.text = c.vacationPay?.toString() ?? '';
+          // Dinheiro já no formato do MoneyInputFormatter ('R$ 3500,00'):
+          // com '3500.0' cru, apagar um dígito virava 'R$ 35,00'.
+          _monthlyIncomeController.text = _moneyText(c.monthlyIncome);
+          _grossSalaryController.text = _moneyText(c.grossSalary);
+          _netSalaryController.text = _moneyText(c.netSalary);
+          _thirteenthSalaryController.text = _moneyText(c.thirteenthSalary);
+          _vacationPayController.text = _moneyText(c.vacationPay);
           _otherIncomeSourcesController.text = c.otherIncomeSources ?? '';
           _otherIncomeAmountController.text =
-              c.otherIncomeAmount?.toString() ?? '';
-          _familyIncomeController.text = c.familyIncome?.toString() ?? '';
+              _moneyText(c.otherIncomeAmount);
+          _familyIncomeController.text = _moneyText(c.familyIncome);
+          _jobStartDate = _parseDate(c.jobStartDate);
+          _jobEndDate = _parseDate(c.jobEndDate);
+          _isCurrentlyWorking = c.isCurrentlyWorking ?? true;
+          _lastCreditCheck = _parseDate(c.lastCreditCheck);
+          _desiredFeatures = Map<String, dynamic>.from(
+            c.desiredFeatures ?? const <String, dynamic>{},
+          );
+          final other = _desiredFeatures['other'];
+          _otherFeaturesController.text =
+              other is List ? other.map((e) => e.toString()).join(', ') : '';
+          _spouse = c.spouse;
+          final captured = c.capturedById?.trim() ?? '';
+          _capturedById = captured.isNotEmpty
+              ? captured
+              : (_currentUserId ?? _capturedById);
           _creditScoreController.text = c.creditScore?.toString() ?? '';
           _bankNameController.text = c.bankName ?? '';
           _bankAgencyController.text = c.bankAgency ?? '';
@@ -244,10 +331,10 @@ class _ClientFormPageState extends State<ClientFormPage> {
           _dependentsNotesController.text = c.dependentsNotes ?? '';
           _preferredCityController.text = c.preferredCity ?? '';
           _preferredNeighborhoodController.text = c.preferredNeighborhood ?? '';
-          _minValueController.text = c.minValue?.toString() ?? '';
-          _maxValueController.text = c.maxValue?.toString() ?? '';
-          _minAreaController.text = c.minArea?.toString() ?? '';
-          _maxAreaController.text = c.maxArea?.toString() ?? '';
+          _minValueController.text = _moneyText(c.minValue);
+          _maxValueController.text = _moneyText(c.maxValue);
+          _minAreaController.text = _numberText(c.minArea);
+          _maxAreaController.text = _numberText(c.maxArea);
 
           _selectedMaritalStatus = c.maritalStatus;
           _selectedEmploymentStatus = c.employmentStatus;
@@ -290,11 +377,83 @@ class _ClientFormPageState extends State<ClientFormPage> {
 
   // ───────────────────────── Save ─────────────────────────
 
+  String _moneyText(double? value) {
+    if (value == null) return '';
+    return Masks.money((value * 100).round().toString());
+  }
+
+  String _numberText(double? value) {
+    if (value == null) return '';
+    return value == value.roundToDouble()
+        ? value.toInt().toString()
+        : value.toString();
+  }
+
+  DateTime? _parseDate(String? value) {
+    if (value == null || value.trim().isEmpty) return null;
+    return DateTime.tryParse(value.trim());
+  }
+
+  String? _formatDate(DateTime? value) =>
+      value == null ? null : DateFormat('yyyy-MM-dd').format(value);
+
   double? _parseMoney(String value) {
     final t = value.trim();
     if (t.isEmpty) return null;
-    final clean = t.replaceAll(RegExp(r'[^\d,.]'), '').replaceAll(',', '.');
+    final clean = t.replaceAll(RegExp(r'[^\d,.]'), '').replaceAll('.', '').replaceAll(',', '.');
     return double.tryParse(clean);
+  }
+
+  double? _parseNumber(String value) {
+    final t = value.trim().replaceAll(',', '.');
+    if (t.isEmpty) return null;
+    return double.tryParse(t);
+  }
+
+  /// Qualquer renda informada (mensal, familiar, bruta, líquida ou outras) —
+  /// mesmo gatilho do `validateForm` do web.
+  bool get _hasAnyIncome {
+    for (final c in [
+      _monthlyIncomeController,
+      _familyIncomeController,
+      _grossSalaryController,
+      _netSalaryController,
+      _otherIncomeAmountController,
+    ]) {
+      final v = _parseMoney(c.text);
+      if (v != null && v > 0) return true;
+    }
+    return false;
+  }
+
+  String? _phoneDuplicateError(String field) {
+    final errors = ClientPhoneRules.duplicateErrors(
+      ClientPhoneRules.contactEntries(
+        phone: _phoneController.text,
+        secondaryPhone: _secondaryPhoneController.text,
+        whatsapp: _whatsappController.text,
+      ),
+    );
+    return errors[field];
+  }
+
+  Map<String, dynamic>? _desiredFeaturesPayload() {
+    final out = <String, dynamic>{};
+    _desiredFeatures.forEach((key, value) {
+      if (key == 'other' || key == 'garageSpots') return;
+      if (value == true) out[key] = true;
+    });
+    final spots = _desiredFeatures['garageSpots'];
+    if (out['hasGarage'] == true && spots is int && spots > 0) {
+      out['garageSpots'] = spots;
+    }
+    final other = _otherFeaturesController.text
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    if (other.isNotEmpty) out['other'] = other;
+    return out.isEmpty ? null : out;
   }
 
   String? _stringOrNull(String value) {
@@ -303,12 +462,23 @@ class _ClientFormPageState extends State<ClientFormPage> {
   }
 
   Future<void> _handleSave() async {
-    if (!_formKey.currentState!.validate()) {
+    // Situação profissional não é campo de texto: a regra roda à parte.
+    final employmentError = _hasAnyIncome &&
+            _selectedEmploymentStatus == null &&
+            _isRetired != true
+        ? 'Informe a situação profissional ou marque que é aposentado(a)'
+        : null;
+    setState(() => _employmentError = employmentError);
+    final fieldsOk = _formKey.currentState!.validate();
+    if (!fieldsOk || employmentError != null) {
       _showSnack('Revise os campos destacados antes de salvar.', error: true);
       return;
     }
-    if (_currentUserId == null) {
-      _showSnack('Não foi possível identificar o usuário atual.', error: true);
+    final capturedBy = (_capturedById?.trim().isNotEmpty ?? false)
+        ? _capturedById!.trim()
+        : _currentUserId;
+    if (capturedBy == null || capturedBy.isEmpty) {
+      _showSnack('Selecione o captador do cliente.', error: true);
       return;
     }
 
@@ -317,18 +487,26 @@ class _ClientFormPageState extends State<ClientFormPage> {
     try {
       final dto = CreateClientDto(
         name: _nameController.text.trim(),
-        email: _emailController.text.trim(),
-        cpf: _cpfController.text.trim().replaceAll(RegExp(r'[^\d]'), ''),
+        email: _stringOrNull(_emailController.text),
+        cpf: _stringOrNull(
+          _cpfController.text.replaceAll(RegExp(r'[^\d]'), ''),
+        ),
         phone: _phoneController.text.trim(),
-        zipCode:
-            _zipCodeController.text.trim().replaceAll(RegExp(r'[^\d]'), ''),
-        address: _addressController.text.trim(),
-        city: _cityController.text.trim(),
-        state: _stateController.text.trim().toUpperCase(),
-        neighborhood: _neighborhoodController.text.trim(),
+        zipCode: _stringOrNull(
+          _zipCodeController.text.replaceAll(RegExp(r'[^\d]'), ''),
+        ),
+        address: _stringOrNull(_addressController.text),
+        city: _stringOrNull(_cityController.text),
+        state: _stringOrNull(_stateController.text)?.toUpperCase(),
+        neighborhood: _stringOrNull(_neighborhoodController.text),
         type: _selectedType,
-        capturedById: _currentUserId!,
+        capturedById: capturedBy,
         status: _selectedStatus,
+        jobStartDate: _formatDate(_jobStartDate),
+        jobEndDate: _isCurrentlyWorking ? null : _formatDate(_jobEndDate),
+        isCurrentlyWorking: _isCurrentlyWorking,
+        lastCreditCheck: _formatDate(_lastCreditCheck),
+        desiredFeatures: _desiredFeaturesPayload(),
         secondaryPhone: _stringOrNull(_secondaryPhoneController.text),
         whatsapp: _stringOrNull(_whatsappController.text),
         birthDate: _birthDate != null
@@ -373,8 +551,8 @@ class _ClientFormPageState extends State<ClientFormPage> {
             _stringOrNull(_preferredNeighborhoodController.text),
         minValue: _parseMoney(_minValueController.text),
         maxValue: _parseMoney(_maxValueController.text),
-        minArea: _parseMoney(_minAreaController.text),
-        maxArea: _parseMoney(_maxAreaController.text),
+        minArea: _parseNumber(_minAreaController.text),
+        maxArea: _parseNumber(_maxAreaController.text),
         minBedrooms: _minBedrooms,
         maxBedrooms: _maxBedrooms,
         minBathrooms: _minBathrooms,
@@ -416,6 +594,9 @@ class _ClientFormPageState extends State<ClientFormPage> {
                 employmentStatus: dto.employmentStatus,
                 companyName: dto.companyName,
                 jobPosition: dto.jobPosition,
+                jobStartDate: dto.jobStartDate,
+                jobEndDate: dto.jobEndDate,
+                isCurrentlyWorking: dto.isCurrentlyWorking,
                 contractType: dto.contractType,
                 isRetired: dto.isRetired,
                 monthlyIncome: dto.monthlyIncome,
@@ -427,6 +608,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                 otherIncomeAmount: dto.otherIncomeAmount,
                 familyIncome: dto.familyIncome,
                 creditScore: dto.creditScore,
+                lastCreditCheck: dto.lastCreditCheck,
                 bankName: dto.bankName,
                 bankAgency: dto.bankAgency,
                 accountType: dto.accountType,
@@ -448,6 +630,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                 minBedrooms: dto.minBedrooms,
                 maxBedrooms: dto.maxBedrooms,
                 minBathrooms: dto.minBathrooms,
+                desiredFeatures: dto.desiredFeatures,
                 preferredPropertyType: dto.preferredPropertyType,
                 leadSource: dto.leadSource,
                 mcmvInterested: dto.mcmvInterested,
@@ -495,11 +678,38 @@ class _ClientFormPageState extends State<ClientFormPage> {
   Widget build(BuildContext context) {
     return AppScaffold(
       title: widget.clientId == null ? 'Novo Cliente' : 'Editar Cliente',
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _errorMessage != null && _client == null
-              ? _buildErrorState(context)
-              : _buildForm(context),
+      body: !_hasFormPermission
+          ? AppErrorState.fromApi(
+              message: widget.clientId == null
+                  ? 'Você não tem permissão para cadastrar clientes.'
+                  : 'Você não tem permissão para editar clientes.',
+              statusCode: 403,
+              secondaryLabel: 'Voltar',
+              onSecondary: () => Navigator.pop(context),
+            )
+          : _isLoading
+              ? _buildLoadingSkeleton(context)
+              : _errorMessage != null && _client == null
+                  ? _buildErrorState(context)
+                  : _buildForm(context),
+    );
+  }
+
+  Widget _buildLoadingSkeleton(BuildContext context) {
+    return ListView(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+      children: const [
+        SkeletonBox(height: 100, borderRadius: 22),
+        SizedBox(height: 14),
+        SkeletonBox(height: 220, borderRadius: 20),
+        SizedBox(height: 12),
+        SkeletonBox(height: 140, borderRadius: 20),
+        SizedBox(height: 12),
+        SkeletonBox(height: 64, borderRadius: 20),
+        SizedBox(height: 12),
+        SkeletonBox(height: 64, borderRadius: 20),
+      ],
     );
   }
 
@@ -534,7 +744,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
                     icon: Icons.person_outline,
                     title: 'Identificação',
                     description:
-                        'Dados básicos do contato — campos obrigatórios estão marcados com *.',
+                        'Só nome e telefone são obrigatórios (*); o resto é validado quando preenchido.',
                     initiallyExpanded: true,
                     child: _buildIdentitySection(context),
                   ),
@@ -595,6 +805,15 @@ class _ClientFormPageState extends State<ClientFormPage> {
                   const SizedBox(height: 12),
                   _section(
                     context,
+                    icon: Icons.star_outline_rounded,
+                    title: 'Características desejadas',
+                    description:
+                        'Comodidades e diferenciais que o cliente procura.',
+                    child: _buildDesiredFeaturesSection(context),
+                  ),
+                  const SizedBox(height: 12),
+                  _section(
+                    context,
                     icon: Icons.contacts_outlined,
                     title: 'Referências',
                     description: 'Pessoais e profissionais para validação.',
@@ -621,6 +840,18 @@ class _ClientFormPageState extends State<ClientFormPage> {
                       maxLines: 4,
                     ),
                   ),
+                  if (_client != null && _showsSpouse) ...[
+                    const SizedBox(height: 12),
+                    _section(
+                      context,
+                      icon: Icons.people_outline,
+                      title: 'Dados do cônjuge',
+                      description:
+                          'Cônjuge vinculado ao cliente (usado nas fichas).',
+                      initiallyExpanded: true,
+                      child: _buildSpouseSection(context),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                 ],
               ),
@@ -797,11 +1028,12 @@ class _ClientFormPageState extends State<ClientFormPage> {
           prefixIcon: const Icon(Icons.person_outline),
           onChanged: (_) => setState(() {}),
           validator: (value) {
-            if (value == null || value.trim().isEmpty) {
-              return 'Nome é obrigatório';
-            }
-            if (value.trim().length < 2) {
-              return 'Nome deve ter pelo menos 2 caracteres';
+            final v = value?.trim() ?? '';
+            if (v.isEmpty) return 'Nome é obrigatório';
+            // O back valida @Length(3, 255).
+            if (v.length < 3) return 'Nome deve ter pelo menos 3 caracteres';
+            if (v.length > 255) {
+              return 'Nome não pode ter mais que 255 caracteres';
             }
             return null;
           },
@@ -809,33 +1041,34 @@ class _ClientFormPageState extends State<ClientFormPage> {
         const SizedBox(height: 12),
         CustomTextField(
           controller: _emailController,
-          label: 'Email *',
+          label: 'Email',
           prefixIcon: const Icon(Icons.email_outlined),
           keyboardType: TextInputType.emailAddress,
           validator: (value) {
-            if (value == null || value.trim().isEmpty) {
-              return 'Email é obrigatório';
+            final v = value?.trim() ?? '';
+            if (v.isEmpty) return null;
+            if (!ClientPhoneRules.isValidEmail(v)) return 'Email inválido';
+            if (v.length > 255) {
+              return 'Email não pode ter mais que 255 caracteres';
             }
-            if (!value.contains('@')) return 'Email inválido';
             return null;
           },
         ),
         const SizedBox(height: 12),
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: CustomTextField(
                 controller: _cpfController,
-                label: 'CPF *',
+                label: 'CPF',
                 prefixIcon: const Icon(Icons.fingerprint_rounded),
                 keyboardType: TextInputType.number,
                 inputFormatters: [CpfInputFormatter()],
                 validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'CPF é obrigatório';
-                  }
-                  final cpf = value.replaceAll(RegExp(r'[^\d]'), '');
-                  if (cpf.length != 11) return 'CPF deve ter 11 dígitos';
+                  final v = value?.trim() ?? '';
+                  if (v.isEmpty) return null;
+                  if (!ClientPhoneRules.isValidCpf(v)) return 'CPF inválido';
                   return null;
                 },
               ),
@@ -852,6 +1085,7 @@ class _ClientFormPageState extends State<ClientFormPage> {
         ),
         const SizedBox(height: 12),
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: CustomTextField(
@@ -861,10 +1095,12 @@ class _ClientFormPageState extends State<ClientFormPage> {
                 keyboardType: TextInputType.phone,
                 inputFormatters: [PhoneInputFormatter()],
                 validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Telefone é obrigatório';
+                  final v = value?.trim() ?? '';
+                  if (v.isEmpty) return 'Telefone é obrigatório';
+                  if (!ClientPhoneRules.isValidPhone(v)) {
+                    return 'Telefone inválido';
                   }
-                  return null;
+                  return _phoneDuplicateError('phone');
                 },
               ),
             ),
@@ -876,6 +1112,14 @@ class _ClientFormPageState extends State<ClientFormPage> {
                 prefixIcon: const Icon(Icons.chat_outlined),
                 keyboardType: TextInputType.phone,
                 inputFormatters: [PhoneInputFormatter()],
+                validator: (value) {
+                  final v = value?.trim() ?? '';
+                  if (v.isEmpty) return null;
+                  if (!ClientPhoneRules.isValidPhone(v)) {
+                    return 'WhatsApp inválido';
+                  }
+                  return _phoneDuplicateError('whatsapp');
+                },
               ),
             ),
           ],
@@ -887,6 +1131,14 @@ class _ClientFormPageState extends State<ClientFormPage> {
           prefixIcon: const Icon(Icons.phone_outlined),
           keyboardType: TextInputType.phone,
           inputFormatters: [PhoneInputFormatter()],
+          validator: (value) {
+            final v = value?.trim() ?? '';
+            if (v.isEmpty) return null;
+            if (!ClientPhoneRules.isValidPhone(v)) {
+              return 'Telefone secundário inválido';
+            }
+            return _phoneDuplicateError('secondaryPhone');
+          },
         ),
         const SizedBox(height: 12),
         _buildDateField(
@@ -958,30 +1210,112 @@ class _ClientFormPageState extends State<ClientFormPage> {
                 )),
           ],
         ),
+        const SizedBox(height: 16),
+        _buildCapturedBySelector(context),
       ],
     );
   }
 
+  // ───────────────────────── Captador ─────────────────────────
+
+  UserInfo? get _selectedCapturer {
+    final id = _capturedById;
+    if (id == null || id.isEmpty) return null;
+    for (final u in _users) {
+      if (u.id == id) return u;
+    }
+    final captured = _client?.capturedBy;
+    if (captured != null && captured.id == id) return captured;
+    return null;
+  }
+
+  /// Select com o desenho de input — o `FieldSelect` "Captador" do web.
+  Widget _buildCapturedBySelector(BuildContext context) {
+    final theme = Theme.of(context);
+    final selected = _selectedCapturer;
+    final text = selected == null
+        ? (_capturedById == null || _capturedById!.isEmpty
+            ? ''
+            : (_capturedById == _currentUserId ? 'Você' : 'Usuário atual'))
+        : (selected.email.isNotEmpty
+            ? '${selected.name} (${selected.email})'
+            : selected.name);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Captador',
+          style: theme.textTheme.labelLarge?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextFormField(
+          key: ValueKey('captador-$text'),
+          initialValue: text,
+          readOnly: true,
+          onTap: _openCapturedByPicker,
+          maxLines: 1,
+          style: theme.textTheme.bodyLarge?.copyWith(
+            color: theme.colorScheme.onSurface,
+          ),
+          decoration: InputDecoration(
+            hintText: _loadingUsers ? 'Carregando usuários…' : 'Selecione o captador',
+            prefixIcon: const Icon(Icons.person_pin_outlined),
+            suffixIcon: const Icon(Icons.keyboard_arrow_down_rounded),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Usuário responsável por capturar/cadastrar este cliente',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: ThemeHelpers.textSecondaryColor(context),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _openCapturedByPicker() async {
+    FocusScope.of(context).unfocus();
+    if (_users.isEmpty && !_loadingUsers) await _loadUsers();
+    if (!mounted) return;
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _CapturerPickerSheet(
+        users: _users,
+        selectedId: _capturedById,
+        currentUserId: _currentUserId,
+      ),
+    );
+    if (picked != null && mounted) setState(() => _capturedById = picked);
+  }
+
+  /// Endereço todo opcional (web e back); só o formato é conferido quando o
+  /// campo vem preenchido.
   Widget _buildAddressSection(BuildContext context) {
     return Column(
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               flex: 2,
               child: CustomTextField(
                 controller: _zipCodeController,
-                label: 'CEP *',
+                label: 'CEP',
                 prefixIcon:
                     const Icon(Icons.markunread_mailbox_outlined),
                 keyboardType: TextInputType.number,
                 inputFormatters: [CepInputFormatter()],
                 validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'CEP é obrigatório';
-                  }
-                  final cep = value.replaceAll(RegExp(r'[^\d]'), '');
-                  if (cep.length != 8) return 'CEP deve ter 8 dígitos';
+                  final cep = (value ?? '').replaceAll(RegExp(r'[^\d]'), '');
+                  if ((value ?? '').trim().isEmpty) return null;
+                  if (cep.length != 8) return 'CEP inválido';
                   return null;
                 },
               ),
@@ -990,14 +1324,13 @@ class _ClientFormPageState extends State<ClientFormPage> {
             Expanded(
               child: CustomTextField(
                 controller: _stateController,
-                label: 'UF *',
+                label: 'UF',
                 prefixIcon: const Icon(Icons.map_outlined),
                 maxLength: 2,
                 validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'UF';
-                  }
-                  if (value.trim().length != 2) {
+                  final v = value?.trim() ?? '';
+                  if (v.isEmpty) return null;
+                  if (!RegExp(r'^[A-Za-z]{2}$').hasMatch(v)) {
                     return '2 letras';
                   }
                   return null;
@@ -1009,26 +1342,27 @@ class _ClientFormPageState extends State<ClientFormPage> {
         const SizedBox(height: 12),
         CustomTextField(
           controller: _addressController,
-          label: 'Endereço *',
+          label: 'Endereço',
           prefixIcon: const Icon(Icons.location_on_outlined),
           validator: (value) {
-            if (value == null || value.trim().isEmpty) {
-              return 'Endereço é obrigatório';
+            if ((value?.trim().length ?? 0) > 500) {
+              return 'Endereço não pode ter mais que 500 caracteres';
             }
             return null;
           },
         ),
         const SizedBox(height: 12),
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: CustomTextField(
                 controller: _cityController,
-                label: 'Cidade *',
+                label: 'Cidade',
                 prefixIcon: const Icon(Icons.location_city_outlined),
                 validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Cidade é obrigatória';
+                  if ((value?.trim().length ?? 0) > 100) {
+                    return 'Máximo de 100 caracteres';
                   }
                   return null;
                 },
@@ -1038,11 +1372,11 @@ class _ClientFormPageState extends State<ClientFormPage> {
             Expanded(
               child: CustomTextField(
                 controller: _neighborhoodController,
-                label: 'Bairro *',
+                label: 'Bairro',
                 prefixIcon: const Icon(Icons.place_outlined),
                 validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Bairro é obrigatório';
+                  if ((value?.trim().length ?? 0) > 100) {
+                    return 'Máximo de 100 caracteres';
                   }
                   return null;
                 },
@@ -1144,14 +1478,21 @@ class _ClientFormPageState extends State<ClientFormPage> {
             ...EmploymentStatus.values.map((e) => _ChipSelectable(
                   label: e.label,
                   selected: _selectedEmploymentStatus == e,
-                  onTap: () =>
-                      setState(() => _selectedEmploymentStatus = e),
+                  onTap: () => setState(() {
+                    _selectedEmploymentStatus = e;
+                    _employmentError = null;
+                  }),
                   accent: accent,
                 )),
           ],
         ),
+        if (_employmentError != null) ...[
+          const SizedBox(height: 8),
+          _inlineError(context, _employmentError!),
+        ],
         const SizedBox(height: 16),
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: CustomTextField(
@@ -1166,16 +1507,75 @@ class _ClientFormPageState extends State<ClientFormPage> {
                 controller: _jobPositionController,
                 label: 'Cargo',
                 prefixIcon: const Icon(Icons.badge_outlined),
+                validator: (value) {
+                  // Regra do web: com renda e situação "empregado" ou
+                  // "autônomo", o cargo/função passa a ser exigido.
+                  final working = _selectedEmploymentStatus ==
+                          EmploymentStatus.employed ||
+                      _selectedEmploymentStatus ==
+                          EmploymentStatus.selfEmployed;
+                  if (_hasAnyIncome &&
+                      working &&
+                      (value?.trim().isEmpty ?? true)) {
+                    return 'Informe o cargo/função';
+                  }
+                  return null;
+                },
               ),
             ),
           ],
         ),
         const SizedBox(height: 12),
-        CustomTextField(
-          controller: _contractTypeController,
-          label: 'Tipo de contrato',
-          prefixIcon: const Icon(Icons.description_outlined),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: CustomTextField(
+                controller: _contractTypeController,
+                label: 'Tipo de contrato',
+                prefixIcon: const Icon(Icons.description_outlined),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ClientDateField(
+                label: 'Data de início',
+                value: _jobStartDate,
+                icon: Icons.event_available_outlined,
+                lastDate: DateTime.now(),
+                onChanged: (d) => setState(() {
+                  _jobStartDate = d;
+                  if (d != null &&
+                      _jobEndDate != null &&
+                      _jobEndDate!.isBefore(d)) {
+                    _jobEndDate = null;
+                  }
+                }),
+              ),
+            ),
+          ],
         ),
+        const SizedBox(height: 12),
+        _switchTile(
+          context,
+          icon: Icons.work_history_outlined,
+          title: 'Ainda está trabalhando',
+          subtitle: 'Desligue para informar a data de término',
+          value: _isCurrentlyWorking,
+          onChanged: (v) => setState(() => _isCurrentlyWorking = v),
+        ),
+        if (!_isCurrentlyWorking) ...[
+          const SizedBox(height: 12),
+          ClientDateField(
+            label: 'Data de término',
+            value: _jobEndDate,
+            icon: Icons.event_busy_outlined,
+            // Término nunca antes do início (minDate do web).
+            firstDate: _jobStartDate ?? DateTime(1900),
+            lastDate: DateTime(2100),
+            onChanged: (d) => setState(() => _jobEndDate = d),
+          ),
+        ],
         const SizedBox(height: 12),
         _switchTile(
           context,
@@ -1183,7 +1583,30 @@ class _ClientFormPageState extends State<ClientFormPage> {
           title: 'Aposentado',
           subtitle: 'Recebe aposentadoria como fonte principal',
           value: _isRetired ?? false,
-          onChanged: (v) => setState(() => _isRetired = v),
+          onChanged: (v) => setState(() {
+            _isRetired = v;
+            if (v) _employmentError = null;
+          }),
+        ),
+      ],
+    );
+  }
+
+  Widget _inlineError(BuildContext context, String message) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(Icons.error_outline, size: 16, color: AppColors.status.error),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            message,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: AppColors.status.error,
+                  fontWeight: FontWeight.w700,
+                  height: 1.3,
+                ),
+          ),
         ),
       ],
     );
@@ -1303,6 +1726,14 @@ class _ClientFormPageState extends State<ClientFormPage> {
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 12),
+        ClientDateField(
+          label: 'Última consulta de crédito',
+          value: _lastCreditCheck,
+          icon: Icons.fact_check_outlined,
+          lastDate: DateTime.now(),
+          onChanged: (d) => setState(() => _lastCreditCheck = d),
         ),
         const SizedBox(height: 12),
         Row(
@@ -1485,6 +1916,303 @@ class _ClientFormPageState extends State<ClientFormPage> {
         ),
       ],
     );
+  }
+
+  // ───────────────────────── Características desejadas ─────────────────────────
+
+  Widget _buildDesiredFeaturesSection(BuildContext context) {
+    final accent = _accentColor(context);
+    final hasGarage = _desiredFeatures['hasGarage'] == true;
+    final spots = _desiredFeatures['garageSpots'];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Selecione as características que o cliente procura:',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: ThemeHelpers.textSecondaryColor(context),
+                height: 1.3,
+              ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final f in _kDesiredFeatures)
+              _ChipSelectable(
+                label: f.$2,
+                icon: f.$3,
+                selected: _desiredFeatures[f.$1] == true,
+                accent: accent,
+                onTap: () => setState(() {
+                  final next = !(_desiredFeatures[f.$1] == true);
+                  if (next) {
+                    _desiredFeatures[f.$1] = true;
+                  } else {
+                    _desiredFeatures.remove(f.$1);
+                    // Desmarcar garagem tira o número de vagas (web).
+                    if (f.$1 == 'hasGarage') {
+                      _desiredFeatures.remove('garageSpots');
+                    }
+                  }
+                }),
+              ),
+          ],
+        ),
+        if (hasGarage) ...[
+          const SizedBox(height: 16),
+          _fieldLabel(context, 'Número de vagas desejadas'),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _ChipSelectable(
+                label: 'Indiferente',
+                selected: spots is! int,
+                onTap: () =>
+                    setState(() => _desiredFeatures.remove('garageSpots')),
+                accent: accent,
+              ),
+              for (var i = 1; i <= 10; i++)
+                _ChipSelectable(
+                  label: '$i',
+                  selected: spots == i,
+                  onTap: () =>
+                      setState(() => _desiredFeatures['garageSpots'] = i),
+                  accent: accent,
+                ),
+            ],
+          ),
+        ],
+        const SizedBox(height: 16),
+        CustomTextField(
+          controller: _otherFeaturesController,
+          label: 'Outras características',
+          hint: 'Ex: Vista para o mar, Lareira (separe por vírgula)',
+          prefixIcon: const Icon(Icons.add_task_outlined),
+          maxLines: 2,
+        ),
+      ],
+    );
+  }
+
+  // ───────────────────────── Cônjuge ─────────────────────────
+
+  bool get _showsSpouse =>
+      _selectedMaritalStatus == MaritalStatus.married ||
+      _selectedMaritalStatus == MaritalStatus.commonLaw;
+
+  Widget _buildSpouseSection(BuildContext context) {
+    final theme = Theme.of(context);
+    final spouse = _spouse;
+    if (spouse == null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Nenhum cônjuge cadastrado para este cliente.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+            ),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: () => _openSpouseSheet(),
+            icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
+            label: const Text('Adicionar cônjuge'),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    final details = <String>[
+      if ((spouse.cpf ?? '').isNotEmpty) 'CPF ${Masks.cpf(spouse.cpf!)}',
+      if ((spouse.phone ?? '').isNotEmpty)
+        ClientPhoneRules.maskAuto(spouse.phone),
+      if ((spouse.email ?? '').isNotEmpty) spouse.email!,
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          spouse.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+            color: ThemeHelpers.textColor(context),
+          ),
+        ),
+        if (details.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(
+            details.join(' · '),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+            ),
+          ),
+        ],
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _confirmDeleteSpouse,
+                icon: Icon(
+                  Icons.delete_outline,
+                  size: 18,
+                  color: AppColors.status.error,
+                ),
+                label: Text(
+                  'Remover',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: AppColors.status.error),
+                ),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  side: BorderSide(
+                    color: AppColors.status.error.withValues(alpha: 0.4),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () => _openSpouseSheet(initial: spouse),
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                label: const Text(
+                  'Editar',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Future<void> _openSpouseSheet({Spouse? initial}) async {
+    final client = _client;
+    if (client == null) return;
+    FocusScope.of(context).unfocus();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final media = MediaQuery.of(ctx);
+        return Padding(
+          padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: media.size.height * 0.88),
+            child: Container(
+              decoration: BoxDecoration(
+                color: ThemeHelpers.backgroundColor(ctx),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+                child: SafeArea(
+                  top: false,
+                  child: SpouseForm(
+                    initialSpouse: initial,
+                    clientPhone: _phoneController.text,
+                    clientSecondaryPhone: _secondaryPhoneController.text,
+                    clientWhatsapp: _whatsappController.text,
+                    onCancel: () => Navigator.pop(ctx),
+                    onSave: (spouse) async {
+                      final response = initial == null
+                          ? await ClientService.instance
+                              .createSpouse(client.id, spouse)
+                          : await ClientService.instance
+                              .updateSpouse(initial.id, spouse);
+                      if (!mounted) return false;
+                      if (response.success && response.data != null) {
+                        setState(() => _spouse = response.data);
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        _showSnack(
+                          initial == null
+                              ? 'Cônjuge cadastrado com sucesso!'
+                              : 'Cônjuge atualizado com sucesso!',
+                        );
+                        return true;
+                      }
+                      _showSnack(
+                        response.message ?? 'Erro ao salvar cônjuge',
+                        error: true,
+                      );
+                      return false;
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _confirmDeleteSpouse() async {
+    final spouse = _spouse;
+    if (spouse == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: const Text('Remover cônjuge?'),
+        content: const Text('Tem certeza que deseja remover o cônjuge?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.status.error,
+            ),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final response = await ClientService.instance.deleteSpouse(spouse.id);
+    if (!mounted) return;
+    if (response.success) {
+      setState(() => _spouse = null);
+      _showSnack('Cônjuge removido.');
+    } else {
+      _showSnack(response.message ?? 'Erro ao remover cônjuge', error: true);
+    }
   }
 
   Widget _buildReferencesSection(BuildContext context) {
@@ -2084,6 +2812,151 @@ class _ClientFormPageState extends State<ClientFormPage> {
       case ClientStatus.closed:
         return Colors.grey;
     }
+  }
+}
+
+/// Folha de seleção do captador (lista com busca), no desenho das demais
+/// folhas: altura máxima de 88%, rolagem e respeito ao teclado.
+class _CapturerPickerSheet extends StatefulWidget {
+  const _CapturerPickerSheet({
+    required this.users,
+    required this.selectedId,
+    required this.currentUserId,
+  });
+
+  final List<UserInfo> users;
+  final String? selectedId;
+  final String? currentUserId;
+
+  @override
+  State<_CapturerPickerSheet> createState() => _CapturerPickerSheetState();
+}
+
+class _CapturerPickerSheetState extends State<_CapturerPickerSheet> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final media = MediaQuery.of(context);
+    final q = _query.trim().toLowerCase();
+    final users = widget.users.where((u) {
+      if (q.isEmpty) return true;
+      return u.name.toLowerCase().contains(q) ||
+          u.email.toLowerCase().contains(q);
+    }).toList();
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: media.size.height * 0.88),
+        child: Container(
+          decoration: BoxDecoration(
+            color: ThemeHelpers.backgroundColor(context),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 8, 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Captador',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          color: ThemeHelpers.textColor(context),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Fechar',
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                child: TextField(
+                  onChanged: (v) => setState(() => _query = v),
+                  decoration: const InputDecoration(
+                    hintText: 'Buscar por nome ou e-mail',
+                    prefixIcon: Icon(Icons.search_rounded),
+                  ),
+                ),
+              ),
+              Flexible(
+                child: users.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(
+                          widget.users.isEmpty
+                              ? 'Não foi possível carregar os usuários.'
+                              : 'Nenhum usuário encontrado.',
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: ThemeHelpers.textSecondaryColor(context),
+                          ),
+                        ),
+                      )
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
+                        itemCount: users.length,
+                        itemBuilder: (context, index) {
+                          final u = users[index];
+                          final selected = u.id == widget.selectedId;
+                          final isMe = u.id == widget.currentUserId;
+                          return ListTile(
+                            onTap: () => Navigator.pop(context, u.id),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            selected: selected,
+                            selectedTileColor: AppColors.primary.primary
+                                .withValues(alpha: 0.08),
+                            title: Text(
+                              isMe ? '${u.name} (você)' : u.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                color: ThemeHelpers.textColor(context),
+                              ),
+                            ),
+                            subtitle: u.email.isEmpty
+                                ? null
+                                : Text(
+                                    u.email,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: ThemeHelpers.textSecondaryColor(
+                                          context),
+                                    ),
+                                  ),
+                            trailing: selected
+                                ? Icon(
+                                    Icons.check_rounded,
+                                    color: AppColors.status.success,
+                                  )
+                                : null,
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

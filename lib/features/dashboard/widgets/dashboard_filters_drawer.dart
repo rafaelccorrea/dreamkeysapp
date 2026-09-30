@@ -33,6 +33,18 @@ class DashboardFilters {
   /// Esse SIM é exibido visualmente, então fica controlável.
   final int appointmentsLimit;
 
+  /// Corretor do recorte da visão executiva (`teamMember` do
+  /// `/dashboard/overview`). Nulo = toda a equipe.
+  ///
+  /// 29/09/2026 (dash-01): o `HomeFilterBar` do web filtra a Home do
+  /// admin/master por corretor — e o ranking "Top corretores" também liga e
+  /// desliga este filtro com um toque.
+  final String? teamMember;
+
+  /// Empresa(s) do recorte da visão executiva (`companyIds[]`). Vazio =
+  /// empresa atual. Só aparece para quem tem mais de uma empresa, como no web.
+  final List<String> companyIds;
+
   DashboardFilters({
     this.dateRange,
     this.compareWith,
@@ -41,7 +53,13 @@ class DashboardFilters {
     this.endDate,
     this.activitiesLimit = 10,
     this.appointmentsLimit = 5,
+    this.teamMember,
+    this.companyIds = const [],
   });
+
+  /// Comparação ligada (a visão executiva só mostra variação com ela ligada).
+  bool get isComparing =>
+      compareWith != null && compareWith!.isNotEmpty && compareWith != 'none';
 
   DashboardFilters copyWith({
     String? dateRange,
@@ -52,6 +70,9 @@ class DashboardFilters {
     int? activitiesLimit,
     int? appointmentsLimit,
     bool clearDates = false,
+    String? teamMember,
+    bool clearTeamMember = false,
+    List<String>? companyIds,
   }) {
     return DashboardFilters(
       dateRange: dateRange ?? this.dateRange,
@@ -61,7 +82,35 @@ class DashboardFilters {
       endDate: clearDates ? null : (endDate ?? this.endDate),
       activitiesLimit: activitiesLimit ?? this.activitiesLimit,
       appointmentsLimit: appointmentsLimit ?? this.appointmentsLimit,
+      teamMember: clearTeamMember ? null : (teamMember ?? this.teamMember),
+      companyIds: companyIds ?? this.companyIds,
     );
+  }
+
+  /// Padrão da visão executiva — o mesmo `getInitialFilters` do web para
+  /// admin/master: do dia 1º do mês até hoje, SEM comparação.
+  static DashboardFilters executiveDefaults() {
+    final now = DateTime.now();
+    final firstDayOfMonth = DateTime(now.year, now.month, 1);
+    return DashboardFilters(
+      dateRange: 'custom',
+      startDate: _ymd(firstDayOfMonth),
+      endDate: _ymd(now),
+      compareWith: 'none',
+      metric: 'all',
+    );
+  }
+
+  /// O recorte é o padrão da visão executiva (mês corrente, sem corretor,
+  /// sem comparação, empresa atual)?
+  bool get isExecutiveDefault {
+    final d = executiveDefaults();
+    return dateRange == d.dateRange &&
+        startDate == d.startDate &&
+        endDate == d.endDate &&
+        !isComparing &&
+        teamMember == null &&
+        companyIds.isEmpty;
   }
 
   /// Filtros padrão: primeiro dia do mês até hoje.
@@ -156,10 +205,24 @@ class DashboardFiltersDrawer extends StatefulWidget {
   final DashboardFilters initialFilters;
   final Function(DashboardFilters) onFiltersChanged;
 
+  /// 29/09/2026 (dash-01): visão executiva (admin/master). Troca o limite de
+  /// agendamentos (só do painel pessoal) pelos recortes do `HomeFilterBar`
+  /// do web: comparação, empresa (só com mais de uma) e corretor.
+  final bool executive;
+
+  /// Empresas do usuário (`GET /companies`). O seletor só aparece com 2+.
+  final List<DashboardScopeOption> companies;
+
+  /// Corretores do recorte (`filters.availableUsers` do overview).
+  final List<DashboardScopeOption> members;
+
   const DashboardFiltersDrawer({
     super.key,
     required this.initialFilters,
     required this.onFiltersChanged,
+    this.executive = false,
+    this.companies = const [],
+    this.members = const [],
   });
 
   @override
@@ -320,10 +383,49 @@ class _DashboardFiltersDrawerState extends State<DashboardFiltersDrawer> {
 
   void _resetFilters() {
     setState(() {
-      _filters = DashboardFilters.defaultFilters();
+      _filters = widget.executive
+          ? DashboardFilters.executiveDefaults()
+          : DashboardFilters.defaultFilters();
       _selectedStartDate = null;
       _selectedEndDate = null;
       _parseInitialDates();
+    });
+  }
+
+  /// Nome do corretor escolhido (ou "Toda a equipe").
+  String get _memberLabel {
+    final id = _filters.teamMember;
+    if (id == null) return 'Toda a equipe';
+    for (final m in widget.members) {
+      if (m.id == id) return m.name;
+    }
+    return 'Corretor selecionado';
+  }
+
+  /// Picker de corretor com busca — a União tem 170+ pessoas, então lista
+  /// solta dentro do sheet de filtros viraria uma coluna sem fim.
+  Future<void> _pickMember(Color accent) async {
+    final picked = await showModalBottomSheet<_MemberPick>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      barrierColor: Colors.black54,
+      backgroundColor: ThemeHelpers.cardBackgroundColor(context),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      builder: (ctx) => _MemberPickerSheet(
+        members: widget.members,
+        selectedId: _filters.teamMember,
+        accent: accent,
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _filters = picked.id == null
+          ? _filters.copyWith(clearTeamMember: true)
+          : _filters.copyWith(teamMember: picked.id);
     });
   }
 
@@ -432,24 +534,102 @@ class _DashboardFiltersDrawerState extends State<DashboardFiltersDrawer> {
 
               const SizedBox(height: 28),
 
-              // ── Limite de agendamentos ──────────────────────
-              _SectionTitle(
-                eyebrow: 'TIMELINE',
-                title: 'Próximos agendamentos',
-                accent: accent,
-                trailing:
-                    '${_filters.appointmentsLimit} ${_filters.appointmentsLimit == 1 ? 'item' : 'itens'}',
-              ),
-              const SizedBox(height: 12),
-              _AppointmentsLimitStepper(
-                value: _filters.appointmentsLimit,
-                accent: accent,
-                onChanged: (v) {
-                  setState(() {
-                    _filters = _filters.copyWith(appointmentsLimit: v);
-                  });
-                },
-              ),
+              if (widget.executive) ...[
+                // ── Comparação (visão executiva) ─────────────────
+                _SectionTitle(
+                  eyebrow: 'COMPARAÇÃO',
+                  title: 'Comparar com',
+                  accent: accent,
+                ),
+                const SizedBox(height: 12),
+                _ChoiceWrap(
+                  accent: accent,
+                  value: _filters.compareWith ?? 'none',
+                  options: const [
+                    DashboardScopeOption(id: 'none', name: 'Sem comparação'),
+                    DashboardScopeOption(
+                      id: 'previous_period',
+                      name: 'Período anterior',
+                    ),
+                    DashboardScopeOption(
+                      id: 'previous_year',
+                      name: 'Ano anterior',
+                    ),
+                  ],
+                  onChanged: (v) => setState(() {
+                    _filters = _filters.copyWith(compareWith: v);
+                  }),
+                ),
+
+                // ── Empresa (só com mais de uma) ─────────────────
+                if (widget.companies.length > 1) ...[
+                  const SizedBox(height: 28),
+                  _SectionTitle(
+                    eyebrow: 'EMPRESA',
+                    title: 'Dados de qual empresa',
+                    accent: accent,
+                  ),
+                  const SizedBox(height: 12),
+                  _ChoiceWrap(
+                    accent: accent,
+                    value: _filters.companyIds.isEmpty
+                        ? ''
+                        : _filters.companyIds.first,
+                    options: [
+                      const DashboardScopeOption(id: '', name: 'Empresa atual'),
+                      ...widget.companies,
+                    ],
+                    onChanged: (v) => setState(() {
+                      _filters = _filters.copyWith(
+                        companyIds: v.isEmpty ? const <String>[] : [v],
+                      );
+                    }),
+                  ),
+                ],
+
+                // ── Corretor ─────────────────────────────────────
+                const SizedBox(height: 28),
+                _SectionTitle(
+                  eyebrow: 'EQUIPE',
+                  title: 'Corretor',
+                  accent: accent,
+                ),
+                const SizedBox(height: 12),
+                _PickerField(
+                  icon: Icons.person_search_rounded,
+                  label: _memberLabel,
+                  active: _filters.teamMember != null,
+                  accent: accent,
+                  onTap: widget.members.isEmpty
+                      ? null
+                      : () => _pickMember(accent),
+                  onClear: _filters.teamMember == null
+                      ? null
+                      : () => setState(() {
+                            _filters =
+                                _filters.copyWith(clearTeamMember: true);
+                          }),
+                ),
+              ] else ...[
+                // ── Limite de agendamentos ──────────────────────
+                _SectionTitle(
+                  eyebrow: 'TIMELINE',
+                  title: 'Próximos agendamentos',
+                  accent: accent,
+                  trailing:
+                      '${_filters.appointmentsLimit} ${_filters.appointmentsLimit == 1 ? 'item' : 'itens'}',
+                ),
+                const SizedBox(height: 12),
+                _AppointmentsLimitStepper(
+                  value: _filters.appointmentsLimit,
+                  accent: accent,
+                  onChanged: (v) {
+                    setState(() {
+                      _filters = _filters.copyWith(appointmentsLimit: v);
+                    });
+                  },
+                ),
+              ],
 
               const SizedBox(height: 28),
 
@@ -1061,6 +1241,383 @@ class _StepperButton extends StatelessWidget {
                 : ThemeHelpers.textSecondaryColor(context)
                     .withValues(alpha: 0.5),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// VISÃO EXECUTIVA — comparação, empresa e corretor (29/09/2026, dash-01)
+// ────────────────────────────────────────────────────────────────────
+
+/// Opção de recorte da visão executiva (empresa, corretor ou comparação).
+class DashboardScopeOption {
+  const DashboardScopeOption({required this.id, required this.name});
+
+  final String id;
+  final String name;
+}
+
+/// Escolha única em fichas — mesma gramática das fichas de período acima.
+class _ChoiceWrap extends StatelessWidget {
+  const _ChoiceWrap({
+    required this.accent,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
+
+  final Color accent;
+  final String value;
+  final List<DashboardScopeOption> options;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: options.map((o) {
+        final selected = o.id == value;
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () => onChanged(o.id),
+            borderRadius: BorderRadius.circular(12),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              constraints: const BoxConstraints(maxWidth: 280),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                color: selected
+                    ? accent
+                    : (isDark
+                        ? Colors.white.withValues(alpha: 0.05)
+                        : Colors.black.withValues(alpha: 0.03)),
+                border: Border.all(
+                  color: selected
+                      ? accent.withValues(alpha: 0.6)
+                      : ThemeHelpers.borderLightColor(context),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (selected) ...[
+                    const Icon(
+                      Icons.check_rounded,
+                      size: 14,
+                      color: Colors.white,
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  Flexible(
+                    child: Text(
+                      o.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.1,
+                        color: selected
+                            ? Colors.white
+                            : ThemeHelpers.textColor(context),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+/// Campo que abre um seletor (corretor), com "x" para limpar quando ativo.
+class _PickerField extends StatelessWidget {
+  const _PickerField({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.accent,
+    required this.onTap,
+    required this.onClear,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool active;
+  final Color accent;
+  final VoidCallback? onTap;
+  final VoidCallback? onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final enabled = onTap != null;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: active
+                ? accent.withValues(alpha: isDark ? 0.10 : 0.06)
+                : (isDark
+                    ? Colors.white.withValues(alpha: 0.04)
+                    : Colors.black.withValues(alpha: 0.03)),
+            border: Border.all(
+              color: active
+                  ? accent.withValues(alpha: isDark ? 0.45 : 0.32)
+                  : ThemeHelpers.borderLightColor(context),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  color: accent.withValues(alpha: active ? 0.18 : 0.10),
+                ),
+                child: Icon(icon, size: 16, color: accent),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  enabled ? label : 'Nenhum corretor neste recorte',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.2,
+                    color: active ? ThemeHelpers.textColor(context) : secondary,
+                  ),
+                ),
+              ),
+              if (onClear != null)
+                IconButton(
+                  onPressed: onClear,
+                  tooltip: 'Voltar para toda a equipe',
+                  visualDensity: VisualDensity.compact,
+                  icon: Icon(Icons.close_rounded, size: 18, color: secondary),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Icon(
+                    Icons.chevron_right_rounded,
+                    size: 20,
+                    color: secondary.withValues(alpha: enabled ? 1 : 0.4),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Resultado do picker: `id` nulo = toda a equipe.
+class _MemberPick {
+  const _MemberPick(this.id);
+
+  final String? id;
+}
+
+/// Tira acento e caixa para a busca por nome ("João" casa com "joao").
+String _foldForSearch(String s) {
+  const from = 'áàâãäéèêëíìîïóòôõöúùûüçñ';
+  const to = 'aaaaaeeeeiiiiooooouuuucn';
+  final buf = StringBuffer();
+  for (final rune in s.toLowerCase().runes) {
+    final ch = String.fromCharCode(rune);
+    final i = from.indexOf(ch);
+    buf.write(i >= 0 ? to[i] : ch);
+  }
+  return buf.toString();
+}
+
+class _MemberPickerSheet extends StatefulWidget {
+  const _MemberPickerSheet({
+    required this.members,
+    required this.selectedId,
+    required this.accent,
+  });
+
+  final List<DashboardScopeOption> members;
+  final String? selectedId;
+  final Color accent;
+
+  @override
+  State<_MemberPickerSheet> createState() => _MemberPickerSheetState();
+}
+
+class _MemberPickerSheetState extends State<_MemberPickerSheet> {
+  final TextEditingController _search = TextEditingController();
+  String _term = '';
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  List<DashboardScopeOption> get _visible {
+    if (_term.isEmpty) return widget.members;
+    return widget.members
+        .where((m) => _foldForSearch(m.name).contains(_term))
+        .toList(growable: false);
+  }
+
+  Widget _row({
+    required String? id,
+    required String label,
+    IconData icon = Icons.person_outline_rounded,
+  }) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final selected = widget.selectedId == id;
+    return InkWell(
+      onTap: () => Navigator.of(context).pop(_MemberPick(id)),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: ThemeHelpers.borderLightColor(
+                context,
+              ).withValues(alpha: 0.7),
+            ),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              selected ? Icons.check_circle_rounded : icon,
+              size: 18,
+              color: selected ? widget.accent : secondary,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                  color: ThemeHelpers.textColor(context),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final mq = MediaQuery.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final visible = _visible;
+
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 150),
+      padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: mq.size.height * 0.85),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Filtrar por corretor',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: ThemeHelpers.textColor(context),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    tooltip: 'Fechar',
+                    icon: Icon(Icons.close_rounded, color: secondary),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+              child: TextField(
+                controller: _search,
+                textInputAction: TextInputAction.search,
+                onChanged: (v) =>
+                    setState(() => _term = _foldForSearch(v.trim())),
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: 'Buscar pelo nome',
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  filled: true,
+                  fillColor: isDark
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : const Color(0xFFEEF0F3),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                padding: const EdgeInsets.only(bottom: 16),
+                itemCount: visible.length + 1,
+                itemBuilder: (ctx, i) {
+                  if (i == 0) {
+                    return _row(
+                      id: null,
+                      label: 'Toda a equipe',
+                      icon: Icons.groups_2_outlined,
+                    );
+                  }
+                  final m = visible[i - 1];
+                  return _row(id: m.id, label: m.name);
+                },
+              ),
+            ),
+            if (visible.isEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                child: Text(
+                  'Ninguém com esse nome.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(color: secondary),
+                ),
+              ),
+          ],
         ),
       ),
     );

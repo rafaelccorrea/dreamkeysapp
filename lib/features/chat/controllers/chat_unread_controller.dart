@@ -21,6 +21,11 @@ class ChatUnreadController extends ChangeNotifier {
   String? _currentUserId;
   String? _currentlyOpenRoomId; // ID da sala que está aberta no ChatPage
 
+  /// Salas em que mensagem nova não acende o badge (29/09/2026): as
+  /// arquivadas por mim e as silenciadas. É o `shouldIncrementUnread` do web;
+  /// na listagem o back já devolve o unreadCount delas zerado.
+  final Set<String> _silencedRoomIds = {};
+
   int get totalUnreadCount => _totalUnreadCount;
   Map<String, int> get roomUnreadCounts => Map.unmodifiable(_roomUnreadCounts);
 
@@ -87,9 +92,11 @@ class ChatUnreadController extends ChangeNotifier {
     // Não incrementar se:
     // 1. A mensagem é do próprio usuário
     // 2. A sala está aberta no ChatPage (será marcada como lida pelo ChatPage)
+    // 3. A sala está arquivada ou silenciada por mim (igual ao web)
     if (_currentUserId != null &&
         message.senderId != _currentUserId &&
-        message.roomId != _currentlyOpenRoomId) {
+        message.roomId != _currentlyOpenRoomId &&
+        !_silencedRoomIds.contains(message.roomId)) {
       incrementUnreadCount(message.roomId);
     }
   }
@@ -99,7 +106,11 @@ class ChatUnreadController extends ChangeNotifier {
     try {
       final response = await _chatApi.getRooms();
       if (response.success && response.data != null) {
-        _calculateTotalUnread(response.data!);
+        final result = response.data!;
+        // 304 (ETag): nada mudou desde a última leitura, a contagem atual
+        // continua valendo. Tratar as listas vazias do 304 zeraria o badge.
+        if (result.notModified) return;
+        _applyRooms(result.rooms, result.archivedRooms);
         notifyListeners();
       } else {
         // Se a resposta não foi bem-sucedida, apenas logar o erro
@@ -115,12 +126,25 @@ class ChatUnreadController extends ChangeNotifier {
     }
   }
 
+  /// Guarda quais salas não contam e recalcula o total (29/09/2026).
+  /// [rooms] são as ativas; [archivedRooms], as arquivadas por mim — o back
+  /// devolve as duas separadas em GET /chat/rooms.
+  void _applyRooms(List<ChatRoom> rooms, List<ChatRoom> archivedRooms) {
+    _silencedRoomIds
+      ..clear()
+      ..addAll(archivedRooms.map((r) => r.id))
+      ..addAll(rooms.where((r) => r.isMuted == true).map((r) => r.id));
+    _calculateTotalUnread(rooms);
+  }
+
   /// Calcula total de mensagens não lidas a partir das salas
   void _calculateTotalUnread(List<ChatRoom> rooms) {
     _roomUnreadCounts.clear();
     _totalUnreadCount = 0;
 
     for (final room in rooms) {
+      // Arquivada ou silenciada não entra no badge (useChatUnreadByRoom do web).
+      if (_silencedRoomIds.contains(room.id)) continue;
       final unread = room.unreadCount ?? 0;
       if (unread > 0) {
         _roomUnreadCounts[room.id] = unread;
@@ -157,6 +181,7 @@ class ChatUnreadController extends ChangeNotifier {
       if (companyId == null || companyId.isEmpty) return;
 
       _roomUnreadCounts.clear();
+      _silencedRoomIds.clear();
       _totalUnreadCount = 0;
       notifyListeners();
 
@@ -168,9 +193,14 @@ class ChatUnreadController extends ChangeNotifier {
     }
   }
 
-  /// Atualiza contagem baseado na lista de salas atualizada
-  void updateFromRooms(List<ChatRoom> rooms) {
-    _calculateTotalUnread(rooms);
+  /// Atualiza contagem baseado na lista de salas atualizada.
+  /// [rooms] = ativas; [archivedRooms] = arquivadas por mim (29/09/2026:
+  /// obrigatório, para que mensagem em sala arquivada não acenda o badge).
+  void updateFromRooms(
+    List<ChatRoom> rooms, {
+    required List<ChatRoom> archivedRooms,
+  }) {
+    _applyRooms(rooms, archivedRooms);
     notifyListeners();
   }
 

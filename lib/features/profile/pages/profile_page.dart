@@ -16,6 +16,8 @@ import '../../../../shared/widgets/app_error_state.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/brand_wordmark_logo.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
+import '../../organization/pages/edit_company_page.dart';
+import '../../organization/services/company_admin_service.dart';
 import '../widgets/avatar_edit_modal.dart';
 import '../widgets/change_password_modal.dart';
 
@@ -27,6 +29,7 @@ Color _pBrand(bool d) =>
     d ? AppColors.primary.primaryDarkMode : AppColors.primary.primary;
 Color _pIndigo(bool d) => d ? const Color(0xFF818CF8) : const Color(0xFF6366F1);
 Color _pViolet(bool d) => d ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
+Color _pTeal(bool d) => d ? const Color(0xFF2DD4BF) : const Color(0xFF0F766E);
 
 /// Página de Perfil — reconstruída sobre o sistema editorial da tela de
 /// Configurações (a referência do app):
@@ -59,6 +62,16 @@ class _ProfilePageState extends State<ProfilePage> {
   String? _pendingToastMsg;
   bool _pendingToastOk = false;
 
+  // Empresas (admin/master) — paridade com a seção "Empresas" do Perfil web:
+  // switches por empresa de "App liberado para todos" e "2FA obrigatório".
+  List<CompanyAdminRecord> _companies = const [];
+  bool _companiesLoading = false;
+  String? _companiesError;
+  final Map<String, bool> _company2FA = {};
+  final Map<String, bool> _companyAppAccess = {};
+  final Map<String, bool> _saving2FA = {};
+  final Map<String, bool> _savingAppAccess = {};
+
   // ─── Lifecycle ──────────────────────────────────────────────────────────
 
   @override
@@ -82,6 +95,7 @@ class _ProfilePageState extends State<ProfilePage> {
           _profile = response.data;
           _isLoading = false;
         });
+        if (_canManageCompanies) await _loadCompanies();
       } else {
         setState(() {
           _errorMessage = response.message ?? 'Erro ao carregar perfil';
@@ -98,6 +112,108 @@ class _ProfilePageState extends State<ProfilePage> {
         });
       }
     }
+  }
+
+  // ─── Empresas (admin/master) ────────────────────────────────────────────
+
+  /// Mesmo recorte do web: a seção e os switches só existem para
+  /// `role === 'admin' || role === 'master'`.
+  bool get _canManageCompanies {
+    final role = (_profile?.role ?? '').toLowerCase();
+    return role == 'admin' || role == 'master';
+  }
+
+  Future<void> _loadCompanies() async {
+    if (!mounted) return;
+    setState(() {
+      _companiesLoading = true;
+      _companiesError = null;
+    });
+    final res = await CompanyAdminService.instance.listCompanies();
+    if (!mounted) return;
+    if (res.success && res.data != null) {
+      final list = res.data!;
+      setState(() {
+        _companies = list;
+        _company2FA
+          ..clear()
+          ..addEntries(list.map((c) => MapEntry(c.id, c.requireTwoFactor)));
+        _companyAppAccess
+          ..clear()
+          ..addEntries(
+            list.map((c) => MapEntry(c.id, c.mobileAppAccessForAll)),
+          );
+        _companiesLoading = false;
+      });
+    } else {
+      setState(() {
+        _companiesError = 'Erro ao carregar empresas';
+        _companiesLoading = false;
+      });
+    }
+  }
+
+  Future<void> _toggleCompany2FA(String companyId, bool next) async {
+    setState(() {
+      _company2FA[companyId] = next;
+      _saving2FA[companyId] = true;
+    });
+    final res = await CompanyAdminService.instance.setRequireTwoFactor(
+      companyId,
+      next,
+    );
+    if (!mounted) return;
+    setState(() {
+      _saving2FA[companyId] = false;
+      if (!res.success) _company2FA[companyId] = !next;
+    });
+    if (res.success) {
+      _toast(
+        '2FA obrigatório ${next ? 'ativado' : 'desativado'} para a empresa.',
+        success: true,
+      );
+    } else {
+      _toast(res.message ?? 'Erro ao salvar 2FA da empresa.', success: false);
+    }
+  }
+
+  Future<void> _toggleCompanyAppAccess(String companyId, bool next) async {
+    setState(() {
+      _companyAppAccess[companyId] = next;
+      _savingAppAccess[companyId] = true;
+    });
+    final res = await CompanyAdminService.instance.setMobileAppAccessForAll(
+      companyId,
+      next,
+    );
+    if (!mounted) return;
+    setState(() {
+      _savingAppAccess[companyId] = false;
+      if (!res.success) _companyAppAccess[companyId] = !next;
+    });
+    if (res.success) {
+      _toast(
+        next
+            ? 'App mobile liberado para todos os colaboradores da empresa.'
+            : 'Liberação geral do app mobile desativada. Vale o acesso '
+                  'individual de cada usuário.',
+        success: true,
+      );
+    } else {
+      _toast(
+        res.message ?? 'Erro ao salvar o acesso ao app da empresa.',
+        success: false,
+      );
+    }
+  }
+
+  Future<void> _openEditCompany(CompanyAdminRecord company) async {
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => EditCompanyPage(companyId: company.id),
+      ),
+    );
+    if (saved == true && mounted) await _loadCompanies();
   }
 
   // ─── Avatar ─────────────────────────────────────────────────────────────
@@ -269,6 +385,12 @@ class _ProfilePageState extends State<ProfilePage> {
                       _sectionSeparator(context),
                       const SizedBox(height: 22),
                       _buildAccountSection(context, theme, brand),
+                      if (_canManageCompanies) ...[
+                        const SizedBox(height: 28),
+                        _sectionSeparator(context),
+                        const SizedBox(height: 22),
+                        _buildCompaniesSection(context, theme),
+                      ],
                       const SizedBox(height: 28),
                       _sectionSeparator(context),
                       const SizedBox(height: 22),
@@ -681,6 +803,215 @@ class _ProfilePageState extends State<ProfilePage> {
           onTap: () => Navigator.pushNamed(context, AppRoutes.profileEdit),
         ),
       ],
+    );
+  }
+
+  // ─── Seção: EMPRESAS (petróleo) — só admin/master ──────────────────────────
+
+  Widget _buildCompaniesSection(BuildContext context, ThemeData theme) {
+    final tone = _pTeal(theme.brightness == Brightness.dark);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+
+    final List<Widget> body;
+    if (_companiesLoading && _companies.isEmpty) {
+      body = [
+        for (var i = 0; i < 2; i++)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+            child: Row(
+              children: const [
+                SkeletonBox(width: 42, height: 42, borderRadius: 12),
+                SizedBox(width: 14),
+                Expanded(child: SkeletonBox(height: 38, borderRadius: 10)),
+              ],
+            ),
+          ),
+      ];
+    } else if (_companiesError != null && _companies.isEmpty) {
+      body = [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _companiesError!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: secondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: _loadCompanies,
+                icon: const Icon(Icons.refresh_rounded, size: 16),
+                label: const Text('Tentar de novo'),
+                style: TextButton.styleFrom(foregroundColor: tone),
+              ),
+            ],
+          ),
+        ),
+      ];
+    } else if (_companies.isEmpty) {
+      body = [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+          child: Text(
+            'Você ainda não possui empresas cadastradas.',
+            style: theme.textTheme.bodySmall?.copyWith(color: secondary),
+          ),
+        ),
+      ];
+    } else {
+      body = [];
+      for (var i = 0; i < _companies.length; i++) {
+        if (i > 0) body.add(_rowDivider(context));
+        body.add(_buildCompanyBlock(context, theme, _companies[i], tone));
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SectionHeader(
+          eyebrow: 'ADMINISTRAÇÃO',
+          title: 'Empresas',
+          subtitle:
+              'Dados, logo e regras de acesso de cada empresa. Só '
+              'administradores veem esta seção.',
+          tone: tone,
+        ),
+        const SizedBox(height: 12),
+        ...body,
+      ],
+    );
+  }
+
+  Widget _buildCompanyBlock(
+    BuildContext context,
+    ThemeData theme,
+    CompanyAdminRecord c,
+    Color tone,
+  ) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final place = [
+      c.city,
+      c.state.toUpperCase(),
+    ].where((s) => s.trim().isNotEmpty).join('/');
+    final meta = [
+      if (c.cnpj.isNotEmpty) 'CNPJ ${c.cnpj}',
+      if (place.isNotEmpty) place,
+    ].join('  ·  ');
+    final initials = c.name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .take(2)
+        .map((w) => w[0].toUpperCase())
+        .join();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 8, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  color: tone.withValues(alpha: 0.12),
+                  border: Border.all(color: tone.withValues(alpha: 0.35)),
+                ),
+                alignment: Alignment.center,
+                child: (c.logoUrl ?? '').isNotEmpty
+                    ? Image.network(
+                        c.logoUrl!,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, _, _) => Text(
+                          initials,
+                          style: TextStyle(
+                            color: tone,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 14,
+                          ),
+                        ),
+                      )
+                    : Text(
+                        initials.isEmpty ? '—' : initials,
+                        style: TextStyle(
+                          color: tone,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 14,
+                        ),
+                      ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      c.name.isEmpty ? '—' : c.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: ThemeHelpers.textColor(context),
+                        letterSpacing: -0.2,
+                        height: 1.2,
+                      ),
+                    ),
+                    if (meta.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        meta,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: secondary,
+                          fontWeight: FontWeight.w500,
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Editar empresa',
+                onPressed: () => _openEditCompany(c),
+                icon: Icon(Icons.edit_outlined, size: 20, color: tone),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          _CompanySwitchRow(
+            tone: tone,
+            icon: Icons.smartphone_rounded,
+            title: 'App liberado para todos',
+            subtitle:
+                'Todos os colaboradores acessam o app, ignorando o acesso '
+                'individual.',
+            value: _companyAppAccess[c.id] ?? false,
+            saving: _savingAppAccess[c.id] ?? false,
+            onChanged: (v) => _toggleCompanyAppAccess(c.id, v),
+          ),
+          _CompanySwitchRow(
+            tone: tone,
+            icon: Icons.verified_user_outlined,
+            title: '2FA obrigatório (TOTP)',
+            subtitle: 'Todos precisam configurar o 2FA antes de entrar.',
+            value: _company2FA[c.id] ?? false,
+            saving: _saving2FA[c.id] ?? false,
+            onChanged: (v) => _toggleCompany2FA(c.id, v),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1358,6 +1689,100 @@ class _NavigationRow extends StatelessWidget {
               trailing,
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Linha de configuração da empresa com switch — flush, sem moldura. Enquanto
+/// grava, o switch dá lugar a um indicador discreto (sem trocar o layout).
+class _CompanySwitchRow extends StatelessWidget {
+  const _CompanySwitchRow({
+    required this.tone,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.saving,
+    required this.onChanged,
+  });
+
+  final Color tone;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool value;
+  final bool saving;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return InkWell(
+      onTap: saving ? null : () => onChanged(!value),
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(0, 6, 4, 6),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 42,
+              child: Icon(
+                icon,
+                size: 18,
+                color: value ? tone : secondary.withValues(alpha: 0.8),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: ThemeHelpers.textColor(context),
+                      height: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: secondary,
+                      height: 1.3,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 56,
+              height: 36,
+              child: Center(
+                child: saving
+                    ? SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: tone,
+                        ),
+                      )
+                    : Switch.adaptive(
+                        value: value,
+                        activeTrackColor: tone,
+                        onChanged: onChanged,
+                      ),
+              ),
+            ),
+          ],
         ),
       ),
     );

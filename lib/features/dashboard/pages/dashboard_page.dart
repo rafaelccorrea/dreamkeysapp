@@ -20,6 +20,7 @@ import '../widgets/broker_dashboard_hub.dart';
 import '../../../core/notifications/subtask_reminder_service.dart';
 import '../../../core/navigation/deep_link_service.dart';
 import '../../../core/push/app_push_service.dart';
+import '../../sale_forms/widgets/sale_form_signature_lock_sheet.dart';
 
 // Formatters globais
 final _currencyFormatter = NumberFormat.currency(
@@ -70,8 +71,17 @@ class _DashboardPageState extends State<DashboardPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       DeepLinkService.instance.notifyHomeReady();
       AppPushService.instance.notifyHomeReady();
+      // Trava de assinatura parada (paridade com o SignatureLockGate do web):
+      // UMA consulta por abertura do app — cada consulta conta um aviso no back.
+      if (!_travaDeAssinaturaConferida && mounted) {
+        _travaDeAssinaturaConferida = true;
+        unawaited(showSignatureLockIfBlocked(context));
+      }
     });
   }
+
+  /// Já consultou a trava de assinatura nesta execução do app.
+  static bool _travaDeAssinaturaConferida = false;
 
   Future<void> _loadDashboardData() async {
     setState(() {

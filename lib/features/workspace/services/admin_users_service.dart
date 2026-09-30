@@ -18,12 +18,25 @@ class AdminUsersService {
   static final AdminUsersService instance = AdminUsersService._();
   final ApiService _api = ApiService.instance;
 
+  static const String _jobLevelsPath = '/job-levels';
+  static String _kanbanRedistributePath(String projectId) =>
+      '/kanban/projects/$projectId/redistribute-leads';
+
   /// Valida disponibilidade de email (`GET /admin/users/validate/email`).
-  Future<bool?> validateEmailAvailable(String email) async {
+  /// Na edição, [excludeUserId] ignora o próprio usuário (paridade com
+  /// `usersApi.validateEmail(email, user.id)` do web).
+  Future<bool?> validateEmailAvailable(
+    String email, {
+    String? excludeUserId,
+  }) async {
     try {
       final res = await _api.get<Map<String, dynamic>>(
         '${ApiConstants.adminUsers}/validate/email',
-        queryParameters: {'email': email.trim()},
+        queryParameters: {
+          'email': email.trim(),
+          if (excludeUserId != null && excludeUserId.isNotEmpty)
+            'excludeUserId': excludeUserId,
+        },
       );
       if (!res.success || res.data == null) return null;
       final root = res.data!['data'] is Map
@@ -243,20 +256,45 @@ class AdminUsersService {
     }
   }
 
-  /// Atualiza papel / gestores / permissões do usuário (`PUT /admin/users/:id`).
-  /// Envia apenas os campos informados. (Acesso ao app vai pelo endpoint
-  /// dedicado [updateAppAccess], espelhando o web.)
+  /// Atualiza o usuário (`PUT /admin/users/:id`) — paridade com o
+  /// `UpdateUserData` do web: name, email, phone, password (só quando
+  /// informada), role, permissionIds, tagIds, managerIds, jobLevelId,
+  /// reportsToUserId e isAvailableForPublicSite. Envia apenas os campos
+  /// informados. Cargo/superior vão só com [includeHierarchy] (null limpa).
   Future<ApiResponse<void>> updateUser(
     String id, {
     String? role,
     List<String>? managerIds,
     List<String>? permissionIds,
+    String? name,
+    String? email,
+    String? phone,
+    String? password,
+    List<String>? tagIds,
+    bool? isAvailableForPublicSite,
+    bool includeHierarchy = false,
+    String? jobLevelId,
+    String? reportsToUserId,
   }) async {
     try {
       final body = <String, dynamic>{};
+      if (name != null) body['name'] = name;
+      if (email != null) body['email'] = email;
+      if (phone != null) body['phone'] = phone;
+      if (password != null && password.isNotEmpty) {
+        body['password'] = password;
+      }
       if (role != null) body['role'] = role;
       if (managerIds != null) body['managerIds'] = managerIds;
       if (permissionIds != null) body['permissionIds'] = permissionIds;
+      if (tagIds != null) body['tagIds'] = tagIds;
+      if (isAvailableForPublicSite != null) {
+        body['isAvailableForPublicSite'] = isAvailableForPublicSite;
+      }
+      if (includeHierarchy) {
+        body['jobLevelId'] = jobLevelId;
+        body['reportsToUserId'] = reportsToUserId;
+      }
 
       final res = await _api.put<Map<String, dynamic>>(
         ApiConstants.adminUserById(id),
@@ -321,5 +359,271 @@ class AdminUsersService {
       debugPrint('❌ [ADMIN_USERS] setActive: $e');
       return ApiResponse.error(message: e.toString(), statusCode: 0);
     }
+  }
+
+  /// Desativa o usuário NESTA empresa (`PATCH /admin/users/:id/deactivate`)
+  /// e devolve o `propertyReassignment` que o back calculou (imóveis que
+  /// mudaram de responsável/captador) — o web mostra isso no toast final.
+  Future<ApiResponse<DeactivateUserResult>> deactivateInCompany(
+    String userId,
+  ) async {
+    try {
+      final res = await _api.patch<Map<String, dynamic>>(
+        ApiConstants.adminUserDeactivate(userId),
+        body: const {},
+      );
+      if (!res.success) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao desativar usuário',
+          statusCode: res.statusCode,
+        );
+      }
+      final body = res.data ?? const <String, dynamic>{};
+      final root = body['data'] is Map && body['propertyReassignment'] == null
+          ? Map<String, dynamic>.from(body['data'] as Map)
+          : body;
+      return ApiResponse.success(
+        data: DeactivateUserResult.fromJson(root),
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [ADMIN_USERS] deactivateInCompany: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Prévia dos cards em aberto do usuário por funil
+  /// (`GET /admin/users/:id/funnel-assignment-preview`).
+  Future<ApiResponse<UserFunnelPreview>> getFunnelAssignmentPreview(
+    String userId,
+  ) async {
+    try {
+      final res = await _api.get<Map<String, dynamic>>(
+        '${ApiConstants.adminUsers}/$userId/funnel-assignment-preview',
+      );
+      if (!res.success || res.data == null) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao carregar a prévia do funil',
+          statusCode: res.statusCode,
+        );
+      }
+      final body = res.data!;
+      final root = body['data'] is Map && body['projects'] == null
+          ? Map<String, dynamic>.from(body['data'] as Map)
+          : body;
+      return ApiResponse.success(
+        data: UserFunnelPreview.fromJson(root),
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [ADMIN_USERS] getFunnelAssignmentPreview: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Redistribui os cards em aberto de [fromUserId] entre os membros do
+  /// funil (`POST /kanban/projects/:id/redistribute-leads`, modo
+  /// `team_members`, só leads abertos) — o mesmo corpo do
+  /// `redistributeUserFunnelLeadsBeforeDeactivate` do web. Devolve quantos
+  /// cards foram atualizados.
+  Future<ApiResponse<int>> redistributeFunnelLeads(
+    String projectId,
+    String fromUserId,
+  ) async {
+    try {
+      final res = await _api.post<Map<String, dynamic>>(
+        _kanbanRedistributePath(projectId),
+        body: {
+          'fromUserId': fromUserId,
+          'distributionMode': 'team_members',
+          'onlyOpenLeads': true,
+        },
+      );
+      if (!res.success) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao redistribuir leads do funil',
+          statusCode: res.statusCode,
+        );
+      }
+      final body = res.data ?? const <String, dynamic>{};
+      final root = body['data'] is Map && body['updatedCount'] == null
+          ? Map<String, dynamic>.from(body['data'] as Map)
+          : body;
+      final updated = root['updatedCount'];
+      return ApiResponse.success(
+        data: updated is num ? updated.toInt() : 0,
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [ADMIN_USERS] redistributeFunnelLeads: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Escada de cargos da empresa (`GET /job-levels`) — mesma fonte do
+  /// `CargoESuperiorFields` do web.
+  Future<ApiResponse<List<JobLevelOption>>> listJobLevels() async {
+    try {
+      final res = await _api.get<dynamic>(_jobLevelsPath);
+      if (!res.success || res.data == null) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao carregar cargos',
+          statusCode: res.statusCode,
+        );
+      }
+      final raw = res.data;
+      final list = raw is List
+          ? raw
+          : (raw is Map && raw['data'] is List ? raw['data'] as List : const []);
+      final out = list
+          .whereType<Map>()
+          .map((e) => JobLevelOption.fromJson(Map<String, dynamic>.from(e)))
+          .where((l) => l.id.isNotEmpty)
+          .toList()
+        ..sort((a, b) => a.rank.compareTo(b.rank));
+      return ApiResponse.success(data: out, statusCode: res.statusCode);
+    } catch (e) {
+      debugPrint('❌ [ADMIN_USERS] listJobLevels: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Colegas da empresa para o campo "Superior direto"
+  /// (`GET /admin/users?allCompanyUsers=true&limit=10000`, como o web).
+  Future<ApiResponse<List<AdminUser>>> listCompanyColleagues() async {
+    try {
+      final res = await _api.get<Map<String, dynamic>>(
+        ApiConstants.adminUsers,
+        queryParameters: const {
+          'page': '1',
+          'limit': '10000',
+          'allCompanyUsers': 'true',
+        },
+      );
+      if (!res.success || res.data == null) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao listar usuários',
+          statusCode: res.statusCode,
+        );
+      }
+      return ApiResponse.success(
+        data: AdminUsersPage.fromJson(res.data!, 1).users,
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [ADMIN_USERS] listCompanyColleagues: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+}
+
+/// Resultado do `PATCH /admin/users/:id/deactivate`.
+class DeactivateUserResult {
+  final int propertiesMainResponsibleUpdated;
+  final int propertyResponsiblesRowsRemoved;
+  final int propertyCaptorRowsRemoved;
+  final int propertiesCapturedByIdUpdated;
+  final bool hasReassignment;
+
+  const DeactivateUserResult({
+    this.propertiesMainResponsibleUpdated = 0,
+    this.propertyResponsiblesRowsRemoved = 0,
+    this.propertyCaptorRowsRemoved = 0,
+    this.propertiesCapturedByIdUpdated = 0,
+    this.hasReassignment = false,
+  });
+
+  factory DeactivateUserResult.fromJson(Map<String, dynamic> json) {
+    final r = json['propertyReassignment'];
+    if (r is! Map) return const DeactivateUserResult();
+    int n(dynamic v) => v is num ? v.toInt() : int.tryParse('$v') ?? 0;
+    return DeactivateUserResult(
+      propertiesMainResponsibleUpdated: n(r['propertiesMainResponsibleUpdated']),
+      propertyResponsiblesRowsRemoved: n(r['propertyResponsiblesRowsRemoved']),
+      propertyCaptorRowsRemoved: n(r['propertyCaptorRowsRemoved']),
+      propertiesCapturedByIdUpdated: n(r['propertiesCapturedByIdUpdated']),
+      hasReassignment: true,
+    );
+  }
+
+  /// Mesma frase do `buildDeactivateSuccessMessage` do web.
+  String successMessage(String userName) {
+    var msg = '$userName foi desativado nesta empresa.';
+    if (!hasReassignment) return msg;
+    final parts = <String>[
+      if (propertiesMainResponsibleUpdated > 0)
+        '$propertiesMainResponsibleUpdated imóvel(is) com novo responsável principal',
+      if (propertyResponsiblesRowsRemoved > 0)
+        '$propertyResponsiblesRowsRemoved vínculo(s) de co-responsável removido(s)',
+      if (propertyCaptorRowsRemoved > 0)
+        '$propertyCaptorRowsRemoved captador(es) removido(s)',
+      if (propertiesCapturedByIdUpdated > 0)
+        '$propertiesCapturedByIdUpdated imóvel(is) com captador atualizado',
+    ];
+    if (parts.isNotEmpty) msg += ' ${parts.join('; ')}.';
+    return msg;
+  }
+}
+
+/// Um funil da prévia de desativação.
+class UserFunnelPreviewProject {
+  final String projectId;
+  final String projectName;
+  final int openTaskCount;
+
+  const UserFunnelPreviewProject({
+    required this.projectId,
+    required this.projectName,
+    required this.openTaskCount,
+  });
+}
+
+/// `GET /admin/users/:id/funnel-assignment-preview`.
+class UserFunnelPreview {
+  final int totalOpenTasks;
+  final List<UserFunnelPreviewProject> projects;
+
+  const UserFunnelPreview({
+    this.totalOpenTasks = 0,
+    this.projects = const [],
+  });
+
+  factory UserFunnelPreview.fromJson(Map<String, dynamic> json) {
+    int n(dynamic v) => v is num ? v.toInt() : int.tryParse('$v') ?? 0;
+    final projects = (json['projects'] is List ? json['projects'] as List : [])
+        .whereType<Map>()
+        .map((p) => UserFunnelPreviewProject(
+              projectId: p['projectId']?.toString() ?? '',
+              projectName: p['projectName']?.toString() ?? 'Funil',
+              openTaskCount: n(p['openTaskCount']),
+            ))
+        .where((p) => p.projectId.isNotEmpty)
+        .toList();
+    return UserFunnelPreview(
+      totalOpenTasks: n(json['totalOpenTasks']),
+      projects: projects,
+    );
+  }
+}
+
+/// Degrau da escada de cargos (`GET /job-levels`).
+class JobLevelOption {
+  final String id;
+  final String name;
+  final int rank;
+
+  const JobLevelOption({
+    required this.id,
+    required this.name,
+    required this.rank,
+  });
+
+  factory JobLevelOption.fromJson(Map<String, dynamic> json) {
+    final r = json['rank'];
+    return JobLevelOption(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      rank: r is num ? r.toInt() : int.tryParse('$r') ?? 999,
+    );
   }
 }

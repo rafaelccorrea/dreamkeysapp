@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../../../shared/services/module_access_service.dart';
 import '../../../shared/utils/error_cause.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
@@ -9,8 +9,17 @@ import '../../../core/theme/theme_helpers.dart';
 import '../../../core/routes/app_routes.dart';
 import '../services/document_service.dart';
 import '../models/document_model.dart';
+import '../utils/document_file_actions.dart';
+import '../utils/document_permissions.dart';
+import '../widgets/document_access_locked.dart';
 import '../widgets/document_filters_drawer.dart';
 import '../widgets/upload_tokens_modal.dart';
+import 'send_document_for_signature_page.dart';
+
+/// Ações do menu de cada documento (paridade com o menu do item da
+/// biblioteca do web: ver, baixar, editar, enviar p/ assinatura, aprovar,
+/// recusar e excluir — cada uma com a permissão correspondente).
+enum _DocAction { view, download, edit, sendForSignature, approve, reject, delete }
 
 /// Página de listagem de documentos
 class DocumentsPage extends StatefulWidget {
@@ -47,17 +56,31 @@ class _DocumentsPageState extends State<DocumentsPage>
   bool _isLoadingPendingDocuments = false;
   bool _isLoadingApprovedDocuments = false;
 
+  /// Seleção múltipla (toque longo) para as ações em lote do web:
+  /// aprovar, recusar, baixar e excluir.
+  final Set<String> _selectedIds = <String>{};
+  bool _bulkBusy = false;
+  String? _busyDocumentId;
+
+  bool get _selecting => _selectedIds.isNotEmpty;
+
   @override
   void initState() {
     super.initState();
+    ModuleAccessService.instance.addListener(_onAccessChanged);
     _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(_onTabChanged);
     _loadDocuments();
     _scrollController.addListener(_onScroll);
   }
 
+  void _onAccessChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    ModuleAccessService.instance.removeListener(_onAccessChanged);
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _searchController.dispose();
@@ -68,7 +91,254 @@ class _DocumentsPageState extends State<DocumentsPage>
 
   void _onTabChanged() {
     if (_tabController.indexIsChanging) return;
+    if (_selectedIds.isNotEmpty) setState(_selectedIds.clear);
     _loadDocumentsForCurrentTab(force: true);
+  }
+
+  // ─── Ações por item e em lote ─────────────────────────────────────────
+
+  void _snack(String text, {bool ok = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(text),
+        backgroundColor: ok ? AppColors.status.success : AppColors.status.error,
+      ),
+    );
+  }
+
+  Future<bool> _confirm({
+    required String title,
+    required String message,
+    required String confirmLabel,
+    bool destructive = false,
+  }) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            style: TextButton.styleFrom(
+              foregroundColor: ThemeHelpers.textColor(ctx),
+            ),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: destructive
+                  ? AppColors.status.error
+                  : AppColors.status.success,
+            ),
+            child: Text(confirmLabel),
+          ),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
+  Future<void> _refreshAfterAction() async {
+    setState(() {
+      _allDocuments.clear();
+      _myDocuments.clear();
+      _pendingDocuments.clear();
+      _approvedDocuments.clear();
+    });
+    await _loadDocumentsForCurrentTab(force: true);
+  }
+
+  void _toggleSelected(Document d) {
+    setState(() {
+      if (!_selectedIds.remove(d.id)) _selectedIds.add(d.id);
+    });
+  }
+
+  Future<void> _openSendForSignature(Document d) async {
+    final sent = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => SendDocumentForSignaturePage(documentId: d.id),
+      ),
+    );
+    if (sent == true && mounted) _refreshAfterAction();
+  }
+
+  Future<void> _handleDocAction(_DocAction action, Document d) async {
+    switch (action) {
+      case _DocAction.view:
+        await Navigator.pushNamed(context, AppRoutes.documentDetails(d.id));
+        if (mounted) _refreshAfterAction();
+        break;
+      case _DocAction.download:
+        setState(() => _busyDocumentId = d.id);
+        await DocumentFileActions.download(
+          context,
+          d.fileUrl,
+          d.originalName.isNotEmpty ? d.originalName : d.fileName,
+        );
+        if (mounted) setState(() => _busyDocumentId = null);
+        break;
+      case _DocAction.edit:
+        await Navigator.pushNamed(context, AppRoutes.documentEdit(d.id));
+        if (mounted) _refreshAfterAction();
+        break;
+      case _DocAction.sendForSignature:
+        await _openSendForSignature(d);
+        break;
+      case _DocAction.approve:
+      case _DocAction.reject: {
+        final approving = action == _DocAction.approve;
+        final ok = await _confirm(
+          title: approving ? 'Aprovar documento' : 'Recusar documento',
+          message: approving
+              ? 'Confirmar a aprovação de "${d.title ?? d.originalName}"?'
+              : 'Confirmar a recusa de "${d.title ?? d.originalName}"?',
+          confirmLabel: approving ? 'Aprovar' : 'Recusar',
+          destructive: !approving,
+        );
+        if (!ok || !mounted) return;
+        setState(() => _busyDocumentId = d.id);
+        final res = await _documentService.approveDocument(
+          d.id,
+          status:
+              approving ? DocumentStatus.approved : DocumentStatus.rejected,
+        );
+        if (!mounted) return;
+        setState(() => _busyDocumentId = null);
+        if (res.success) {
+          _snack(
+            approving ? 'Documento aprovado.' : 'Documento rejeitado.',
+            ok: true,
+          );
+          _refreshAfterAction();
+        } else {
+          _snack(res.message ??
+              (approving
+                  ? 'Erro ao aprovar documento.'
+                  : 'Erro ao rejeitar documento.'));
+        }
+        break;
+      }
+      case _DocAction.delete: {
+        final ok = await _confirm(
+          title: 'Excluir documento',
+          message:
+              'Excluir "${d.title ?? d.originalName}"? Esta ação não pode ser '
+              'desfeita.',
+          confirmLabel: 'Excluir',
+          destructive: true,
+        );
+        if (!ok || !mounted) return;
+        setState(() => _busyDocumentId = d.id);
+        final res = await _documentService.deleteDocuments([d.id]);
+        if (!mounted) return;
+        setState(() => _busyDocumentId = null);
+        if (res.success) {
+          _snack('Documento excluído.', ok: true);
+          _refreshAfterAction();
+        } else {
+          _snack(res.message ?? 'Erro ao excluir documento.');
+        }
+        break;
+      }
+    }
+  }
+
+  List<Document> get _selectedDocuments =>
+      _documents.where((d) => _selectedIds.contains(d.id)).toList();
+
+  Future<void> _bulkReview(bool approving) async {
+    final ids = _selectedIds.toList();
+    if (ids.isEmpty) return;
+    final ok = await _confirm(
+      title: approving ? 'Aprovar documentos' : 'Recusar documentos',
+      message: approving
+          ? 'Aprovar ${ids.length} documento(s)?'
+          : 'Recusar ${ids.length} documento(s)?',
+      confirmLabel: approving ? 'Aprovar' : 'Recusar',
+      destructive: !approving,
+    );
+    if (!ok || !mounted) return;
+    setState(() => _bulkBusy = true);
+    final results = await Future.wait(
+      ids.map(
+        (id) => _documentService.approveDocument(
+          id,
+          status:
+              approving ? DocumentStatus.approved : DocumentStatus.rejected,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    final okCount = results.where((r) => r.success).length;
+    setState(() {
+      _bulkBusy = false;
+      _selectedIds.clear();
+    });
+    if (okCount == ids.length) {
+      _snack(
+        approving
+            ? '$okCount documento(s) aprovado(s).'
+            : '$okCount documento(s) rejeitado(s).',
+        ok: true,
+      );
+    } else {
+      _snack(
+        approving
+            ? 'Erro ao aprovar documentos ($okCount de ${ids.length}).'
+            : 'Erro ao rejeitar documentos ($okCount de ${ids.length}).',
+      );
+    }
+    _refreshAfterAction();
+  }
+
+  Future<void> _bulkDelete() async {
+    final ids = _selectedIds.toList();
+    if (ids.isEmpty) return;
+    final ok = await _confirm(
+      title: 'Excluir documentos',
+      message:
+          'Excluir ${ids.length} documento(s)? Esta ação não pode ser desfeita.',
+      confirmLabel: 'Excluir',
+      destructive: true,
+    );
+    if (!ok || !mounted) return;
+    setState(() => _bulkBusy = true);
+    final res = await _documentService.deleteDocuments(ids);
+    if (!mounted) return;
+    setState(() {
+      _bulkBusy = false;
+      if (res.success) _selectedIds.clear();
+    });
+    if (res.success) {
+      _snack('${ids.length} documento(s) excluído(s).', ok: true);
+      _refreshAfterAction();
+    } else {
+      _snack(res.message ?? 'Erro ao excluir documentos.');
+    }
+  }
+
+  Future<void> _bulkDownload() async {
+    final docs = _selectedDocuments;
+    if (docs.isEmpty) return;
+    setState(() => _bulkBusy = true);
+    final n = await DocumentFileActions.downloadMany(
+      context,
+      docs
+          .map(
+            (d) => MapEntry(
+              d.fileUrl,
+              d.originalName.isNotEmpty ? d.originalName : d.fileName,
+            ),
+          )
+          .toList(),
+    );
+    if (!mounted) return;
+    setState(() => _bulkBusy = false);
+    if (n > 0) _snack('Download iniciado para $n arquivo(s).', ok: true);
   }
 
   Future<void> _loadDocumentsForCurrentTab({bool force = false}) async {
@@ -345,27 +615,36 @@ class _DocumentsPageState extends State<DocumentsPage>
     await _loadDocumentsForCurrentTab(force: true);
   }
 
+  void _openUploadLinks() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const UploadTokensModal(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
+    // Porta da biblioteca (web: ModuleRoute('document_management') +
+    // document:read). Sem ela, cadeado com o motivo.
+    if (!DocumentPermissions.canOpenLibrary) {
+      return const AppScaffold(
+        title: 'Documentos',
+        showBottomNavigation: true,
+        body: DocumentAccessLocked(),
+      );
+    }
+
+    final canCreate = DocumentPermissions.canCreate;
 
     return AppScaffold(
       title: 'Documentos',
       showBottomNavigation: true,
       actions: [
-        IconButton(
-          icon: const Icon(Icons.link),
-          onPressed: () {
-            showModalBottomSheet(
-              context: context,
-              isScrollControlled: true,
-              useSafeArea: true,
-              backgroundColor: Colors.transparent,
-              builder: (context) => const UploadTokensModal(),
-            );
-          },
-          tooltip: 'Links Públicos',
-        ),
         IconButton(
           icon: Stack(
             children: [
@@ -409,12 +688,44 @@ class _DocumentsPageState extends State<DocumentsPage>
           },
           tooltip: 'Filtros',
         ),
-        IconButton(
-          icon: const Icon(Icons.add),
-          onPressed: () {
-            Navigator.pushNamed(context, AppRoutes.documentCreate);
+        if (canCreate)
+          IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: () async {
+              await Navigator.pushNamed(context, AppRoutes.documentCreate);
+              if (mounted) _refreshAfterAction();
+            },
+            tooltip: 'Novo Documento',
+          ),
+        PopupMenuButton<String>(
+          tooltip: 'Mais opções',
+          icon: const Icon(Icons.more_vert),
+          onSelected: (v) {
+            if (v == 'signatures') {
+              Navigator.pushNamed(context, AppRoutes.signatures);
+            } else if (v == 'links') {
+              _openUploadLinks();
+            }
           },
-          tooltip: 'Novo Documento',
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: 'signatures',
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.draw_outlined),
+                title: Text('Assinaturas'),
+              ),
+            ),
+            if (canCreate)
+              const PopupMenuItem(
+                value: 'links',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.link),
+                  title: Text('Links públicos'),
+                ),
+              ),
+          ],
         ),
       ],
       body: Column(
@@ -456,6 +767,89 @@ class _DocumentsPageState extends State<DocumentsPage>
                         ],
                       ),
           ),
+          if (_selecting) _buildBulkBar(context, theme),
+        ],
+      ),
+    );
+  }
+
+  /// Barra de ações em lote (web: aprovar/recusar com `canApprove`, baixar
+  /// com `canDownload`, excluir com `canDelete`).
+  Widget _buildBulkBar(BuildContext context, ThemeData theme) {
+    final n = _selectedIds.length;
+    final canApprove = DocumentPermissions.canApprove;
+    final canDownload = DocumentPermissions.canDownload;
+    final canDelete = DocumentPermissions.canDelete;
+
+    Widget action(
+      IconData icon,
+      String tooltip,
+      VoidCallback? onTap, {
+      Color? color,
+    }) {
+      return IconButton(
+        tooltip: tooltip,
+        onPressed: _bulkBusy ? null : onTap,
+        icon: Icon(icon, color: color),
+      );
+    }
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        8,
+        6,
+        8,
+        6 + MediaQuery.of(context).padding.bottom,
+      ),
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        border: Border(
+          top: BorderSide(color: ThemeHelpers.borderColor(context)),
+        ),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: 'Cancelar seleção',
+            onPressed: _bulkBusy ? null : () => setState(_selectedIds.clear),
+            icon: const Icon(Icons.close_rounded),
+          ),
+          Expanded(
+            child: Text(
+              _bulkBusy
+                  ? 'Processando...'
+                  : '$n selecionado${n > 1 ? 's' : ''}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: ThemeHelpers.textColor(context),
+              ),
+            ),
+          ),
+          if (canApprove) ...[
+            action(
+              Icons.check_circle_outline_rounded,
+              'Aprovar',
+              () => _bulkReview(true),
+              color: AppColors.status.success,
+            ),
+            action(
+              Icons.cancel_outlined,
+              'Recusar',
+              () => _bulkReview(false),
+              color: AppColors.status.error,
+            ),
+          ],
+          if (canDownload)
+            action(Icons.download_outlined, 'Baixar', _bulkDownload),
+          if (canDelete)
+            action(
+              Icons.delete_outline_rounded,
+              'Excluir',
+              _bulkDelete,
+              color: AppColors.status.error,
+            ),
         ],
       ),
     );
@@ -606,22 +1000,25 @@ class _DocumentsPageState extends State<DocumentsPage>
                 color: ThemeHelpers.textSecondaryColor(context),
               ),
             ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () {
-                Navigator.pushNamed(context, AppRoutes.documentCreate);
-              },
-              icon: const Icon(Icons.add),
-              label: const Text('Novo Documento'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary.primary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 14,
+            if (DocumentPermissions.canCreate) ...[
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: () async {
+                  await Navigator.pushNamed(context, AppRoutes.documentCreate);
+                  if (mounted) _refreshAfterAction();
+                },
+                icon: const Icon(Icons.add),
+                label: const Text('Novo Documento'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 14,
+                  ),
                 ),
               ),
-            ),
+            ],
           ],
         ),
       ),
@@ -633,51 +1030,64 @@ class _DocumentsPageState extends State<DocumentsPage>
     ThemeData theme,
     Document document,
   ) {
+    final selected = _selectedIds.contains(document.id);
+    final busy = _busyDocumentId == document.id;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: ThemeHelpers.borderLightColor(context),
-          width: 1,
+          color: selected
+              ? AppColors.primary.primary
+              : ThemeHelpers.borderLightColor(context),
+          width: selected ? 1.5 : 1,
         ),
       ),
-      color: ThemeHelpers.cardBackgroundColor(context),
+      color: selected
+          ? AppColors.primary.primary.withValues(alpha: 0.06)
+          : ThemeHelpers.cardBackgroundColor(context),
       child: InkWell(
         onTap: () {
-          Navigator.pushNamed(
-            context,
-            AppRoutes.documentDetails(document.id),
-          );
+          if (_selecting) {
+            _toggleSelected(document);
+          } else {
+            _handleDocAction(_DocAction.view, document);
+          }
         },
+        onLongPress: () => _toggleSelected(document),
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 14, 4, 14),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Ícone do tipo de arquivo
+              // Ícone do tipo de arquivo (vira o check na seleção)
               Container(
-                width: 48,
-                height: 48,
+                width: 44,
+                height: 44,
                 decoration: BoxDecoration(
-                  color: AppColors.primary.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
+                  color: selected
+                      ? AppColors.primary.primary
+                      : AppColors.primary.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
-                  _getFileIcon(document.fileExtension),
-                  color: AppColors.primary.primary,
-                  size: 24,
+                  selected
+                      ? Icons.check_rounded
+                      : _getFileIcon(document.fileExtension),
+                  color: selected ? Colors.white : AppColors.primary.primary,
+                  size: 22,
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 14),
               // Informações
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Título ou nome
                     Text(
                       document.title ?? document.originalName,
                       style: theme.textTheme.titleMedium?.copyWith(
@@ -687,80 +1097,68 @@ class _DocumentsPageState extends State<DocumentsPage>
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 4),
-                    // Tipo e Status
-                    Row(
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
                       children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.primary.primary.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            document.type.label,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: AppColors.primary.primary,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 11,
-                            ),
-                          ),
+                        _pill(
+                          theme,
+                          document.type.label,
+                          AppColors.primary.primary,
                         ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: _getStatusColor(document.status)
-                                .withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            document.status.label,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: _getStatusColor(document.status),
-                              fontWeight: FontWeight.w600,
-                              fontSize: 11,
-                            ),
-                          ),
+                        _pill(
+                          theme,
+                          document.status.label,
+                          _getStatusColor(document.status),
                         ),
+                        if (document.signatures != null &&
+                            document.signatures!.hasSignatures)
+                          _pill(
+                            theme,
+                            '${document.signatures!.signed}/${document.signatures!.total} assinaturas',
+                            document.signatures!.allSigned
+                                ? AppColors.status.success
+                                : AppColors.status.warning,
+                          ),
                       ],
                     ),
                     const SizedBox(height: 8),
-                    // Informações adicionais
                     Row(
                       children: [
-                        Icon(
-                          Icons.file_present,
-                          size: 14,
-                          color: ThemeHelpers.textSecondaryColor(context),
-                        ),
+                        Icon(Icons.file_present, size: 14, color: muted),
                         const SizedBox(width: 4),
                         Text(
                           _formatFileSize(document.fileSize),
                           style: theme.textTheme.bodySmall?.copyWith(
-                            color: ThemeHelpers.textSecondaryColor(context),
+                            color: muted,
                             fontSize: 12,
                           ),
                         ),
                         if (document.client != null) ...[
                           const SizedBox(width: 12),
-                          Icon(
-                            Icons.person,
-                            size: 14,
-                            color: ThemeHelpers.textSecondaryColor(context),
-                          ),
+                          Icon(Icons.person, size: 14, color: muted),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
                               document.client!.name,
                               style: theme.textTheme.bodySmall?.copyWith(
-                                color: ThemeHelpers.textSecondaryColor(context),
+                                color: muted,
+                                fontSize: 12,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ] else if (document.property != null) ...[
+                          const SizedBox(width: 12),
+                          Icon(Icons.home_outlined, size: 14, color: muted),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              document.property!.title,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: muted,
                                 fontSize: 12,
                               ),
                               maxLines: 1,
@@ -773,26 +1171,17 @@ class _DocumentsPageState extends State<DocumentsPage>
                   ],
                 ),
               ),
-              // Botões de ação
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.download_outlined),
-                    onPressed: () => _downloadDocument(context, document),
-                    tooltip: 'Baixar',
-                    iconSize: 20,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
+              if (busy)
+                const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   ),
-                  const SizedBox(width: 8),
-                  Icon(
-                    Icons.chevron_right,
-                    color: ThemeHelpers.textSecondaryColor(context),
-                    size: 24,
-                  ),
-                ],
-              ),
+                )
+              else if (!_selecting)
+                _buildItemMenu(document),
             ],
           ),
         ),
@@ -800,50 +1189,102 @@ class _DocumentsPageState extends State<DocumentsPage>
     );
   }
 
-  Future<void> _downloadDocument(BuildContext context, Document document) async {
-    try {
-      final url = Uri.parse(document.fileUrl);
-      
-      // Verifica se a URL pode ser lançada
-      final canLaunch = await canLaunchUrl(url);
-      
-      if (!canLaunch) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Não foi possível abrir o documento: ${document.originalName}'),
-              backgroundColor: AppColors.status.error,
+  Widget _pill(ThemeData theme, String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w600,
+          fontSize: 11,
+        ),
+      ),
+    );
+  }
+
+  /// Menu do item — cada ação só aparece com a permissão do web.
+  Widget _buildItemMenu(Document d) {
+    final canDownload = DocumentPermissions.canDownload;
+    final canUpdate = DocumentPermissions.canUpdate;
+    final canCreate = DocumentPermissions.canCreate;
+    final canApprove = DocumentPermissions.canApprove;
+    final canDelete = DocumentPermissions.canDelete;
+    final pending = d.status == DocumentStatus.pendingReview;
+    final allSigned = d.signatures?.allSigned ?? false;
+
+    PopupMenuItem<_DocAction> item(
+      _DocAction value,
+      IconData icon,
+      String label, {
+      Color? color,
+    }) {
+      return PopupMenuItem<_DocAction>(
+        value: value,
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: color),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: color != null ? TextStyle(color: color) : null,
+              ),
             ),
-          );
-        }
-        return;
-      }
-
-      // Tenta abrir no navegador/externo
-      final launched = await launchUrl(
-        url,
-        mode: LaunchMode.externalApplication,
+          ],
+        ),
       );
-
-      if (!launched && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Não foi possível abrir o documento: ${document.originalName}'),
-            backgroundColor: AppColors.status.error,
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint('❌ [DOCUMENTS_PAGE] Erro ao baixar documento: $e');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao abrir documento: ${e.toString()}'),
-            backgroundColor: AppColors.status.error,
-          ),
-        );
-      }
     }
+
+    return PopupMenuButton<_DocAction>(
+      tooltip: 'Ações',
+      icon: Icon(
+        Icons.more_vert,
+        color: ThemeHelpers.textSecondaryColor(context),
+      ),
+      onSelected: (a) => _handleDocAction(a, d),
+      itemBuilder: (context) => [
+        item(_DocAction.view, Icons.visibility_outlined, 'Ver detalhes'),
+        if (canDownload && d.fileUrl.isNotEmpty)
+          item(_DocAction.download, Icons.download_outlined, 'Baixar'),
+        if (canUpdate) item(_DocAction.edit, Icons.edit_outlined, 'Editar'),
+        if (canCreate && !allSigned)
+          item(
+            _DocAction.sendForSignature,
+            Icons.send_outlined,
+            'Enviar p/ assinatura',
+          ),
+        if (canApprove && pending) ...[
+          item(
+            _DocAction.approve,
+            Icons.check_circle_outline_rounded,
+            'Aprovar',
+            color: AppColors.status.success,
+          ),
+          item(
+            _DocAction.reject,
+            Icons.cancel_outlined,
+            'Recusar',
+            color: AppColors.status.error,
+          ),
+        ],
+        if (canDelete)
+          item(
+            _DocAction.delete,
+            Icons.delete_outline_rounded,
+            'Excluir',
+            color: AppColors.status.error,
+          ),
+      ],
+    );
   }
 
   IconData _getFileIcon(String extension) {

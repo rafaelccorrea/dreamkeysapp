@@ -60,6 +60,10 @@ class CompanyTeam {
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
+  /// Unidade (filial) dona da equipe — `unitId`/`unitName` do back.
+  final String? unitId;
+  final String? unitName;
+
   const CompanyTeam({
     required this.id,
     required this.name,
@@ -71,6 +75,8 @@ class CompanyTeam {
     this.memberCount,
     this.createdAt,
     this.updatedAt,
+    this.unitId,
+    this.unitName,
   });
 
   factory CompanyTeam.fromJson(Map<String, dynamic> json) {
@@ -99,6 +105,20 @@ class CompanyTeam {
             .toList()
         : <CompanyTeamMember>[];
 
+    String? parseUnitId() {
+      final raw = json['unitId'] ??
+          (json['unit'] is Map ? (json['unit'] as Map)['id'] : null);
+      final s = raw?.toString().trim() ?? '';
+      return s.isEmpty ? null : s;
+    }
+
+    String? parseUnitName() {
+      final raw = json['unitName'] ??
+          (json['unit'] is Map ? (json['unit'] as Map)['name'] : null);
+      final s = raw?.toString().trim() ?? '';
+      return s.isEmpty ? null : s;
+    }
+
     int? count;
     final mc = json['memberCount'] ?? json['membersCount'];
     if (mc != null) {
@@ -120,6 +140,8 @@ class CompanyTeam {
       memberCount: count,
       createdAt: parseDate(json['createdAt']),
       updatedAt: parseDate(json['updatedAt']),
+      unitId: parseUnitId(),
+      unitName: parseUnitName(),
     );
   }
 

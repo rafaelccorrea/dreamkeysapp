@@ -40,6 +40,7 @@ import '../services/property_approval_service.dart';
 import '../widgets/approval_action_sheets.dart';
 import '../utils/property_edit_permissions.dart';
 import '../utils/property_status_visual.dart';
+import '../utils/property_type_visual.dart';
 import '../utils/compute_property_score.dart';
 import '../utils/public_property_link.dart';
 import '../widgets/property_score_panel.dart';
@@ -2250,7 +2251,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           spacing: 6,
           runSpacing: 6,
           children: [
-            PropertyStatusPill(status: property.status),
+            PropertyStatusPill(
+              status: property.status,
+              rawStatus: property.statusRaw,
+            ),
             if (canUndoSold)
               Material(
                 color: Colors.transparent,
@@ -2652,20 +2656,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return 'há ${(delta.inDays / 365).floor()} a';
   }
 
-  IconData _typeIcon(PropertyType type) {
-    switch (type) {
-      case PropertyType.house:
-        return Icons.cottage_outlined;
-      case PropertyType.apartment:
-        return Icons.apartment;
-      case PropertyType.commercial:
-        return Icons.storefront_outlined;
-      case PropertyType.land:
-        return Icons.terrain_outlined;
-      case PropertyType.rural:
-        return Icons.agriculture_outlined;
-    }
-  }
+  IconData _typeIcon(PropertyType type) => type == PropertyType.house
+      ? Icons.cottage_outlined
+      : PropertyTypeVisual.outlined(type);
 
   /// Pills discretas do hero — paridade `PropertyHeroMetaChip` (web).
   Widget _buildHeroMetaPillsRow(
@@ -2674,7 +2667,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     bool isDark,
   ) {
     final chips = <Widget>[];
-    final typeLabel = property.type.label;
+    // Tipo cru: o que o app não conhece aparece como veio, nunca como "Casa".
+    final typeLabel = property.typeLabel;
     if (typeLabel.isNotEmpty) {
       chips.add(_heroMetaChip(
         context,

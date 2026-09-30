@@ -1,8 +1,13 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 import '../../../core/constants/api_constants.dart';
 import '../../../shared/services/api_service.dart';
+import '../models/whatsapp_anexos.dart';
 import '../models/whatsapp_models.dart';
 
 /// Serviço do WhatsApp Inbox — consome `/whatsapp/*` (paridade com
@@ -14,12 +19,16 @@ import '../models/whatsapp_models.dart';
 ///   GET   /whatsapp/messages                       (whatsapp:view_messages)
 ///   GET   /whatsapp/messages/conversations-count   (whatsapp:view_messages)
 ///   GET   /whatsapp/messages/unread-count          (whatsapp:view_messages)
+///   GET   /whatsapp/messages/:id                   (rota que o web chama;
+///                                                   o back ainda não tem)
 ///   POST  /whatsapp/messages/:id/read              (whatsapp:view_messages)
+///   POST  /whatsapp/messages/:id/claim             (whatsapp:view_messages)
 ///   PATCH /whatsapp/conversations/finalize         (whatsapp:view_messages)
 ///   POST  /whatsapp/send             [multipart]   (whatsapp:send)
 ///   POST  /whatsapp/send-template                  (whatsapp:send)
 ///   GET   /whatsapp/templates                      (whatsapp:manage_config)
 ///   POST  /whatsapp/unofficial/messages/send       (whatsapp:send)
+///   POST  /whatsapp/unofficial/messages/send-media [multipart] (whatsapp:send)
 ///   GET   /whatsapp/unofficial/config/status       (whatsapp:view)
 ///   GET   /whatsapp/unofficial/quick-messages      (whatsapp:view)
 class WhatsAppService {
@@ -33,6 +42,10 @@ class WhatsAppService {
       '/whatsapp/messages/conversations-count';
   static const String _kUnreadCount = '/whatsapp/messages/unread-count';
   static String _kMessageRead(String id) => '/whatsapp/messages/$id/read';
+  static String _kMessageById(String id) => '/whatsapp/messages/$id';
+  static String _kMessageClaim(String id) => '/whatsapp/messages/$id/claim';
+  static const String _kUnofficialSendMedia =
+      '/whatsapp/unofficial/messages/send-media';
   static const String _kSend = '/whatsapp/send';
   static const String _kSendTemplate = '/whatsapp/send-template';
   static const String _kTemplates = '/whatsapp/templates';
@@ -255,6 +268,56 @@ class WhatsAppService {
     }
   }
 
+  /// O back ainda não tem `GET /whatsapp/messages/:id` (29/09/2026): o web
+  /// chama essa rota para renovar a URL assinada da mídia e recebe 404. Depois
+  /// do primeiro 404 a sessão para de tentar e a tela renova relendo a
+  /// thread (ver `_renovarMidia` na conversa).
+  static bool _rotaDaMensagemAusente = false;
+
+  /// `GET /whatsapp/messages/:id` — mensagem com a `mediaUrl` assinada de
+  /// novo (paridade com `whatsappApi.getMessage`). `null` quando o back não
+  /// devolve a mensagem.
+  Future<WhatsAppMessage?> getMessage(String messageId) async {
+    if (_rotaDaMensagemAusente || messageId.isEmpty) return null;
+    try {
+      final response =
+          await _api.get<Map<String, dynamic>>(_kMessageById(messageId));
+      if (response.success && response.data != null) {
+        return WhatsAppMessage.fromJson(response.data!);
+      }
+      if (response.statusCode == 404) _rotaDaMensagemAusente = true;
+      return null;
+    } catch (e) {
+      debugPrint('❌ [WHATSAPP] getMessage: $e');
+      return null;
+    }
+  }
+
+  /// `POST /whatsapp/messages/:id/claim` — o atendente assume para si a
+  /// conversa da fila (Aguardando). Paridade com `whatsappApi
+  /// .claimConversation` (29/09/2026). O back recusa com a frase do motivo
+  /// ("Você está pausado ou inativo…", "Esta conversa já está com outro
+  /// atendente."), que vai direto para a tela.
+  Future<ApiResponse<void>> claimConversation(String messageId) async {
+    try {
+      final response = await _api.post<dynamic>(_kMessageClaim(messageId));
+      if (response.success) {
+        return ApiResponse.success(statusCode: response.statusCode);
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao assumir conversa.',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [WHATSAPP] claimConversation: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
   /// `PATCH /whatsapp/conversations/finalize` — finaliza a conversa (sai das
   /// abas ativas; nova mensagem do contato reabre automaticamente).
   Future<ApiResponse<void>> finalizeConversation(String phoneNumber) async {
@@ -350,6 +413,120 @@ class WhatsAppService {
         statusCode: 0,
       );
     }
+  }
+
+  /// Envia UM anexo da bandeja (29/09/2026) — paridade com
+  /// `whatsappApi.sendMessage` (canal oficial) e
+  /// `whatsappUnofficialApi.sendMedia` (QR Code):
+  /// - Oficial: `POST /whatsapp/send` multipart; imagem no campo `image`
+  ///   (o campo histórico), documento e áudio no campo `file`; a legenda vai
+  ///   em `message`.
+  /// - QR Code: `POST /whatsapp/unofficial/messages/send-media` multipart com
+  ///   `media` e `caption`.
+  ///
+  /// Timeout de 90 s (upload + S3 + Meta), o mesmo do web. Quando a
+  /// requisição saiu e a resposta não voltou (timeout, queda de rede), o erro
+  /// leva `{'naoConfirmado': true}` em `error`: a mensagem pode ter saído, e
+  /// reenviar duplicaria o arquivo na cliente.
+  Future<ApiResponse<void>> sendMedia({
+    required String to,
+    required WhatsAppAnexo anexo,
+    String? caption,
+    String? clientId,
+    bool viaUnofficial = false,
+  }) async {
+    final endpoint = viaUnofficial ? _kUnofficialSendMedia : _kSend;
+    final legenda = (caption ?? '').trim();
+    final http.MultipartRequest request;
+    try {
+      // O upload pode levar dezenas de segundos e o multipart não passa pelo
+      // refresh automático do ApiService: o token precisa chegar válido.
+      await _api.garantirTokenFresco(margemSegundos: 120);
+      request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${ApiConstants.baseApiUrl}$endpoint'),
+      );
+      request.headers.addAll(await _api.buildOutboundHeaders(
+        endpoint: endpoint,
+        excludeContentType: true,
+      ));
+      request.fields['to'] = to;
+      final String campo;
+      if (viaUnofficial) {
+        campo = 'media';
+        if (legenda.isNotEmpty) request.fields['caption'] = legenda;
+      } else {
+        campo = anexo.ehImagem ? 'image' : 'file';
+        request.fields['message'] = legenda;
+        if (clientId != null && clientId.isNotEmpty) {
+          request.fields['clientId'] = clientId;
+        }
+      }
+      // O tipo vai explícito: o back decide imagem × documento × áudio por
+      // ele (e o QR Code manda como vídeo tudo que não for `image/*`).
+      request.files.add(await http.MultipartFile.fromPath(
+        campo,
+        anexo.caminho,
+        filename: anexo.nomeParaEnvio,
+        contentType: _tipoDoConteudo(anexo.mime),
+      ));
+    } catch (e) {
+      debugPrint('❌ [WHATSAPP] sendMedia (preparo): $e');
+      return ApiResponse.error(
+        message: 'Não foi possível preparar "${anexo.nome}" para envio: $e',
+        statusCode: 0,
+      );
+    }
+
+    try {
+      final streamed =
+          await request.send().timeout(const Duration(seconds: 90));
+      final response = await http.Response.fromStream(streamed)
+          .timeout(const Duration(seconds: 30));
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return ApiResponse.success(statusCode: response.statusCode);
+      }
+      return ApiResponse.error(
+        message: _mensagemDoErro(
+          response.body,
+          'Erro ao enviar "${anexo.nome}" (HTTP ${response.statusCode}).',
+        ),
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [WHATSAPP] sendMedia: $e');
+      return ApiResponse.error(
+        message: e is TimeoutException
+            ? 'O envio de "${anexo.nome}" passou de 90 segundos sem resposta do servidor.'
+            : 'A conexão caiu durante o envio de "${anexo.nome}".',
+        statusCode: 0,
+        data: const {'naoConfirmado': true},
+      );
+    }
+  }
+
+  static MediaType _tipoDoConteudo(String mime) {
+    try {
+      if (mime.isNotEmpty) return MediaType.parse(mime);
+    } catch (_) {}
+    return MediaType('application', 'octet-stream');
+  }
+
+  /// Frase do back (`message` em texto ou lista) ou [padrao].
+  static String _mensagemDoErro(String body, String padrao) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map) {
+        final m = decoded['message'];
+        if (m is String && m.trim().isNotEmpty) return m.trim();
+        if (m is List && m.isNotEmpty) {
+          return m.map((e) => e.toString()).join('\n');
+        }
+        final erro = decoded['error'];
+        if (erro is String && erro.trim().isNotEmpty) return erro.trim();
+      }
+    } catch (_) {}
+    return padrao;
   }
 
   /// `POST /whatsapp/send-template` — envia template aprovado (reabre a

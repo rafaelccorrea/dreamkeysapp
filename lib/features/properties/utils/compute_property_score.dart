@@ -72,10 +72,17 @@ double _ratioFromChecks(List<_FieldCheck> checks) {
   return ok / checks.length;
 }
 
+/// Paridade com `isResidentialProperty` do web (computePropertyScore.ts).
 bool _isResidential(PropertyType type) {
-  return type != PropertyType.land &&
-      type != PropertyType.commercial &&
-      type != PropertyType.rural;
+  return !const [
+    PropertyType.land,
+    PropertyType.commercial,
+    PropertyType.office,
+    PropertyType.store,
+    PropertyType.warehouse,
+    PropertyType.rural,
+    PropertyType.farm,
+  ].contains(type);
 }
 
 bool _hasMeaningfulTitle(String title) {
@@ -233,7 +240,7 @@ List<_FieldCheck> _highImpactChecks(Property property) {
       label: 'Tipo e finalidade preenchidos',
       ok: _hasPositive(property.salePrice) ||
           _hasPositive(property.rentPrice) ||
-          property.status != PropertyStatus.draft,
+          property.statusRaw != PropertyStatus.draft.value,
       critical: true,
     ),
     _FieldCheck(

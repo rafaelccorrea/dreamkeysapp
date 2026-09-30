@@ -20,12 +20,25 @@ class SdrDashboardFiltersDrawer extends StatefulWidget {
     required this.teams,
     required this.onApply,
     required this.onClear,
+    this.projects = const [],
+    this.campaigns = const [],
+    this.sources = const [],
+    this.members = const [],
+    this.tags = const [],
   });
 
   final SdrDashboardFilters initialFilters;
   final List<SdrTeamOption> teams;
   final ValueChanged<SdrDashboardFilters> onApply;
   final VoidCallback onClear;
+
+  // 29/09/2026 (sdr-03): os mesmos recortes do web — funis, campanhas (Meta +
+  // Sistema), mídias/origens, pessoas e tags do card.
+  final List<SdrProjectOption> projects;
+  final List<SdrFilterOption> campaigns;
+  final List<SdrFilterOption> sources;
+  final List<SdrFilterOption> members;
+  final List<SdrFilterOption> tags;
 
   @override
   State<SdrDashboardFiltersDrawer> createState() =>
@@ -37,6 +50,11 @@ class _SdrDashboardFiltersDrawerState extends State<SdrDashboardFiltersDrawer> {
   DateTime? _customStart;
   DateTime? _customEnd;
   late Set<String> _teamIds;
+  late Set<String> _projectIds;
+  late Set<String> _campaignIds;
+  late Set<String> _sources;
+  late Set<String> _agentIds;
+  late Set<String> _tagIds;
 
   @override
   void initState() {
@@ -46,6 +64,11 @@ class _SdrDashboardFiltersDrawerState extends State<SdrDashboardFiltersDrawer> {
     _customStart = f.customStart;
     _customEnd = f.customEnd;
     _teamIds = Set<String>.from(f.teamIds);
+    _projectIds = Set<String>.from(f.projectIds);
+    _campaignIds = Set<String>.from(f.campaignIds);
+    _sources = Set<String>.from(f.sources);
+    _agentIds = Set<String>.from(f.agentIds);
+    _tagIds = Set<String>.from(f.tagIds);
   }
 
   static String _fmt(DateTime d) => DateFormat('dd/MM/yyyy').format(d);
@@ -56,6 +79,11 @@ class _SdrDashboardFiltersDrawerState extends State<SdrDashboardFiltersDrawer> {
       customStart: _customStart,
       customEnd: _customEnd,
       teamIds: _teamIds,
+      projectIds: _projectIds,
+      campaignIds: _campaignIds,
+      sources: _sources,
+      agentIds: _agentIds,
+      tagIds: _tagIds,
     );
   }
 

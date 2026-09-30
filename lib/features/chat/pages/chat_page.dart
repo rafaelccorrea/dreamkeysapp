@@ -36,7 +36,11 @@ class _ChatPageState extends State<ChatPage>
   final ChatApiService _chatApi = ChatApiService.instance;
   final ChatSocketService _chatSocket = ChatSocketService.instance;
 
-  List<ChatRoom> _allRooms = [];
+  // 29/09/2026 — as duas listas vêm separadas do back (GET /chat/rooms
+  // devolve `{ rooms, archivedRooms }`; arquivar é por participante).
+  // Antes as arquivadas eram recalculadas filtrando `isArchived` das ativas,
+  // e a aba 'Arquivadas' ficava sempre vazia.
+  List<ChatRoom> _activeRooms = [];
   List<ChatRoom> _archivedRooms = [];
   ChatRoom? _selectedRoom;
   List<ChatMessage> _messages = [];
@@ -57,17 +61,11 @@ class _ChatPageState extends State<ChatPage>
   late TabController _tabController;
 
   List<ChatRoom> get _rooms {
-    List<ChatRoom> rooms;
-    switch (_tabController.index) {
-      case 0: // Todas
-        rooms = _allRooms.where((r) => r.isArchived != true).toList();
-        break;
-      case 1: // Arquivadas
-        rooms = _archivedRooms;
-        break;
-      default:
-        rooms = _allRooms.where((r) => r.isArchived != true).toList();
-    }
+    // Aba 'Arquivadas' = archivedRooms do back; as demais = ativas.
+    // Cópia antes de ordenar para não reordenar o estado dentro do getter.
+    final rooms = List<ChatRoom>.of(
+      _tabController.index == 1 ? _archivedRooms : _activeRooms,
+    );
     // Ordenar por data da última mensagem (mais recente primeiro)
     rooms.sort((a, b) {
       final aDate = a.lastMessageAt ?? a.createdAt;
@@ -77,6 +75,39 @@ class _ChatPageState extends State<ChatPage>
       ); // Ordem decrescente (mais recente primeiro)
     });
     return rooms;
+  }
+
+  /// Sala conhecida pelo id, esteja ela nas ativas ou nas arquivadas.
+  ChatRoom? _findRoom(String roomId) {
+    for (final r in _activeRooms) {
+      if (r.id == roomId) return r;
+    }
+    for (final r in _archivedRooms) {
+      if (r.id == roomId) return r;
+    }
+    return null;
+  }
+
+  /// Aplica [update] à sala [roomId] na lista em que ela estiver (ativas ou
+  /// arquivadas), sem mudá-la de lista. Chamar dentro de setState.
+  void _patchRoom(String roomId, ChatRoom Function(ChatRoom room) update) {
+    final i = _activeRooms.indexWhere((r) => r.id == roomId);
+    if (i != -1) {
+      _activeRooms[i] = update(_activeRooms[i]);
+      return;
+    }
+    final j = _archivedRooms.indexWhere((r) => r.id == roomId);
+    if (j != -1) {
+      _archivedRooms[j] = update(_archivedRooms[j]);
+    }
+  }
+
+  /// Repassa as duas listas ao badge do chat (arquivada não conta).
+  void _syncUnreadBadge() {
+    ChatUnreadController.instance.updateFromRooms(
+      _activeRooms,
+      archivedRooms: _archivedRooms,
+    );
   }
 
   @override
@@ -171,7 +202,7 @@ class _ChatPageState extends State<ChatPage>
       if (response.success) {
         // Remover da lista
         setState(() {
-          _allRooms.removeWhere((r) => r.id == room.id);
+          _activeRooms.removeWhere((r) => r.id == room.id);
           _archivedRooms.removeWhere((r) => r.id == room.id);
 
           // Se a sala deletada estava selecionada, limpar seleção
@@ -182,7 +213,7 @@ class _ChatPageState extends State<ChatPage>
         });
 
         // Atualizar controller de não lidas
-        ChatUnreadController.instance.updateFromRooms(_allRooms);
+        _syncUnreadBadge();
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -224,21 +255,28 @@ class _ChatPageState extends State<ChatPage>
       );
 
       if (response.success && response.data != null) {
-        // Selecionar a sala criada/obtida
-        await _selectRoom(response.data!);
+        final fetched = response.data!;
+        if (!mounted) return;
 
-        // Se não estava na lista, adicionar
-        if (!_allRooms.any((r) => r.id == response.data!.id)) {
+        // 29/09/2026: sala já conhecida (ativa OU arquivada) não é duplicada,
+        // como no joinRoom do web; conversa nova entra no topo da lista certa.
+        if (_findRoom(fetched.id) == null) {
           setState(() {
-            _allRooms.insert(0, response.data!);
-            _archivedRooms = _allRooms
-                .where((r) => r.isArchived == true)
-                .toList();
+            if (fetched.isArchived == true) {
+              _archivedRooms.insert(0, fetched);
+            } else {
+              _activeRooms.insert(0, fetched);
+            }
           });
         }
+        final room = _findRoom(fetched.id) ?? fetched;
 
-        // Voltar para a tab "Todas" para ver a conversa
-        _tabController.animateTo(0);
+        // Selecionar a sala criada/obtida
+        await _selectRoom(room);
+        if (!mounted) return;
+
+        // Voltar para a aba em que a conversa está ('Todas' ou 'Arquivadas')
+        _tabController.animateTo(room.isArchived == true ? 1 : 0);
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -328,26 +366,27 @@ class _ChatPageState extends State<ChatPage>
 
     try {
       final response = await _chatApi.getRooms();
+      if (!mounted) return;
       if (response.success && response.data != null) {
-        // Ordenar conversas por data da última mensagem (mais recente primeiro)
-        final sortedRooms = List<ChatRoom>.from(response.data!);
-        sortedRooms.sort((a, b) {
-          final aDate = a.lastMessageAt ?? a.createdAt;
-          final bDate = b.lastMessageAt ?? b.createdAt;
-          return bDate.compareTo(
-            aDate,
-          ); // Ordem decrescente (mais recente primeiro)
-        });
+        final result = response.data!;
 
+        // 304 (ETag): nada mudou desde a última leitura. Mantém as listas
+        // que já estão na tela; as listas vazias do 304 não são "sem
+        // conversas" (o web apagava as Arquivadas justamente assim).
+        if (result.notModified) {
+          setState(() => _isLoadingRooms = false);
+          return;
+        }
+
+        // 'Todas' = rooms e 'Arquivadas' = archivedRooms, como o back
+        // separa. A ordem (mais recente primeiro) é aplicada em [_rooms].
         setState(() {
-          _allRooms = sortedRooms;
-          _archivedRooms = _allRooms
-              .where((r) => r.isArchived == true)
-              .toList();
+          _activeRooms = List<ChatRoom>.of(result.rooms);
+          _archivedRooms = List<ChatRoom>.of(result.archivedRooms);
           _isLoadingRooms = false;
         });
         // Atualizar controller de não lidas
-        ChatUnreadController.instance.updateFromRooms(response.data!);
+        _syncUnreadBadge();
       } else {
         setState(() {
           _errorMessage = response.message ?? 'Erro ao carregar conversas';
@@ -356,6 +395,7 @@ class _ChatPageState extends State<ChatPage>
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorCause = ErrorCause.fromException(e);
         _errorMessage = 'Erro ao carregar conversas: ${e.toString()}';
@@ -394,27 +434,11 @@ class _ChatPageState extends State<ChatPage>
     _chatSocket.setOnRoomUpdated((roomId, name, imageUrl) {
       if (mounted) {
         setState(() {
-          final index = _allRooms.indexWhere((r) => r.id == roomId);
-          if (index != -1) {
-            _allRooms[index] = ChatRoom(
-              id: _allRooms[index].id,
-              companyId: _allRooms[index].companyId,
-              type: _allRooms[index].type,
-              name: name ?? _allRooms[index].name,
-              createdBy: _allRooms[index].createdBy,
-              imageUrl: imageUrl ?? _allRooms[index].imageUrl,
-              lastMessage: _allRooms[index].lastMessage,
-              lastMessageAt: _allRooms[index].lastMessageAt,
-              participants: _allRooms[index].participants,
-              createdAt: _allRooms[index].createdAt,
-              updatedAt: _allRooms[index].updatedAt,
-              isArchived: _allRooms[index].isArchived,
-              unreadCount: _allRooms[index].unreadCount,
-            );
-            _archivedRooms = _allRooms
-                .where((r) => r.isArchived == true)
-                .toList();
-          }
+          // Nome/foto do grupo mudaram: vale para ativa ou arquivada.
+          _patchRoom(
+            roomId,
+            (r) => r.copyWith(name: name, imageUrl: imageUrl),
+          );
         });
       }
     });
@@ -424,33 +448,16 @@ class _ChatPageState extends State<ChatPage>
     if (!mounted) return; // Verificar se o widget ainda está montado
 
     setState(() {
-      final index = _allRooms.indexWhere((r) => r.id == message.roomId);
-      if (index != -1) {
-        _allRooms[index] = ChatRoom(
-          id: _allRooms[index].id,
-          companyId: _allRooms[index].companyId,
-          type: _allRooms[index].type,
-          name: _allRooms[index].name,
-          createdBy: _allRooms[index].createdBy,
-          imageUrl: _allRooms[index].imageUrl,
+      // Arquivada também ganha a prévia nova (igual ao web), mas continua
+      // na aba Arquivadas: o back não desarquiva com mensagem nova. A
+      // reordenação (mais recente no topo) acontece em [_rooms].
+      _patchRoom(
+        message.roomId,
+        (r) => r.copyWith(
           lastMessage: message.content,
           lastMessageAt: message.createdAt,
-          participants: _allRooms[index].participants,
-          createdAt: _allRooms[index].createdAt,
-          updatedAt: _allRooms[index].updatedAt,
-          isArchived: _allRooms[index].isArchived,
-          unreadCount: _allRooms[index].unreadCount,
-        );
-        // Reordenar após atualizar a última mensagem (mover para o topo)
-        _allRooms.sort((a, b) {
-          final aDate = a.lastMessageAt ?? a.createdAt;
-          final bDate = b.lastMessageAt ?? b.createdAt;
-          return bDate.compareTo(
-            aDate,
-          ); // Ordem decrescente (mais recente primeiro)
-        });
-        _archivedRooms = _allRooms.where((r) => r.isArchived == true).toList();
-      }
+        ),
+      );
     });
   }
 
@@ -477,38 +484,55 @@ class _ChatPageState extends State<ChatPage>
 
     // Carregar mensagens
     await _loadMessages(room.id);
+    if (!mounted) return;
 
-    // Atualizar lista de rooms (remover unread)
+    // Atualizar lista de rooms (remover unread), na lista em que ela está
     setState(() {
-      final index = _allRooms.indexWhere((r) => r.id == room.id);
-      if (index != -1) {
-        _allRooms[index] = ChatRoom(
-          id: _allRooms[index].id,
-          companyId: _allRooms[index].companyId,
-          type: _allRooms[index].type,
-          name: _allRooms[index].name,
-          createdBy: _allRooms[index].createdBy,
-          imageUrl: _allRooms[index].imageUrl,
-          lastMessage: _allRooms[index].lastMessage,
-          lastMessageAt: _allRooms[index].lastMessageAt,
-          participants: _allRooms[index].participants,
-          createdAt: _allRooms[index].createdAt,
-          updatedAt: _allRooms[index].updatedAt,
-          isArchived: _allRooms[index].isArchived,
-          unreadCount: 0,
-        );
-        _archivedRooms = _allRooms.where((r) => r.isArchived == true).toList();
-      }
+      _patchRoom(room.id, (r) => r.copyWith(unreadCount: 0));
     });
   }
 
+  /// Abre a sala pedida pela rota (/chat/:roomId, ex.: toque na notificação).
+  ///
+  /// 29/09/2026: procura nas ativas e nas arquivadas; se não estiver em
+  /// nenhuma, busca a sala no servidor, como o joinRoom do web. Antes, sala
+  /// fora da lista abria a PRIMEIRA conversa da lista, e lista vazia lançava
+  /// exceção sem tratamento.
   Future<void> _selectRoomById(String roomId) async {
-    final room = _allRooms.firstWhere(
-      (r) => r.id == roomId,
-      orElse: () => _allRooms.isNotEmpty
-          ? _allRooms.first
-          : throw Exception('Room not found'),
-    );
+    final ChatRoom room;
+    final known = _findRoom(roomId);
+    if (known != null) {
+      room = known;
+    } else {
+      final response = await _chatApi.getRoomById(roomId);
+      if (!mounted) return;
+      final fetched = response.data;
+      if (!response.success || fetched == null) {
+        // Causa real do back (ex.: 'Você não tem acesso a esta sala de chat').
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              response.message ?? 'Não foi possível abrir a conversa',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+      room = fetched;
+      setState(() {
+        if (room.isArchived == true) {
+          _archivedRooms.insert(0, room);
+        } else {
+          _activeRooms.insert(0, room);
+        }
+      });
+    }
+
+    // Conversa arquivada: ao voltar para a lista, a aba certa já está aberta.
+    if (room.isArchived == true && _tabController.index != 1) {
+      _tabController.animateTo(1);
+    }
     await _selectRoom(room);
   }
 
@@ -631,6 +655,9 @@ class _ChatPageState extends State<ChatPage>
   }
 
   Widget _buildRoomsList(BuildContext context, ThemeData theme) {
+    // Lista da aba calculada uma vez por build (o getter copia e ordena).
+    final rooms = _rooms;
+    final isArchivedTab = _tabController.index == 1;
     return Column(
       children: [
         // Header da lista
@@ -704,19 +731,24 @@ class _ChatPageState extends State<ChatPage>
                         statusCode: _errorStatus,
                         onRetry: _loadRooms,
                       ))
-              : _rooms.isEmpty
+              : rooms.isEmpty
               ? Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(
-                        Icons.chat_bubble_outline,
+                        isArchivedTab
+                            ? Icons.archive_outlined
+                            : Icons.chat_bubble_outline,
                         size: 64,
                         color: ThemeHelpers.textSecondaryColor(context),
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        'Nenhuma conversa',
+                        isArchivedTab
+                            ? 'Nenhuma conversa arquivada'
+                            : 'Nenhuma conversa',
+                        textAlign: TextAlign.center,
                         style: theme.textTheme.bodyLarge?.copyWith(
                           color: ThemeHelpers.textSecondaryColor(context),
                         ),
@@ -726,9 +758,9 @@ class _ChatPageState extends State<ChatPage>
                 )
               : ListView.builder(
                   padding: const EdgeInsets.symmetric(vertical: 8),
-                  itemCount: _rooms.length,
+                  itemCount: rooms.length,
                   itemBuilder: (context, index) {
-                    final room = _rooms[index];
+                    final room = rooms[index];
                     final isSelected = _selectedRoom?.id == room.id;
                     return ChatRoomListItem(
                       room: room,

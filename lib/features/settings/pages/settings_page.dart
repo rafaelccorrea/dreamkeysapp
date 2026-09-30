@@ -5,7 +5,8 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
-import '../../../../shared/services/profile_service.dart';
+import '../../../../shared/services/profile_service.dart'
+    hide UserPreferences;
 import '../../../../shared/services/settings_service.dart';
 import '../../../../shared/services/theme_service.dart';
 import '../../../../shared/utils/error_cause.dart';
@@ -14,8 +15,14 @@ import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/brand_wordmark_logo.dart';
 import '../../../../shared/widgets/app_update_dialog.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
+import 'notification_preferences_page.dart';
 
 /// Tela de Configurações — layout editorial aberto.
+///
+/// Grava em `/user-preferences` (paridade com o SettingsPage do imobx-front):
+/// canais, avisos na tela, os dois avisos de lead, a regra de sobreposição da
+/// agenda e o tema. Cada interruptor manda só o bloco que mudou (o back funde)
+/// e só conta como salvo quando a API confirma; erro volta o valor anterior.
 ///
 /// Sem cards encapsulando seções: cada bloco respira na página, separado por
 /// hierarquia tipográfica (eyebrow uppercase em accent + headline w900) e
@@ -30,8 +37,10 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   bool _isLoading = true;
-  Settings? _settings;
+  UserPreferences? _prefs;
+  List<NotificationCategoryMeta>? _catalog;
   Profile? _profile;
+  int _savingCount = 0;
   String? _errorMessage;
   // Guardado junto da mensagem: sem o código HTTP não dá para distinguir
   // "sem permissão" de "servidor fora do ar".
@@ -75,8 +84,6 @@ class _SettingsPageState extends State<SettingsPage> {
       : AppColors.primary.primary;
 
   Future<void> _loadData() async {
-    debugPrint('⚙️ [SETTINGS PAGE] Iniciando carregamento de dados');
-
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -85,26 +92,35 @@ class _SettingsPageState extends State<SettingsPage> {
     });
 
     try {
-      final settingsResponse = await SettingsService.instance.getSettings();
-      final profileResponse = await ProfileService.instance.getProfile();
+      // As três partem juntas (preferências, perfil e catálogo de assuntos).
+      final prefsFuture = SettingsService.instance.getPreferences();
+      final profileFuture = ProfileService.instance.getProfile();
+      final catalogFuture = SettingsService.instance
+          .getNotificationCategories();
+      final prefsResponse = await prefsFuture;
+      final profileResponse = await profileFuture;
+      final catalogResponse = await catalogFuture;
 
       if (mounted) {
         setState(() {
-          if (settingsResponse.success && settingsResponse.data != null) {
-            _settings = settingsResponse.data;
-          }
+          _prefs = prefsResponse.success ? prefsResponse.data : null;
           if (profileResponse.success && profileResponse.data != null) {
             _profile = profileResponse.data;
           }
+          _catalog = catalogResponse.success ? catalogResponse.data : null;
           _isLoading = false;
-          if (_settings == null && _profile == null) {
-            _errorMessage = settingsResponse.message ?? 'Erro ao carregar dados';
-            _errorStatus = settingsResponse.statusCode;
+          // Sem as preferências a tela não tem o que mostrar nem onde gravar:
+          // erro real, nada de padrões fingindo que carregou.
+          if (_prefs == null) {
+            _errorMessage =
+                prefsResponse.message ??
+                'Não deu para carregar as preferências.';
+            _errorStatus = prefsResponse.statusCode;
           }
         });
       }
     } catch (e, stackTrace) {
-      debugPrint('❌ [SETTINGS PAGE] Erro: $e\n$stackTrace');
+      debugPrint('[SETTINGS PAGE] Erro: $e\n$stackTrace');
       if (mounted) {
         setState(() {
           _errorCause = ErrorCause.fromException(e);
@@ -115,66 +131,158 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  Future<void> _updateNotificationSetting({
-    required bool Function(NotificationSettings) getValue,
-    required NotificationSettings Function(NotificationSettings, bool) setValue,
-  }) async {
-    if (_settings == null) return;
+  /// Funde recursivamente [patch] em [base] — o mesmo merge que o back faz,
+  /// para o interruptor refletir a escolha enquanto a API confirma.
+  static Map<String, dynamic> _deepMerge(
+    Map<String, dynamic> base,
+    Map<String, dynamic>? patch,
+  ) {
+    if (patch == null) return base;
+    final out = Map<String, dynamic>.of(base);
+    patch.forEach((key, value) {
+      final current = out[key];
+      if (value is Map && current is Map) {
+        out[key] = _deepMerge(
+          Map<String, dynamic>.from(current),
+          Map<String, dynamic>.from(value),
+        );
+      } else {
+        out[key] = value;
+      }
+    });
+    return out;
+  }
 
-    final currentNotifications = _settings!.notifications;
-    final oldValue = getValue(currentNotifications);
-    final newValue = !oldValue;
-
-    final updatedNotifications = setValue(currentNotifications, newValue);
-    final updatedSettings = Settings(
-      notifications: updatedNotifications,
-      language: _settings!.language,
-      timezone: _settings!.timezone,
+  UserPreferences _applyLocal(UserPreferences p, Map<String, dynamic> body) {
+    Map<String, dynamic>? section(String k) =>
+        body[k] is Map ? Map<String, dynamic>.from(body[k] as Map) : null;
+    return UserPreferences(
+      themeSettings: _deepMerge(p.themeSettings, section('themeSettings')),
+      notificationSettings: _deepMerge(
+        p.notificationSettings,
+        section('notificationSettings'),
+      ),
+      layoutSettings: _deepMerge(p.layoutSettings, section('layoutSettings')),
+      generalSettings: _deepMerge(
+        p.generalSettings,
+        section('generalSettings'),
+      ),
+      updatedAt: p.updatedAt,
     );
+  }
+
+  /// Grava um bloco em PUT /user-preferences. Otimista na tela; se a API
+  /// recusar, volta ao valor anterior e mostra a causa.
+  Future<void> _savePatch(Map<String, dynamic> body) async {
+    final before = _prefs;
+    if (before == null) return;
 
     setState(() {
-      _settings = updatedSettings;
+      _prefs = _applyLocal(before, body);
+      _savingCount++;
     });
 
-    final response = await SettingsService.instance.updateSettings(
-      updatedSettings,
-    );
+    final response = await SettingsService.instance.updatePreferences(body);
+    if (!mounted) return;
 
-    if (response.success) {
-      if (response.data != null) {
-        setState(() => _settings = response.data);
+    setState(() {
+      _savingCount = _savingCount > 0 ? _savingCount - 1 : 0;
+      if (response.success && response.data != null) {
+        _prefs = response.data;
+      } else {
+        _prefs = before;
       }
-    } else if (mounted) {
-      setState(() {
-        _settings = Settings(
-          notifications: currentNotifications,
-          language: _settings!.language,
-          timezone: _settings!.timezone,
-        );
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.error_outline, color: Colors.white, size: 20),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  response.message ?? 'Erro ao atualizar configuração',
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                ),
+    });
+
+    if (!response.success) {
+      _showError(response.message ?? 'Não deu para salvar as preferências.');
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.error_outline, color: Colors.white, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(color: Colors.white, fontSize: 14),
               ),
-            ],
-          ),
-          backgroundColor: AppColors.status.error,
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.all(16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          duration: const Duration(seconds: 3),
+            ),
+          ],
         ),
-      );
+        backgroundColor: AppColors.status.error,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  void _toggleChannel(String channel) {
+    final p = _prefs;
+    if (p == null) return;
+    var email = p.emailChannel;
+    var push = p.pushChannel;
+    var inApp = p.inAppChannel;
+    var whatsapp = p.whatsappChannel;
+    switch (channel) {
+      case 'email':
+        email = !email;
+      case 'push':
+        push = !push;
+      case 'inApp':
+        inApp = !inApp;
+      case 'whatsapp':
+        whatsapp = !whatsapp;
+    }
+    _savePatch({
+      'notificationSettings': SettingsService.channelsPayload(
+        email: email,
+        push: push,
+        inApp: inApp,
+        whatsapp: whatsapp,
+      ),
+    });
+  }
+
+  void _setLeadEvent(String key, LeadEventPreference next) {
+    _savePatch({
+      'notificationSettings': {
+        'events': {key: next.toJson()},
+      },
+    });
+  }
+
+  /// Tema: o app aplica na hora (como o web) e grava claro/escuro no back.
+  /// "Sistema" é só do aparelho — o back não tem esse valor.
+  Future<void> _applyTheme(ThemeMode mode) async {
+    await ThemeService.instance.setThemeMode(mode);
+    if (mounted) setState(() {});
+    final p = _prefs;
+    if (p == null || mode == ThemeMode.system) return;
+    final theme = mode == ThemeMode.dark ? 'dark' : 'light';
+    if (p.themeSettings['theme'] == theme) return;
+    await _savePatch({
+      'themeSettings': {'theme': theme, 'language': p.language},
+    });
+  }
+
+  Future<void> _openNotificationPreferences() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<bool>(
+        builder: (_) => const NotificationPreferencesPage(),
+      ),
+    );
+    if (!mounted) return;
+    // As escolhas por assunto podem ter mudado lá dentro.
+    final res = await SettingsService.instance.getPreferences();
+    if (mounted && res.success && res.data != null && _savingCount == 0) {
+      setState(() => _prefs = res.data);
     }
   }
 
@@ -189,7 +297,7 @@ class _SettingsPageState extends State<SettingsPage> {
       showBottomNavigation: true,
       body: _isLoading
           ? _buildSkeleton(context, theme, brand)
-          : _errorMessage != null && _settings == null && _profile == null
+          : _errorMessage != null && _prefs == null
           ? _buildErrorState(context, theme, brand)
           : RefreshIndicator(
               color: brand,
@@ -213,7 +321,19 @@ class _SettingsPageState extends State<SettingsPage> {
                     const SizedBox(height: 28),
                     _sectionSeparator(context),
                     const SizedBox(height: 22),
+                    _buildScreenAlertsSection(context, theme),
+                    const SizedBox(height: 28),
+                    _sectionSeparator(context),
+                    const SizedBox(height: 22),
                     _buildEventsSection(context, theme),
+                    const SizedBox(height: 28),
+                    _sectionSeparator(context),
+                    const SizedBox(height: 22),
+                    _buildSubjectsSection(context, theme),
+                    const SizedBox(height: 28),
+                    _sectionSeparator(context),
+                    const SizedBox(height: 22),
+                    _buildAgendaSection(context, theme),
                     const SizedBox(height: 28),
                     _sectionSeparator(context),
                     const SizedBox(height: 22),
@@ -405,7 +525,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(width: 8),
               Text(
-                'SINCRONIZADO',
+                _savingCount > 0 ? 'SALVANDO' : 'SALVO NO SERVIDOR',
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: ThemeHelpers.textSecondaryColor(
                     context,
@@ -430,7 +550,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Canais de alerta, eventos relevantes e aparência do app. Cada interruptor grava no servidor assim que a API confirma.',
+            'Canais, avisos, assuntos, agenda e aparência. Cada interruptor grava no servidor na hora e volta atrás se a gravação falhar.',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: ThemeHelpers.textSecondaryColor(context),
               height: 1.4,
@@ -543,17 +663,23 @@ class _SettingsPageState extends State<SettingsPage> {
   // ──────────────────────────────────────────────────────────────────────
 
   Widget _buildQuickStrip(BuildContext context, ThemeData theme, Color brand) {
-    final n = _settings?.notifications;
-    final channelsActive = [
-      n?.email ?? false,
-      n?.push ?? false,
-      n?.sms ?? false,
-    ].where((e) => e).length;
-    final eventsActive = [
-      n?.newMatches ?? false,
-      n?.newMessages ?? false,
-      n?.appointmentReminders ?? false,
-    ].where((e) => e).length;
+    final p = _prefs;
+    final channelsActive = p == null
+        ? 0
+        : [
+            p.inAppChannel,
+            p.emailChannel,
+            p.pushChannel,
+            p.whatsappChannel,
+          ].where((e) => e).length;
+
+    final catalog = _catalog;
+    final silenceable =
+        catalog?.where((c) => c.silenciavel).toList() ??
+        const <NotificationCategoryMeta>[];
+    final subjectsOn = p == null
+        ? 0
+        : silenceable.where((c) => p.category(c.key).enabled).length;
 
     final themeService = ThemeService.instance;
     final themeShort = switch (themeService.themeMode) {
@@ -561,20 +687,20 @@ class _SettingsPageState extends State<SettingsPage> {
       ThemeMode.dark => 'Escuro',
       ThemeMode.system => 'Auto',
     };
-    final langShort = _shortLanguage(_settings?.language ?? 'pt-BR');
+    final langShort = _shortLanguage(p?.language ?? 'pt-BR');
 
     final items = <_QuickKpi>[
       _QuickKpi(
         accent: _toneChannels,
         label: 'CANAIS',
-        value: '$channelsActive/3',
-        sub: 'ativos',
+        value: '$channelsActive/4',
+        sub: 'ligados',
       ),
       _QuickKpi(
         accent: _toneEvents,
-        label: 'ALERTAS',
-        value: '$eventsActive/3',
-        sub: 'eventos',
+        label: 'ASSUNTOS',
+        value: catalog == null ? '—' : '$subjectsOn/${silenceable.length}',
+        sub: 'ligados',
       ),
       _QuickKpi(
         accent: _toneAppearance,
@@ -607,16 +733,19 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // SEÇÃO: CANAIS DE NOTIFICAÇÃO (azul)
+  // SEÇÃO: CANAIS DE NOTIFICAÇÃO (azul) — os quatro canais do web
   // ──────────────────────────────────────────────────────────────────────
 
   Widget _buildChannelsSection(BuildContext context, ThemeData theme) {
-    final n = _settings?.notifications;
-    final activeCount = [
-      n?.email ?? false,
-      n?.push ?? false,
-      n?.sms ?? false,
-    ].where((e) => e).length;
+    final p = _prefs;
+    final activeCount = p == null
+        ? 0
+        : [
+            p.inAppChannel,
+            p.emailChannel,
+            p.pushChannel,
+            p.whatsappChannel,
+          ].where((e) => e).length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -624,62 +753,117 @@ class _SettingsPageState extends State<SettingsPage> {
         _SectionHeader(
           eyebrow: 'COMO RECEBER',
           title: 'Canais de notificação',
-          subtitle: 'Por onde o app pode te alcançar.',
-          rightHint: '$activeCount de 3 ativos',
+          subtitle:
+              'Por onde o sistema fala com você; o que chega por cada um se ajusta por assunto.',
+          rightHint: '$activeCount de 4 ligados',
           tone: _toneChannels,
         ),
         const SizedBox(height: 16),
         _SwitchRow(
           tone: _toneChannels,
+          icon: Icons.notifications_none_rounded,
+          title: 'Sino do sistema',
+          subtitle: 'O painel de avisos aqui dentro.',
+          value: p?.inAppChannel ?? true,
+          onChanged: (_) => _toggleChannel('inApp'),
+        ),
+        _rowDivider(context),
+        _SwitchRow(
+          tone: _toneChannels,
           icon: Icons.email_outlined,
-          title: 'Email',
-          subtitle: 'Resumos diários e ações que precisam de leitura calma.',
-          value: n?.email ?? true,
-          onChanged: (_) => _updateNotificationSetting(
-            getValue: (x) => x.email,
-            setValue: (x, v) => x.copyWith(email: v),
-          ),
+          title: 'E-mail',
+          subtitle: 'No seu endereço cadastrado.',
+          value: p?.emailChannel ?? true,
+          onChanged: (_) => _toggleChannel('email'),
         ),
         _rowDivider(context),
         _SwitchRow(
           tone: _toneChannels,
-          icon: Icons.notifications_active_outlined,
-          title: 'Push',
-          subtitle:
-              'Alertas em tempo real diretamente no aparelho — mesmo com o app fechado.',
-          value: n?.push ?? true,
-          onChanged: (_) => _updateNotificationSetting(
-            getValue: (x) => x.push,
-            setValue: (x, v) => x.copyWith(push: v),
-          ),
+          icon: Icons.phone_android_rounded,
+          title: 'Push no celular',
+          subtitle: 'Pelo app, mesmo com ele fechado.',
+          value: p?.pushChannel ?? true,
+          onChanged: (_) => _toggleChannel('push'),
         ),
         _rowDivider(context),
         _SwitchRow(
           tone: _toneChannels,
-          icon: Icons.sms_outlined,
-          title: 'SMS',
-          subtitle:
-              'Reservado para alertas críticos. Pode ter custo da operadora.',
-          value: n?.sms ?? false,
-          onChanged: (_) => _updateNotificationSetting(
-            getValue: (x) => x.sms,
-            setValue: (x, v) => x.copyWith(sms: v),
-          ),
+          icon: Icons.chat_outlined,
+          title: 'WhatsApp',
+          subtitle: 'No seu número.',
+          value: p?.whatsappChannel ?? true,
+          onChanged: (_) => _toggleChannel('whatsapp'),
         ),
       ],
     );
   }
 
   // ──────────────────────────────────────────────────────────────────────
-  // SEÇÃO: EVENTOS (âmbar)
+  // SEÇÃO: AVISOS NA TELA (azul)
+  // ──────────────────────────────────────────────────────────────────────
+
+  Widget _buildScreenAlertsSection(BuildContext context, ThemeData theme) {
+    final p = _prefs;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SectionHeader(
+          eyebrow: 'NA TELA',
+          title: 'Avisos na tela',
+          subtitle: 'O que aparece por cima do que você está fazendo.',
+          tone: _toneChannels,
+        ),
+        const SizedBox(height: 16),
+        _SwitchRow(
+          tone: _toneChannels,
+          icon: Icons.volume_up_outlined,
+          title: 'Som ao receber',
+          subtitle: 'Um toque curto quando chega mensagem ou aviso.',
+          value: p?.sound ?? true,
+          onChanged: (v) => _savePatch({
+            'notificationSettings': {'sound': v},
+          }),
+        ),
+        _rowDivider(context),
+        _SwitchRow(
+          tone: _toneChannels,
+          icon: Icons.campaign_outlined,
+          title: 'Popups de lead',
+          subtitle:
+              'Novo lead, lead atribuído e lead perdido aparecem num popup; o sino não muda.',
+          value: p?.leadEventToasts ?? false,
+          onChanged: (v) => _savePatch({
+            'notificationSettings': {'leadEventToasts': v},
+          }),
+        ),
+        _rowDivider(context),
+        _SwitchRow(
+          tone: _toneChannels,
+          icon: Icons.celebration_outlined,
+          title: 'Comemorações',
+          subtitle:
+              'Confete e o card quando alguém da empresa fecha venda ou locação.',
+          value: p?.celebrations ?? true,
+          onChanged: (v) => _savePatch({
+            'notificationSettings': {'celebrations': v},
+          }),
+        ),
+      ],
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // SEÇÃO: DOIS AVISOS DE LEAD (âmbar)
   // ──────────────────────────────────────────────────────────────────────
 
   Widget _buildEventsSection(BuildContext context, ThemeData theme) {
-    final n = _settings?.notifications;
+    final p = _prefs;
+    if (p == null) return const SizedBox.shrink();
+    final transfer = p.leadEvent(SettingsService.leadTransferEvent);
+    final whatsapp = p.leadEvent(SettingsService.leadWhatsappEvent);
     final activeCount = [
-      n?.newMatches ?? false,
-      n?.newMessages ?? false,
-      n?.appointmentReminders ?? false,
+      transfer.enabled,
+      whatsapp.enabled,
     ].where((e) => e).length;
 
     return Column(
@@ -687,48 +871,263 @@ class _SettingsPageState extends State<SettingsPage> {
       children: [
         _SectionHeader(
           eyebrow: 'O QUE NOTIFICAR',
-          title: 'Eventos relevantes',
-          subtitle: 'Que momentos merecem chegar até você.',
-          rightHint: '$activeCount de 3 ativos',
+          title: 'Dois avisos de lead',
+          subtitle:
+              'Transferência recebida e lead do WhatsApp: ligue o aviso e escolha os canais.',
+          rightHint: '$activeCount de 2 ligados',
           tone: _toneEvents,
         ),
         const SizedBox(height: 16),
-        _SwitchRow(
-          tone: _toneEvents,
-          icon: Icons.favorite_rounded,
-          title: 'Novos matches',
-          subtitle:
-              'Cliente combinou com imóvel. Avisa assim que o casamento é detectado.',
-          value: n?.newMatches ?? true,
-          onChanged: (_) => _updateNotificationSetting(
-            getValue: (x) => x.newMatches,
-            setValue: (x, v) => x.copyWith(newMatches: v),
-          ),
+        _leadEventBlock(
+          context,
+          SettingsService.leadTransferEvent,
+          Icons.swap_horiz_rounded,
+          'Lead transferido para você',
+          transfer,
         ),
         _rowDivider(context),
+        _leadEventBlock(
+          context,
+          SettingsService.leadWhatsappEvent,
+          Icons.chat_outlined,
+          'Lead novo pelo WhatsApp',
+          whatsapp,
+        ),
+      ],
+    );
+  }
+
+  Widget _leadEventBlock(
+    BuildContext context,
+    String key,
+    IconData icon,
+    String title,
+    LeadEventPreference ev,
+  ) {
+    const channels = [
+      ('inApp', 'Sino'),
+      ('email', 'E-mail'),
+      ('whatsapp', 'WhatsApp'),
+    ];
+    bool valueOf(String c) => switch (c) {
+      'inApp' => ev.inApp,
+      'email' => ev.email,
+      _ => ev.whatsapp,
+    };
+    LeadEventPreference toggled(String c) => switch (c) {
+      'inApp' => ev.copyWith(inApp: !ev.inApp),
+      'email' => ev.copyWith(email: !ev.email),
+      _ => ev.copyWith(whatsapp: !ev.whatsapp),
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
         _SwitchRow(
           tone: _toneEvents,
-          icon: Icons.chat_bubble_outline,
-          title: 'Novas mensagens',
-          subtitle:
-              'Conversas com clientes, equipa e parceiros. Resposta rápida vence venda.',
-          value: n?.newMessages ?? true,
-          onChanged: (_) => _updateNotificationSetting(
-            getValue: (x) => x.newMessages,
-            setValue: (x, v) => x.copyWith(newMessages: v),
+          icon: icon,
+          title: title,
+          subtitle: ev.enabled
+              ? 'Avisa pelos canais marcados abaixo.'
+              : 'Não avisa.',
+          value: ev.enabled,
+          onChanged: (v) => _setLeadEvent(key, ev.copyWith(enabled: v)),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(76, 0, 20, 14),
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final (c, label) in channels)
+                _ChannelToggleChip(
+                  label: label,
+                  on: ev.enabled && valueOf(c),
+                  tone: _toneEvents,
+                  onTap: ev.enabled
+                      ? () => _setLeadEvent(key, toggled(c))
+                      : null,
+                ),
+            ],
           ),
         ),
-        _rowDivider(context),
-        _SwitchRow(
-          tone: _toneEvents,
-          icon: Icons.event_available_outlined,
-          title: 'Compromissos',
+      ],
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // SEÇÃO: POR ASSUNTO (âmbar) — resumo + página dedicada
+  // ──────────────────────────────────────────────────────────────────────
+
+  Widget _buildSubjectsSection(BuildContext context, ThemeData theme) {
+    final p = _prefs;
+    final catalog = _catalog;
+    final off = (catalog == null || p == null)
+        ? 0
+        : catalog
+              .where((c) => c.silenciavel && !p.category(c.key).enabled)
+              .length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SectionHeader(
+          eyebrow: 'POR ASSUNTO',
+          title: 'Assuntos das notificações',
           subtitle:
-              'Lembretes de visita, reunião e vistoria com antecedência configurável.',
-          value: n?.appointmentReminders ?? true,
-          onChanged: (_) => _updateNotificationSetting(
-            getValue: (x) => x.appointmentReminders,
-            setValue: (x, v) => x.copyWith(appointmentReminders: v),
+              'Financeiro, imóveis, leads… o que chega e por onde, assunto a assunto.',
+          rightHint: off > 0 ? '$off silenciado${off == 1 ? '' : 's'}' : null,
+          tone: _toneEvents,
+        ),
+        const SizedBox(height: 14),
+        if (catalog == null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Text(
+              'Não foi possível ler a lista de assuntos. Puxe para recarregar.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: ThemeHelpers.textSecondaryColor(context),
+              ),
+            ),
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final c in catalog)
+                  _SubjectPill(
+                    label: c.label,
+                    on: !c.silenciavel || (p?.category(c.key).enabled ?? true),
+                    locked: !c.silenciavel,
+                    tone: _toneEvents,
+                  ),
+              ],
+            ),
+          ),
+        const SizedBox(height: 8),
+        _NavigationRow(
+          tone: _toneEvents,
+          icon: Icons.tune_rounded,
+          title: 'Ajustar por assunto',
+          subtitle:
+              'Liga, silencia e escolhe os canais de cada assunto, inclusive os avisos do Financeiro.',
+          trailing: Icon(
+            Icons.arrow_forward_rounded,
+            size: 18,
+            color: ThemeHelpers.textSecondaryColor(context),
+          ),
+          onTap: _openNotificationPreferences,
+        ),
+      ],
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // SEÇÃO: AGENDA (violeta) — regra de sobreposição
+  // ──────────────────────────────────────────────────────────────────────
+
+  Widget _buildAgendaSection(BuildContext context, ThemeData theme) {
+    final allow = _prefs?.calendarAllowOverlappingSlots ?? false;
+
+    Widget option(bool value, String title, String subtitle, IconData icon) {
+      final selected = allow == value;
+      return InkWell(
+        onTap: selected || _prefs == null
+            ? null
+            : () => _savePatch({
+                'generalSettings': {'calendarAllowOverlappingSlots': value},
+              }),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          child: Row(
+            children: [
+              _ToneIconPlate(tone: _toneAppearance, icon: icon, active: selected),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: ThemeHelpers.textColor(context),
+                        letterSpacing: -0.2,
+                        height: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: ThemeHelpers.textSecondaryColor(context),
+                        height: 1.35,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Icon(
+                selected ? Icons.check_circle_rounded : Icons.circle_outlined,
+                color: selected
+                    ? _toneAppearance
+                    : ThemeHelpers.textSecondaryColor(context),
+                size: 24,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SectionHeader(
+          eyebrow: 'AGENDA',
+          title: 'Dois compromissos no mesmo horário',
+          subtitle:
+              'A regra vale só para a SUA agenda — a dos outros não muda.',
+          rightHint: allow ? 'Permite' : 'Bloqueia',
+          tone: _toneAppearance,
+        ),
+        const SizedBox(height: 16),
+        Material(
+          color: Colors.transparent,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              option(
+                false,
+                'Bloqueia',
+                'O sistema avisa e não deixa marcar por cima de outro compromisso seu.',
+                Icons.event_busy_outlined,
+              ),
+              _rowDivider(context),
+              option(
+                true,
+                'Permite',
+                'Você pode ter dois compromissos no mesmo horário, lado a lado.',
+                Icons.event_available_outlined,
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+          child: Text(
+            'Vale em: criar agendamento, editar horário e adiar.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+              fontWeight: FontWeight.w600,
+              height: 1.35,
+            ),
           ),
         ),
       ],
@@ -741,8 +1140,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildAppearanceSection(BuildContext context, ThemeData theme) {
     final themeService = ThemeService.instance;
-    final lang = _settings?.language ?? 'pt-BR';
-    final tz = _settings?.timezone ?? 'America/Sao_Paulo';
+    final lang = _prefs?.language ?? 'pt-BR';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -750,7 +1148,8 @@ class _SettingsPageState extends State<SettingsPage> {
         _SectionHeader(
           eyebrow: 'COMO VOCÊ VÊ',
           title: 'Aparência & região',
-          subtitle: 'Tema visual, idioma da interface e fuso horário.',
+          subtitle:
+              'Tema visual e idioma da interface. Claro ou escuro também vale no sistema web.',
           tone: _toneAppearance,
         ),
         const SizedBox(height: 16),
@@ -775,19 +1174,7 @@ class _SettingsPageState extends State<SettingsPage> {
             label: _languageLabel(lang),
             tone: _toneAppearance,
           ),
-          onTap: null, // read-only por enquanto
-        ),
-        _rowDivider(context),
-        _NavigationRow(
-          tone: _toneAppearance,
-          icon: Icons.schedule_rounded,
-          title: 'Fuso horário',
-          subtitle: 'Horários de agenda exibidos com base neste fuso.',
-          trailing: _ValueChip(
-            label: _timezoneLabel(tz),
-            tone: _toneAppearance,
-          ),
-          onTap: null,
+          onTap: null, // o web também só lê (themeSettings.language)
         ),
       ],
     );
@@ -880,7 +1267,7 @@ class _SettingsPageState extends State<SettingsPage> {
     ThemeData theme,
     Color brand,
   ) {
-    final lang = _shortLanguage(_settings?.language ?? 'pt-BR');
+    final lang = _shortLanguage(_prefs?.language ?? 'pt-BR');
     final themeShort = ThemeService.instance.getThemeName();
     final year = DateTime.now().year;
 
@@ -939,12 +1326,6 @@ class _SettingsPageState extends State<SettingsPage> {
             children: [
               _FooterMeta(label: 'IDIOMA', value: lang),
               _FooterMeta(label: 'TEMA', value: themeShort),
-              _FooterMeta(
-                label: 'FUSO',
-                value: _timezoneLabel(
-                  _settings?.timezone ?? 'America/Sao_Paulo',
-                ),
-              ),
             ],
           ),
           const SizedBox(height: 14),
@@ -1139,9 +1520,9 @@ class _SettingsPageState extends State<SettingsPage> {
     final theme = Theme.of(sheetContext);
 
     return InkWell(
-      onTap: () async {
-        await themeService.setThemeMode(mode);
-        if (sheetContext.mounted) Navigator.pop(sheetContext);
+      onTap: () {
+        Navigator.pop(sheetContext);
+        _applyTheme(mode);
       },
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
@@ -1243,15 +1624,6 @@ class _SettingsPageState extends State<SettingsPage> {
     if (c.startsWith('en')) return 'English';
     if (c.startsWith('es')) return 'Español';
     return code;
-  }
-
-  String _timezoneLabel(String tz) {
-    final t = tz.trim();
-    if (t.isEmpty) return '—';
-    final parts = t.split('/');
-    if (parts.length < 2) return t;
-    final city = parts.last.replaceAll('_', ' ');
-    return city;
   }
 }
 
@@ -1649,7 +2021,7 @@ class _AvatarRing extends StatelessWidget {
             ? Image.network(
                 profile.avatar!,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) =>
+                errorBuilder: (_, _, _) =>
                     _Monogram(name: profile.name, accent: accent),
               )
             : _Monogram(name: profile.name, accent: accent),
@@ -1841,6 +2213,129 @@ class _FooterMeta extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Canal de um aviso de lead (Sino / E-mail / WhatsApp) — contorno; acende
+/// no tom quando ligado. Desabilitado quando o aviso está desligado.
+class _ChannelToggleChip extends StatelessWidget {
+  const _ChannelToggleChip({
+    required this.label,
+    required this.on,
+    required this.tone,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool on;
+  final Color tone;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final fg = on ? tone : secondary.withValues(alpha: onTap == null ? 0.5 : 1);
+    return Material(
+      color: on ? tone.withValues(alpha: 0.12) : Colors.transparent,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: on
+                  ? tone.withValues(alpha: 0.5)
+                  : ThemeHelpers.borderColor(context).withValues(alpha: 0.7),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                on ? Icons.check_rounded : Icons.close_rounded,
+                size: 13,
+                color: fg,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: fg,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Assunto no resumo "Por assunto" — marcado quando ligado, cadeado quando
+/// é do sistema (não pode ser desligado).
+class _SubjectPill extends StatelessWidget {
+  const _SubjectPill({
+    required this.label,
+    required this.on,
+    required this.locked,
+    required this.tone,
+  });
+
+  final String label;
+  final bool on;
+  final bool locked;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final fg = on ? ThemeHelpers.textColor(context) : secondary;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        color: on && !locked ? tone.withValues(alpha: 0.1) : Colors.transparent,
+        border: Border.all(
+          color: on && !locked
+              ? tone.withValues(alpha: 0.45)
+              : ThemeHelpers.borderColor(context).withValues(alpha: 0.7),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            locked
+                ? Icons.lock_outline_rounded
+                : on
+                ? Icons.check_rounded
+                : Icons.notifications_off_outlined,
+            size: 13,
+            color: locked ? secondary : (on ? tone : secondary),
+          ),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: fg,
+                decoration: on ? null : TextDecoration.lineThrough,
+                decorationColor: secondary,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

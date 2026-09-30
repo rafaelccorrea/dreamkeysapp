@@ -29,6 +29,26 @@ class AdminUser {
   /// `GET /admin/users/:id`.
   final List<String> managerIds;
 
+  /// Nomes das permissões atribuídas (mesma origem de [permissionIds]).
+  /// Base da alçada na edição: o que o usuário já tem continua concedível
+  /// mesmo que o editor não possua (paridade `filterPermissionIdsToGrantableForEdit`).
+  final List<String> permissionNames;
+
+  /// Proprietário da conta — só o master altera as permissões dele.
+  final bool owner;
+
+  /// Visível na lista pública de corretores do site.
+  final bool isAvailableForPublicSite;
+
+  /// Cargo (escada da imobiliária) e superior direto nesta empresa.
+  final String? jobLevelId;
+  final String? jobLevelName;
+  final int? jobLevelRank;
+  final String? reportsToUserId;
+
+  /// Tags do usuário (quando o endpoint traz a relação `tags`).
+  final List<String> tagIds;
+
   const AdminUser({
     required this.id,
     required this.name,
@@ -45,6 +65,14 @@ class AdminUser {
     this.updatedAt,
     this.permissionIds = const [],
     this.managerIds = const [],
+    this.permissionNames = const [],
+    this.owner = false,
+    this.isAvailableForPublicSite = false,
+    this.jobLevelId,
+    this.jobLevelName,
+    this.jobLevelRank,
+    this.reportsToUserId,
+    this.tagIds = const [],
   });
 
   factory AdminUser.fromJson(Map<String, dynamic> json) {
@@ -62,6 +90,10 @@ class AdminUser {
       final s = v.toString().toLowerCase();
       return s == 'true' || s == '1';
     }
+
+    final jobLevel = json['jobLevel'] is Map
+        ? Map<String, dynamic>.from(json['jobLevel'] as Map)
+        : null;
 
     return AdminUser(
       id: json['id']?.toString() ?? '',
@@ -88,7 +120,31 @@ class AdminUser {
       updatedAt: parseDate(json['updatedAt']),
       permissionIds: _parsePermissionIds(json['permissions']),
       managerIds: _parseManagerIds(json),
+      permissionNames: _parsePermissionNames(json['permissions']),
+      owner: parseBool(json['owner']),
+      isAvailableForPublicSite: parseBool(json['isAvailableForPublicSite']),
+      jobLevelId: jobLevel?['id']?.toString() ??
+          ((json['jobLevelId']?.toString() ?? '').isEmpty
+              ? null
+              : json['jobLevelId'].toString()),
+      jobLevelName: jobLevel?['name']?.toString(),
+      jobLevelRank: jobLevel?['rank'] is num
+          ? (jobLevel!['rank'] as num).toInt()
+          : int.tryParse(jobLevel?['rank']?.toString() ?? ''),
+      reportsToUserId: (json['reportsToUserId']?.toString() ?? '').isEmpty
+          ? null
+          : json['reportsToUserId'].toString(),
+      tagIds: _parsePermissionIds(json['tags']),
     );
+  }
+
+  static List<String> _parsePermissionNames(dynamic raw) {
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((p) => p['name']?.toString() ?? '')
+        .where((s) => s.isNotEmpty)
+        .toList();
   }
 
   static List<String> _parseManagerIds(Map<String, dynamic> json) {
@@ -142,6 +198,15 @@ class AdminUser {
       createdAt: createdAt,
       updatedAt: updatedAt,
       permissionIds: permissionIds ?? this.permissionIds,
+      managerIds: managerIds,
+      permissionNames: permissionNames,
+      owner: owner,
+      isAvailableForPublicSite: isAvailableForPublicSite,
+      jobLevelId: jobLevelId,
+      jobLevelName: jobLevelName,
+      jobLevelRank: jobLevelRank,
+      reportsToUserId: reportsToUserId,
+      tagIds: tagIds,
     );
   }
 

@@ -51,7 +51,10 @@ enum _SdrTab { overview, team, sources }
 ///   ([SdrConfigSheet]); Filtros abre o [SdrDashboardFiltersDrawer] com badge
 ///   de filtros ativos no botão.
 ///
-/// Gating: módulo `whatsapp_ai` + permissão `whatsapp:manage_config`.
+/// Gating (sdr-01, igual ao web): módulo `kanban_management` + permissão
+/// `kanban:view_all_teams` — o dado é do CRM, toda empresa vê o seu. O
+/// console do agente e as configurações continuam do WhatsApp-IA
+/// (`whatsapp_ai` + `whatsapp:manage_config`).
 class SdrDashboardPage extends StatefulWidget {
   const SdrDashboardPage({super.key});
 
@@ -90,6 +93,11 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
   SdrSettings? _agentSettings;
 
   bool get _hasAccess =>
+      ModuleAccessService.instance.hasCompanyModule('kanban_management') &&
+      ModuleAccessService.instance.hasPermission('kanban:view_all_teams');
+
+  /// Console do agente (Zezin) e configurações: só com o WhatsApp-IA.
+  bool get _hasAgent =>
       ModuleAccessService.instance.hasCompanyModule('whatsapp_ai') &&
       ModuleAccessService.instance.hasPermission('whatsapp:manage_config');
 
@@ -165,7 +173,7 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
   }
 
   Future<void> _loadAgentStatus() async {
-    if (!_hasAccess) return;
+    if (!_hasAccess || !_hasAgent) return;
     final res = await SdrService.instance.getSettings();
     if (!mounted || !res.success || res.data == null) return;
     setState(() => _agentSettings = res.data);
@@ -228,21 +236,22 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
   Widget build(BuildContext context) {
     if (!_hasAccess) {
       return const AppScaffold(
-        title: 'SDR com IA',
+        title: 'Dash SDR',
         showBottomNavigation: false,
         body: _DeniedView(),
       );
     }
 
     return AppScaffold(
-      title: 'SDR com IA',
+      title: 'Dash SDR',
       showBottomNavigation: false,
       actions: [
-        ChromeToolbarIconButton(
-          icon: LucideIcons.settings2,
-          tooltip: 'Configurações do agente',
-          onPressed: _openConfigSheet,
-        ),
+        if (_hasAgent)
+          ChromeToolbarIconButton(
+            icon: LucideIcons.settings2,
+            tooltip: 'Configurações do agente',
+            onPressed: _openConfigSheet,
+          ),
         _BadgedToolbarAction(
           count: _filters.activeCount,
           child: ChromeToolbarIconButton(
@@ -264,12 +273,14 @@ class _SdrDashboardPageState extends State<SdrDashboardPage> {
                     padding: const EdgeInsets.fromLTRB(
                         0, _kPagePadTop, 0, _kPagePadBottom),
                     children: [
-                      Padding(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: _kPagePadH),
-                        child: _buildAgentConsole(context),
-                      ),
-                      const SizedBox(height: 18),
+                      if (_hasAgent) ...[
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: _kPagePadH),
+                          child: _buildAgentConsole(context),
+                        ),
+                        const SizedBox(height: 18),
+                      ],
                       Padding(
                         padding:
                             const EdgeInsets.symmetric(horizontal: _kPagePadH),

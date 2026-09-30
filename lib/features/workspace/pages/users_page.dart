@@ -241,41 +241,76 @@ class _UsersPageState extends State<UsersPage> {
       AppPermissions.userUpdate,
     );
     if (!canEdit) return;
-    final next = !u.active;
-    final res = await AdminUsersService.instance.setActive(u.id, next);
-    if (!mounted) return;
-    if (res.success) {
-      setState(() {
-        final idx = _users.indexWhere((x) => x.id == u.id);
-        if (idx >= 0) {
-          _users[idx] = AdminUser(
-            id: u.id,
-            name: u.name,
-            email: u.email,
-            role: u.role,
-            active: next,
-            isActiveInCompany: u.isActiveInCompany,
-            avatar: u.avatar,
-            phone: u.phone,
-            document: u.document,
-            hasAppAccess: u.hasAppAccess,
-            lastLoginAt: u.lastLoginAt,
-            createdAt: u.createdAt,
-            updatedAt: u.updatedAt,
-          );
-        }
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(next ? 'Usuário ativado.' : 'Usuário desativado.'),
-          duration: const Duration(seconds: 2),
+    // A desativação é POR EMPRESA (user_company.isActive); o `active` global
+    // fica intocado — decidir por ele deixava o desativado sem "Ativar".
+    final isActive = u.isActiveInCompany;
+    if (isActive) {
+      final outcome = await showModalBottomSheet<_DeactivateOutcome>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        isDismissible: false,
+        enableDrag: false,
+        builder: (_) => _DeactivateUserSheet(
+          user: u,
+          canRedistributeFunnel: ModuleAccessService.instance.hasPermission(
+            'kanban:update',
+          ),
         ),
       );
+      if (outcome == null || !mounted) return;
+      for (final warning in outcome.warnings) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text(warning),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+      if (!outcome.deactivated) return;
+      _replaceLocal(u.copyWith(isActiveInCompany: false));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: AppColors.status.success,
+          content: Text(outcome.message),
+          duration: const Duration(seconds: 6),
+        ),
+      );
+      unawaited(_loadStats());
+      return;
+    }
+
+    final res = await AdminUsersService.instance.setActive(u.id, true);
+    if (!mounted) return;
+    if (res.success) {
+      _replaceLocal(u.copyWith(isActiveInCompany: true));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: AppColors.status.success,
+          content: Text('Acesso reativado para ${u.name}.'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      unawaited(_loadStats());
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res.message ?? 'Falha ao atualizar.')),
+        SnackBar(
+          content: Text(
+            res.message ?? 'Erro ao alterar status do usuário',
+          ),
+        ),
       );
     }
+  }
+
+  void _replaceLocal(AdminUser next) {
+    setState(() {
+      final idx = _users.indexWhere((x) => x.id == next.id);
+      if (idx >= 0) _users[idx] = next;
+    });
   }
 
   @override
@@ -1258,7 +1293,7 @@ class _UserCard extends StatelessWidget {
             : const Color(0xFF059669);
         final roleColor = _roleColor(ctx);
         final presence = _presenceColor();
-        final willDeactivate = user.active;
+        final willDeactivate = user.isActiveInCompany;
 
         return Container(
           decoration: BoxDecoration(
@@ -1530,7 +1565,7 @@ class _UserAvatar extends StatelessWidget {
             child: Image.network(
               avatarUrl!,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => _monogram(),
+              errorBuilder: (_, _, _) => _monogram(),
               loadingBuilder: (_, child, progress) {
                 if (progress == null) return child;
                 return _monogram();
@@ -1885,6 +1920,528 @@ class _UsersDeniedView extends StatelessWidget {
               style: TextStyle(
                 color: ThemeHelpers.textSecondaryColor(context),
                 fontSize: 12.5,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Desativar acesso — prévia do funil + redistribuição (UserDeactivateModal)
+// ───────────────────────────────────────────────────────────────────────────
+
+class _DeactivateOutcome {
+  final bool deactivated;
+  final String message;
+  final List<String> warnings;
+  const _DeactivateOutcome({
+    required this.deactivated,
+    required this.message,
+    this.warnings = const [],
+  });
+}
+
+/// Porte do `UserDeactivateModal` do web: carrega a prévia dos cards em
+/// aberto por funil, oferece redistribuir entre a equipe (quem tem
+/// `kanban:update`) e só então desativa na empresa. Tudo acontece aqui
+/// dentro; a folha fecha com o resultado para a lista.
+class _DeactivateUserSheet extends StatefulWidget {
+  const _DeactivateUserSheet({
+    required this.user,
+    required this.canRedistributeFunnel,
+  });
+
+  final AdminUser user;
+  final bool canRedistributeFunnel;
+
+  @override
+  State<_DeactivateUserSheet> createState() => _DeactivateUserSheetState();
+}
+
+class _DeactivateUserSheetState extends State<_DeactivateUserSheet> {
+  bool _loading = true;
+  bool _submitting = false;
+  UserFunnelPreview _preview = const UserFunnelPreview();
+  bool _redistribute = true;
+  String? _error;
+
+  String get _firstName {
+    final f = widget.user.name.trim().split(RegExp(r'\s+')).first;
+    return f.isEmpty ? 'ele' : f;
+  }
+
+  bool get _hasOpenCards => _preview.totalOpenTasks > 0;
+  bool get _showRedistribute => _hasOpenCards && widget.canRedistributeFunnel;
+  bool get _willRedistribute => _showRedistribute && _redistribute;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPreview();
+  }
+
+  Future<void> _loadPreview() async {
+    final res = await AdminUsersService.instance.getFunnelAssignmentPreview(
+      widget.user.id,
+    );
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      // Falha na prévia = segue como o web: sem cards, sem redistribuir.
+      _preview = res.success && res.data != null
+          ? res.data!
+          : const UserFunnelPreview();
+      _redistribute = _preview.totalOpenTasks > 0 &&
+          widget.canRedistributeFunnel;
+    });
+  }
+
+  Future<void> _confirm() async {
+    if (_submitting) return;
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    final svc = AdminUsersService.instance;
+    final warnings = <String>[];
+    var infoPrefix = '';
+
+    if (_willRedistribute) {
+      var updatedTotal = 0;
+      final failed = <String>[];
+      for (final p in _preview.projects) {
+        if (p.openTaskCount <= 0) continue;
+        final r = await svc.redistributeFunnelLeads(p.projectId, widget.user.id);
+        if (r.success) {
+          updatedTotal += r.data ?? 0;
+        } else {
+          failed.add(p.projectName);
+        }
+        if (!mounted) return;
+      }
+      if (failed.isNotEmpty) {
+        warnings.add(
+          'Não foi possível redistribuir em: ${failed.join(', ')}. O desativar seguirá mesmo assim.',
+        );
+      } else if (updatedTotal > 0) {
+        infoPrefix =
+            '$updatedTotal card${updatedTotal == 1 ? '' : 's'} redistribuído${updatedTotal == 1 ? '' : 's'} no funil. ';
+      }
+    }
+
+    final res = await svc.deactivateInCompany(widget.user.id);
+    if (!mounted) return;
+    if (!res.success) {
+      setState(() {
+        _submitting = false;
+        _error = res.message ?? 'Erro ao alterar status do usuário';
+      });
+      if (warnings.isNotEmpty) {
+        setState(() => _error = '${warnings.join(' ')} ${_error ?? ''}');
+      }
+      return;
+    }
+    final msg = (res.data ?? const DeactivateUserResult())
+        .successMessage(widget.user.name);
+    Navigator.of(context).pop(
+      _DeactivateOutcome(
+        deactivated: true,
+        message: '$infoPrefix$msg',
+        warnings: warnings,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = ThemeHelpers.textColor(context);
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final danger =
+        isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
+    final warn = isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309);
+    final info = isDark ? const Color(0xFF60A5FA) : const Color(0xFF1D4ED8);
+    final total = _preview.totalOpenTasks;
+
+    final confirmLabel = _submitting
+        ? (_willRedistribute
+            ? 'Redistribuindo e desativando…'
+            : 'Desativando…')
+        : (_willRedistribute
+            ? 'Redistribuir e desativar'
+            : 'Confirmar desativação');
+
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.88,
+      ),
+      decoration: BoxDecoration(
+        color: ThemeHelpers.cardBackgroundColor(context),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border.all(
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+        ),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        18,
+        10,
+        18,
+        14 + MediaQuery.paddingOf(context).bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 38,
+              height: 4,
+              decoration: BoxDecoration(
+                color: ThemeHelpers.borderColor(context),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: danger.withValues(alpha: isDark ? 0.20 : 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(LucideIcons.userMinus, size: 19, color: danger),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Desativar acesso',
+                      style: TextStyle(
+                        fontSize: 16.5,
+                        fontWeight: FontWeight.w900,
+                        color: textColor,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Você está desativando ${widget.user.name} nesta empresa. '
+                      'Ele continua no cadastro, mas não entra mais no sistema.',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: secondary,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Flexible(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: _loading
+                    ? const [
+                        SkeletonBox(height: 60, borderRadius: 14),
+                        SizedBox(height: 10),
+                        SkeletonBox(height: 60, borderRadius: 14),
+                        SizedBox(height: 10),
+                        SkeletonBox(height: 48, borderRadius: 14),
+                      ]
+                    : [
+                        _impact(
+                          icon: LucideIcons.ban,
+                          tone: danger,
+                          title: 'Acesso ao sistema',
+                          body:
+                              'O login e o uso do painel nesta empresa ficam bloqueados imediatamente após confirmar.',
+                        ),
+                        _divider(),
+                        _impact(
+                          icon: LucideIcons.house,
+                          tone: warn,
+                          title: 'Imóveis e cadastros',
+                          body:
+                              'Imóveis em que $_firstName era responsável podem ser transferidos automaticamente conforme as regras de desativação configuradas na empresa.',
+                        ),
+                        _divider(),
+                        _impact(
+                          icon: LucideIcons.kanban,
+                          tone: _hasOpenCards ? warn : info,
+                          title: 'Funil de vendas',
+                          body: _hasOpenCards
+                              ? '$total ${total == 1 ? 'negociação em aberto' : 'negociações em aberto'} com este responsável:'
+                              : 'Nenhuma negociação em aberto no funil com este responsável.',
+                          extra: _hasOpenCards
+                              ? Column(
+                                  children: [
+                                    for (final p in _preview.projects)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 6),
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                p.projectName,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                  fontSize: 12.5,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: textColor,
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              '${p.openTaskCount} ${p.openTaskCount == 1 ? 'card' : 'cards'}',
+                                              style: TextStyle(
+                                                fontSize: 12.5,
+                                                fontWeight: FontWeight.w900,
+                                                color: textColor,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                  ],
+                                )
+                              : null,
+                        ),
+                        if (_hasOpenCards) ...[
+                          const SizedBox(height: 16),
+                          Text(
+                            'O QUE FAZER COM OS CARDS DO FUNIL',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1.2,
+                              color: secondary,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          if (_showRedistribute) ...[
+                            _choice(
+                              selected: _redistribute,
+                              tone: AppColors.primary.primary,
+                              icon: LucideIcons.split,
+                              title: 'Redistribuir entre a equipe e desativar',
+                              hint:
+                                  'Reparte os cards em aberto entre os outros membros que recebem leads em cada funil (rodízio). Recomendado para não deixar negociações paradas.',
+                              onTap: () =>
+                                  setState(() => _redistribute = true),
+                            ),
+                            const SizedBox(height: 8),
+                            _choice(
+                              selected: !_redistribute,
+                              tone: secondary,
+                              icon: LucideIcons.userMinus,
+                              title: 'Desativar sem redistribuir',
+                              hint:
+                                  'Os cards permanecem com $_firstName como responsável. Você pode redistribuir depois no quadro do funil.',
+                              onTap: () =>
+                                  setState(() => _redistribute = false),
+                            ),
+                          ] else
+                            _impact(
+                              icon: LucideIcons.info,
+                              tone: info,
+                              title: 'Sem permissão para redistribuir',
+                              body:
+                                  'Você não tem permissão para redistribuir leads. Após desativar, use "Redistribuir leads" no funil ou peça a um gestor.',
+                            ),
+                        ],
+                        if (_error != null) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            _error!,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                              color: danger,
+                            ),
+                          ),
+                        ],
+                      ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed:
+                      _submitting ? null : () => Navigator.of(context).pop(),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 48),
+                    foregroundColor: textColor,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: const Text('Cancelar'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                flex: 2,
+                child: FilledButton(
+                  onPressed: _submitting || _loading ? null : _confirm,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: danger,
+                    minimumSize: const Size(0, 48),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: Text(
+                    confirmLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _divider() => Divider(
+        height: 20,
+        color: ThemeHelpers.borderLightColor(context).withValues(alpha: 0.7),
+      );
+
+  Widget _impact({
+    required IconData icon,
+    required Color tone,
+    required String title,
+    required String body,
+    Widget? extra,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: tone.withValues(alpha: isDark ? 0.18 : 0.10),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, size: 17, color: tone),
+        ),
+        const SizedBox(width: 11),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w800,
+                  color: ThemeHelpers.textColor(context),
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                body,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: ThemeHelpers.textSecondaryColor(context),
+                  height: 1.3,
+                ),
+              ),
+              ?extra,
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _choice({
+    required bool selected,
+    required Color tone,
+    required IconData icon,
+    required String title,
+    required String hint,
+    required VoidCallback onTap,
+  }) {
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return GestureDetector(
+      onTap: _submitting ? null : onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: selected ? tone.withValues(alpha: 0.07) : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected
+                ? tone.withValues(alpha: 0.5)
+                : ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+            width: selected ? 1.4 : 1,
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              selected ? LucideIcons.circleDot : LucideIcons.circle,
+              size: 18,
+              color: selected ? tone : secondary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(icon, size: 14, color: selected ? tone : secondary),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: ThemeHelpers.textColor(context),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    hint,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: secondary,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

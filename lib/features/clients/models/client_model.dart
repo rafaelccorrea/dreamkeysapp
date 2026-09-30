@@ -129,7 +129,8 @@ enum ClientSource {
   }
 }
 
-/// Modelo de Cônjuge
+/// Modelo de Cônjuge — mesmos campos do `CreateSpouseDto` do back
+/// (`/spouses`), que o web edita no `SpouseForm`.
 class Spouse {
   final String id;
   final String name;
@@ -138,6 +139,15 @@ class Spouse {
   final String? email;
   final String? birthDate;
   final String? rg;
+  final String? whatsapp;
+  final String? profession;
+  final String? companyName;
+  final String? jobPosition;
+  final double? monthlyIncome;
+  final String? jobStartDate;
+  final bool? isCurrentlyWorking;
+  final bool? isRetired;
+  final String? notes;
   final String createdAt;
   final String updatedAt;
 
@@ -149,11 +159,21 @@ class Spouse {
     this.email,
     this.birthDate,
     this.rg,
+    this.whatsapp,
+    this.profession,
+    this.companyName,
+    this.jobPosition,
+    this.monthlyIncome,
+    this.jobStartDate,
+    this.isCurrentlyWorking,
+    this.isRetired,
+    this.notes,
     required this.createdAt,
     required this.updatedAt,
   });
 
   factory Spouse.fromJson(Map<String, dynamic> json) {
+    final income = json['monthlyIncome'] ?? json['monthly_income'];
     return Spouse(
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
@@ -163,6 +183,21 @@ class Spouse {
       birthDate:
           json['birthDate']?.toString() ?? json['birth_date']?.toString(),
       rg: json['rg']?.toString(),
+      whatsapp: json['whatsapp']?.toString(),
+      profession: json['profession']?.toString(),
+      companyName:
+          json['companyName']?.toString() ?? json['company_name']?.toString(),
+      jobPosition:
+          json['jobPosition']?.toString() ?? json['job_position']?.toString(),
+      monthlyIncome: income is num
+          ? income.toDouble()
+          : double.tryParse(income?.toString() ?? ''),
+      jobStartDate: json['jobStartDate']?.toString() ??
+          json['job_start_date']?.toString(),
+      isCurrentlyWorking: json['isCurrentlyWorking'] as bool? ??
+          json['is_currently_working'] as bool?,
+      isRetired: json['isRetired'] as bool? ?? json['is_retired'] as bool?,
+      notes: json['notes']?.toString(),
       createdAt:
           json['createdAt']?.toString() ?? json['created_at']?.toString() ?? '',
       updatedAt:
@@ -170,14 +205,26 @@ class Spouse {
     );
   }
 
+  /// Corpo de `POST /spouses/:clientId` e `PATCH /spouses/:id`. Campos vazios
+  /// ficam de fora: o back valida `@IsEmail`/`@IsDateString` quando presentes.
   Map<String, dynamic> toJson() {
+    bool filled(String? v) => v != null && v.trim().isNotEmpty;
     return {
       'name': name,
-      if (cpf != null) 'cpf': cpf,
-      if (phone != null) 'phone': phone,
-      if (email != null) 'email': email,
-      if (birthDate != null) 'birthDate': birthDate,
-      if (rg != null) 'rg': rg,
+      if (filled(cpf)) 'cpf': cpf,
+      if (filled(rg)) 'rg': rg,
+      if (filled(birthDate)) 'birthDate': birthDate,
+      if (filled(email)) 'email': email,
+      if (filled(phone)) 'phone': phone,
+      if (filled(whatsapp)) 'whatsapp': whatsapp,
+      if (filled(profession)) 'profession': profession,
+      if (filled(companyName)) 'companyName': companyName,
+      if (filled(jobPosition)) 'jobPosition': jobPosition,
+      if (monthlyIncome != null) 'monthlyIncome': monthlyIncome,
+      if (filled(jobStartDate)) 'jobStartDate': jobStartDate,
+      if (isCurrentlyWorking != null) 'isCurrentlyWorking': isCurrentlyWorking,
+      if (isRetired != null) 'isRetired': isRetired,
+      if (filled(notes)) 'notes': notes,
     };
   }
 }
@@ -672,17 +719,21 @@ class UserInfo {
   }
 }
 
-/// DTO para criar cliente
+/// DTO para criar cliente.
+///
+/// Paridade com o web/back: só `name`, `phone`, `type` e `capturedById` são
+/// obrigatórios. E-mail, CPF, CEP, endereço, cidade, UF e bairro são
+/// opcionais (`@IsOptional` no `CreateClientDto` do back).
 class CreateClientDto {
   final String name;
-  final String email;
-  final String cpf;
+  final String? email;
+  final String? cpf;
   final String phone;
-  final String zipCode;
-  final String address;
-  final String city;
-  final String state;
-  final String neighborhood;
+  final String? zipCode;
+  final String? address;
+  final String? city;
+  final String? state;
+  final String? neighborhood;
   final ClientType type;
   final String capturedById;
   final ClientStatus? status;
@@ -751,14 +802,14 @@ class CreateClientDto {
 
   CreateClientDto({
     required this.name,
-    required this.email,
-    required this.cpf,
+    this.email,
+    this.cpf,
     required this.phone,
-    required this.zipCode,
-    required this.address,
-    required this.city,
-    required this.state,
-    required this.neighborhood,
+    this.zipCode,
+    this.address,
+    this.city,
+    this.state,
+    this.neighborhood,
     required this.type,
     required this.capturedById,
     this.status,
@@ -826,17 +877,32 @@ class CreateClientDto {
     this.mcmvPreRegistrationDate,
   });
 
+  /// Igual ao `sanitizeFormData` do web: nome, telefone, tipo e captador vão
+  /// sempre; o resto só quando preenchido. Mandar `''` faria o `@IsEmail` do
+  /// back recusar um e-mail que o usuário nem informou.
   Map<String, dynamic> toJson() {
+    final json = _rawJson();
+    json.removeWhere(
+      (key, value) =>
+          key != 'name' &&
+          key != 'phone' &&
+          value is String &&
+          value.trim().isEmpty,
+    );
+    return json;
+  }
+
+  Map<String, dynamic> _rawJson() {
     return {
       'name': name,
-      'email': email,
-      'cpf': cpf,
+      'email': ?email,
+      'cpf': ?cpf,
       'phone': phone,
-      'zipCode': zipCode,
-      'address': address,
-      'city': city,
-      'state': state,
-      'neighborhood': neighborhood,
+      'zipCode': ?zipCode,
+      'address': ?address,
+      'city': ?city,
+      'state': ?state,
+      'neighborhood': ?neighborhood,
       'type': type.value,
       'capturedById': capturedById,
       if (status != null) 'status': status!.value,
@@ -918,14 +984,14 @@ class CreateClientDto {
 class UpdateClientDto extends CreateClientDto {
   UpdateClientDto({
     required super.name,
-    required super.email,
-    required super.cpf,
+    super.email,
+    super.cpf,
     required super.phone,
-    required super.zipCode,
-    required super.address,
-    required super.city,
-    required super.state,
-    required super.neighborhood,
+    super.zipCode,
+    super.address,
+    super.city,
+    super.state,
+    super.neighborhood,
     required super.type,
     required super.capturedById,
     super.status,
@@ -1037,6 +1103,51 @@ class ClientSearchFilters {
     this.sortBy,
     this.sortOrder,
   });
+
+  /// Cópia com campos trocados (a exportação pagina a lista filtrada da tela).
+  ClientSearchFilters copyWith({
+    String? name,
+    String? email,
+    String? phone,
+    String? search,
+    String? document,
+    String? city,
+    String? neighborhood,
+    String? state,
+    ClientType? type,
+    ClientStatus? status,
+    String? responsibleUserId,
+    bool? isActive,
+    bool? onlyMyData,
+    String? createdFrom,
+    String? createdTo,
+    int? limit,
+    int? page,
+    String? sortBy,
+    String? sortOrder,
+  }) {
+    return ClientSearchFilters(
+      name: name ?? this.name,
+      email: email ?? this.email,
+      phone: phone ?? this.phone,
+      search: search ?? this.search,
+      document: document ?? this.document,
+      city: city ?? this.city,
+      neighborhood: neighborhood ?? this.neighborhood,
+      state: state ?? this.state,
+      type: type ?? this.type,
+      status: status ?? this.status,
+      responsibleUserId: responsibleUserId ?? this.responsibleUserId,
+      isActive: isActive ?? this.isActive,
+      onlyMyData: onlyMyData ?? this.onlyMyData,
+      createdFrom: createdFrom ?? this.createdFrom,
+      createdTo: createdTo ?? this.createdTo,
+      limit: limit ?? this.limit,
+      page: page ?? this.page,
+      sortBy: sortBy ?? this.sortBy,
+      sortOrder: sortOrder ?? this.sortOrder,
+    );
+  }
 
   Map<String, String> toQueryParams() {
     final params = <String, String>{};
@@ -1206,21 +1317,32 @@ class Attachment {
   final String? mimeType;
   final int? size;
 
+  /// Chave no bucket — é ela que o `PUT` da interação usa em
+  /// `retainAttachmentKeys` para manter o anexo.
+  final String? key;
+  final String? previewUrl;
+
   Attachment({
     required this.id,
     this.name,
     required this.url,
     this.mimeType,
     this.size,
+    this.key,
+    this.previewUrl,
   });
 
   factory Attachment.fromJson(Map<String, dynamic> json) {
     return Attachment(
-      id: json['id']?.toString() ?? '',
+      id: json['id']?.toString() ?? json['key']?.toString() ?? '',
       name: json['name']?.toString(),
       url: json['url']?.toString() ?? '',
-      mimeType: json['mimeType']?.toString() ?? json['mime_type']?.toString(),
+      mimeType: json['mimeType']?.toString() ??
+          json['mime_type']?.toString() ??
+          json['contentType']?.toString(),
       size: Client._parseInt(json['size']),
+      key: json['key']?.toString(),
+      previewUrl: json['previewUrl']?.toString(),
     );
   }
 

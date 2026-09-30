@@ -1,5 +1,9 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import '../../../core/constants/api_constants.dart';
 import '../../../shared/services/api_service.dart';
 import '../../../shared/services/profile_service.dart';
@@ -14,6 +18,12 @@ class ClientService {
 
   static final ClientService instance = ClientService._();
   final ApiService _apiService = ApiService.instance;
+
+  // Endpoints que ainda não estão no ApiConstants (paridade imobx-front).
+  static const String _spousesBase = '/spouses';
+  static String _spouseForClient(String clientId) =>
+      '/spouses/client/$clientId';
+  static const String _companyUsers = '/users';
 
   /// Lista clientes com filtros
   Future<ApiResponse<ClientListResponse>> getClients({
@@ -596,71 +606,419 @@ class ClientService {
     }
   }
 
-  /// Cria uma nova interação
+  /// Cria uma nova interação — `POST /clients/:id/interactions` em
+  /// multipart (campos `title`, `notes`, `interactionAt` e até 10 `files`
+  /// de 20 MB), igual ao `ClientInteractionsPanel` do web.
   Future<ApiResponse<ClientInteraction>> createClientInteraction(
     String clientId, {
     required String notes,
     String? title,
     String? interactionAt,
+    List<File> files = const [],
+  }) {
+    debugPrint('📝 [CLIENT_SERVICE] Criando interação para cliente $clientId...');
+    return _sendInteractionMultipart(
+      method: 'POST',
+      endpoint: ApiConstants.clientInteractions(clientId),
+      notes: notes,
+      title: title,
+      interactionAt: interactionAt,
+      files: files,
+      fallbackError: 'Erro ao criar interação',
+    );
+  }
+
+  /// Edita uma interação — `PUT /clients/:id/interactions/:iid` em multipart.
+  /// [retainAttachmentKeys] lista as chaves dos anexos já existentes que
+  /// continuam; os que ficarem de fora são removidos pelo back.
+  Future<ApiResponse<ClientInteraction>> updateClientInteraction(
+    String clientId,
+    String interactionId, {
+    required String notes,
+    String? title,
+    String? interactionAt,
+    List<File> files = const [],
+    List<String> retainAttachmentKeys = const [],
+  }) {
+    debugPrint('📝 [CLIENT_SERVICE] Editando interação $interactionId...');
+    return _sendInteractionMultipart(
+      method: 'PUT',
+      endpoint: ApiConstants.clientInteraction(clientId, interactionId),
+      notes: notes,
+      title: title,
+      interactionAt: interactionAt,
+      files: files,
+      retainAttachmentKeys: retainAttachmentKeys,
+      fallbackError: 'Erro ao atualizar interação',
+    );
+  }
+
+  Future<ApiResponse<ClientInteraction>> _sendInteractionMultipart({
+    required String method,
+    required String endpoint,
+    required String notes,
+    String? title,
+    String? interactionAt,
+    List<File> files = const [],
+    List<String>? retainAttachmentKeys,
+    required String fallbackError,
   }) async {
     try {
-      debugPrint('📝 [CLIENT_SERVICE] Criando interação para cliente $clientId...');
-
-      final body = <String, dynamic>{
-        'notes': notes,
-        if (title != null && title.isNotEmpty) 'title': title,
-        if (interactionAt != null && interactionAt.isNotEmpty)
-          'interactionAt': interactionAt,
-      };
-
-      final response = await _apiService.post<dynamic>(
-        ApiConstants.clientInteractions(clientId),
-        body: body,
+      final uri = Uri.parse('${ApiConstants.baseApiUrl}$endpoint');
+      final request = http.MultipartRequest(method, uri);
+      request.headers.addAll(
+        await _apiService.buildOutboundHeaders(
+          endpoint: endpoint,
+          excludeContentType: true,
+        ),
       );
 
-      if (response.success && response.data != null) {
-        try {
-          final raw = response.data is Map<String, dynamic>
-              ? response.data as Map<String, dynamic>
-              : null;
-          if (raw == null) {
-            return ApiResponse.error(
-              message: 'Resposta inválida ao criar interação',
-              statusCode: response.statusCode,
-            );
-          }
-          // Algumas APIs envolvem o item em { data: {...} }
-          final json = raw['data'] is Map<String, dynamic>
-              ? raw['data'] as Map<String, dynamic>
-              : raw;
-          final interaction = ClientInteraction.fromJson(json);
-          return ApiResponse.success(
-            data: interaction,
-            statusCode: response.statusCode,
-          );
-        } catch (e, stackTrace) {
-          debugPrint('❌ [CLIENT_SERVICE] Erro ao parsear interação criada: $e');
-          debugPrint('📚 [CLIENT_SERVICE] StackTrace: $stackTrace');
+      request.fields['notes'] = notes;
+      if (title != null && title.trim().isNotEmpty) {
+        request.fields['title'] = title.trim();
+      }
+      if (interactionAt != null && interactionAt.isNotEmpty) {
+        request.fields['interactionAt'] = interactionAt;
+      }
+      if (retainAttachmentKeys != null) {
+        request.fields['retainAttachmentKeys'] =
+            jsonEncode(retainAttachmentKeys);
+      }
+
+      for (final file in files) {
+        final name = file.path.split(RegExp(r'[\\/]')).last;
+        request.files.add(
+          await http.MultipartFile.fromPath(
+            'files',
+            file.path,
+            filename: name,
+            contentType: _guessMediaType(name),
+          ),
+        );
+      }
+
+      final streamed =
+          await request.send().timeout(const Duration(seconds: 120));
+      final response = await http.Response.fromStream(streamed);
+
+      dynamic decoded;
+      try {
+        decoded = response.body.isEmpty ? null : jsonDecode(response.body);
+      } catch (_) {
+        decoded = null;
+      }
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final raw = decoded is Map<String, dynamic> ? decoded : null;
+        if (raw == null) {
           return ApiResponse.error(
-            message: 'Erro ao processar interação criada',
+            message: 'Resposta inválida do servidor',
             statusCode: response.statusCode,
           );
         }
+        // Algumas APIs envolvem o item em { data: {...} }
+        final json = raw['data'] is Map<String, dynamic>
+            ? raw['data'] as Map<String, dynamic>
+            : raw;
+        return ApiResponse.success(
+          data: ClientInteraction.fromJson(json),
+          statusCode: response.statusCode,
+        );
       }
 
       return ApiResponse.error(
-        message: response.message ?? 'Erro ao criar interação',
+        message: _extractMessage(decoded) ?? fallbackError,
         statusCode: response.statusCode,
-        data: response.error,
+        data: decoded,
       );
     } catch (e, stackTrace) {
-      debugPrint('❌ [CLIENT_SERVICE] Erro ao criar interação: $e');
+      debugPrint('❌ [CLIENT_SERVICE] $fallbackError: $e');
       debugPrint('📚 [CLIENT_SERVICE] StackTrace: $stackTrace');
       return ApiResponse.error(
         message: 'Erro de conexão: ${e.toString()}',
         statusCode: 0,
       );
     }
+  }
+
+  static MediaType? _guessMediaType(String fileName) {
+    final ext = fileName.contains('.')
+        ? fileName.split('.').last.toLowerCase()
+        : '';
+    switch (ext) {
+      case 'jpg':
+      case 'jpeg':
+        return MediaType('image', 'jpeg');
+      case 'png':
+        return MediaType('image', 'png');
+      case 'gif':
+        return MediaType('image', 'gif');
+      case 'webp':
+        return MediaType('image', 'webp');
+      case 'heic':
+        return MediaType('image', 'heic');
+      case 'pdf':
+        return MediaType('application', 'pdf');
+      case 'doc':
+        return MediaType('application', 'msword');
+      case 'docx':
+        return MediaType(
+          'application',
+          'vnd.openxmlformats-officedocument.wordprocessingml.document',
+        );
+      case 'xls':
+        return MediaType('application', 'vnd.ms-excel');
+      case 'xlsx':
+        return MediaType(
+          'application',
+          'vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        );
+      case 'txt':
+        return MediaType('text', 'plain');
+      case 'mp4':
+        return MediaType('video', 'mp4');
+      case 'mp3':
+        return MediaType('audio', 'mpeg');
+      default:
+        return null;
+    }
+  }
+
+  static String? _extractMessage(dynamic decoded) {
+    if (decoded is Map) {
+      final msg = decoded['message'];
+      if (msg is String && msg.trim().isNotEmpty) return msg;
+      if (msg is List && msg.isNotEmpty) {
+        return msg.map((e) => e.toString()).join('\n');
+      }
+      final err = decoded['error'];
+      if (err is String && err.trim().isNotEmpty) return err;
+    }
+    return null;
+  }
+
+  // ───────────────────────── Cônjuge (/spouses) ─────────────────────────
+
+  /// `GET /spouses/client/:clientId` — 404 vira `data: null` (sem cônjuge),
+  /// igual ao `spouseApi.getSpouseByClientId` do web.
+  Future<ApiResponse<Spouse?>> getSpouseByClient(String clientId) async {
+    try {
+      final response =
+          await _apiService.get<dynamic>(_spouseForClient(clientId));
+      if (response.success) {
+        final data = response.data;
+        return ApiResponse.success(
+          data: data is Map<String, dynamic> && data['id'] != null
+              ? Spouse.fromJson(data)
+              : null,
+          statusCode: response.statusCode,
+        );
+      }
+      if (response.statusCode == 404) {
+        return ApiResponse.success(data: null, statusCode: 404);
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao buscar cônjuge',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// `POST /spouses/:clientId`
+  Future<ApiResponse<Spouse>> createSpouse(
+    String clientId,
+    Spouse spouse,
+  ) async {
+    try {
+      final response = await _apiService.post<dynamic>(
+        '$_spousesBase/$clientId',
+        body: spouse.toJson(),
+      );
+      return _spouseResult(response, 'Erro ao cadastrar cônjuge');
+    } catch (e) {
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// `PATCH /spouses/:id`
+  Future<ApiResponse<Spouse>> updateSpouse(
+    String spouseId,
+    Spouse spouse,
+  ) async {
+    try {
+      final response = await _apiService.patch<dynamic>(
+        '$_spousesBase/$spouseId',
+        body: spouse.toJson(),
+      );
+      return _spouseResult(response, 'Erro ao atualizar cônjuge');
+    } catch (e) {
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// `DELETE /spouses/:id`
+  Future<ApiResponse<void>> deleteSpouse(String spouseId) async {
+    try {
+      final response =
+          await _apiService.delete<dynamic>('$_spousesBase/$spouseId');
+      if (response.success) {
+        return ApiResponse.success(statusCode: response.statusCode);
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao remover cônjuge',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  ApiResponse<Spouse> _spouseResult(
+    ApiResponse<dynamic> response,
+    String fallback,
+  ) {
+    if (response.success) {
+      final data = response.data;
+      if (data is Map<String, dynamic>) {
+        final json = data['data'] is Map<String, dynamic>
+            ? data['data'] as Map<String, dynamic>
+            : data;
+        return ApiResponse.success(
+          data: Spouse.fromJson(json),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: 'Resposta inválida do servidor',
+        statusCode: response.statusCode,
+      );
+    }
+    return ApiResponse.error(
+      message: response.message ?? fallback,
+      statusCode: response.statusCode,
+      data: response.error,
+    );
+  }
+
+  // ───────────────────────── Captador ─────────────────────────
+
+  /// Usuários da empresa para o seletor "Captador" — `GET /users?page=1&limit=100`,
+  /// a mesma chamada que o `ClientFormPage` do web faz com `getUsers`.
+  /// Sem acesso à listagem de usuários, cai para `/clients/users-for-transfer`.
+  Future<ApiResponse<List<UserInfo>>> getCompanyUsers() async {
+    try {
+      final response = await _apiService.get<dynamic>(
+        _companyUsers,
+        queryParameters: const {'page': '1', 'limit': '100'},
+      );
+      if (response.success && response.data != null) {
+        final data = response.data;
+        final list = data is List
+            ? data
+            : (data is Map<String, dynamic> && data['data'] is List
+                ? data['data'] as List<dynamic>
+                : const <dynamic>[]);
+        final users = list
+            .whereType<Map>()
+            .map((e) => UserInfo.fromJson(Map<String, dynamic>.from(e)))
+            .where((u) => u.id.isNotEmpty)
+            .toList();
+        if (users.isNotEmpty) {
+          return ApiResponse.success(
+            data: users,
+            statusCode: response.statusCode,
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ [CLIENT_SERVICE] getCompanyUsers: $e');
+    }
+    return getUsersForTransfer();
+  }
+
+  // ───────────────────────── Importação / exportação ─────────────────────────
+
+  /// Planilha de erros de um job de importação —
+  /// `GET /clients/import-jobs/:jobId/errors` (blob .xlsx).
+  Future<ApiResponse<List<int>>> downloadImportErrors(String jobId) async {
+    try {
+      final endpoint = ApiConstants.clientsImportJobErrors(jobId);
+      final uri = Uri.parse('${ApiConstants.baseApiUrl}$endpoint');
+      final headers = await _apiService.buildOutboundHeaders(
+        endpoint: endpoint,
+      );
+      final httpResponse = await http
+          .get(uri, headers: headers)
+          .timeout(const Duration(seconds: 60));
+      if (httpResponse.statusCode >= 200 && httpResponse.statusCode < 300) {
+        return ApiResponse.success(
+          data: httpResponse.bodyBytes.toList(),
+          statusCode: httpResponse.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: httpResponse.statusCode == 404
+            ? 'Planilha de erros não encontrada. Pode não haver erros ou o job ainda está processando.'
+            : 'Erro ao baixar planilha de erros.',
+        statusCode: httpResponse.statusCode,
+      );
+    } catch (e) {
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Todos os clientes da busca/filtro atual, página a página (limite 100),
+  /// para a exportação local — o web exporta a lista filtrada da tela.
+  Future<ApiResponse<List<Client>>> fetchAllClients({
+    ClientSearchFilters? filters,
+    String? search,
+    int maxRecords = 10000,
+  }) async {
+    final all = <Client>[];
+    var page = 1;
+    var totalPages = 1;
+    do {
+      final response = await getClients(
+        filters: (filters ?? ClientSearchFilters()).copyWith(
+          search: search == null || search.trim().isEmpty
+              ? null
+              : search.trim(),
+          page: page,
+          limit: 100,
+        ),
+      );
+      if (!response.success || response.data == null) {
+        return ApiResponse.error(
+          message: response.message ?? 'Erro ao buscar clientes',
+          statusCode: response.statusCode,
+          data: response.error,
+        );
+      }
+      all.addAll(response.data!.data);
+      totalPages = response.data!.pagination?.totalPages ?? 1;
+      if (response.data!.data.isEmpty) break;
+      page++;
+    } while (page <= totalPages && all.length < maxRecords);
+    return ApiResponse.success(data: all, statusCode: 200);
   }
 
   /// Exclui uma interação

@@ -7,6 +7,8 @@ import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import '../../organization/models/unit_model.dart';
+import '../../organization/services/unit_service.dart';
 import '../services/company_team_service.dart';
 import '../widgets/team_member_picker_sheet.dart';
 
@@ -92,6 +94,18 @@ class _TeamFormPageState extends State<TeamFormPage> {
   bool _useInSaleForms = false;
   final List<_DraftMember> _members = [];
 
+  // Unidade (filial) dona da equipe — obrigatória no back
+  // (`CreateTeamDto.unitId`), editável na edição (paridade EditTeamPage).
+  List<OrgUnit> _units = const [];
+  bool _unitsLoading = true;
+  String? _unitsError;
+  String? _unitId;
+
+  /// Nome vindo da própria equipe — cobre a unidade que foi desativada e
+  /// por isso não volta na lista de ativas.
+  String? _unitNameFallback;
+  bool _unitError = false;
+
   bool _loading = false;
   bool _saving = false;
   bool _nameError = false;
@@ -148,6 +162,7 @@ class _TeamFormPageState extends State<TeamFormPage> {
     _savedFingerprint = _fingerprint();
     _name.addListener(_onNameChanged);
     _description.addListener(_rebuild);
+    _loadUnits();
     if (_isEditing) _load();
   }
 
@@ -172,6 +187,7 @@ class _TeamFormPageState extends State<TeamFormPage> {
         _name.text.trim(),
         _description.text.trim(),
         _color,
+        _unitId ?? '',
         _isActive,
         _useInSaleForms,
         _members.map((m) => '${m.userId}:${m.role}').join(','),
@@ -195,6 +211,8 @@ class _TeamFormPageState extends State<TeamFormPage> {
         _name.text = t.name;
         _description.text = t.description ?? '';
         if ((t.color ?? '').isNotEmpty) _color = t.color!;
+        _unitId = t.unitId;
+        _unitNameFallback = t.unitName;
         _isActive = t.isActive;
         _useInSaleForms = t.useInSaleForms;
         _members
@@ -215,6 +233,33 @@ class _TeamFormPageState extends State<TeamFormPage> {
         _errorRaw = res.error;
       }
     });
+  }
+
+  /// `GET /units?activeOnly=true` — mesma fonte do web (`unitsApi.list(true)`).
+  Future<void> _loadUnits() async {
+    if (!_unitsLoading || _unitsError != null) {
+      setState(() {
+        _unitsLoading = true;
+        _unitsError = null;
+      });
+    }
+    final res = await UnitService.instance.list(activeOnly: true);
+    if (!mounted) return;
+    setState(() {
+      _unitsLoading = false;
+      if (res.success) {
+        _units = res.data ?? const [];
+      } else {
+        _units = const [];
+        _unitsError = res.message ?? 'Erro ao carregar unidades';
+      }
+    });
+  }
+
+  void _snack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   Future<void> _addMember() async {
@@ -242,6 +287,22 @@ class _TeamFormPageState extends State<TeamFormPage> {
       setState(() => _nameError = true);
       return;
     }
+    // Mesmas travas e mensagens do web (CreateTeamPage/EditTeamPage).
+    if ((_unitId ?? '').isEmpty) {
+      HapticFeedback.mediumImpact();
+      setState(() => _unitError = true);
+      _snack('Selecione a unidade (filial) da equipe');
+      return;
+    }
+    if (_members.isEmpty) {
+      HapticFeedback.mediumImpact();
+      _snack(
+        _isEditing
+            ? 'A equipe precisa ter pelo menos um membro'
+            : 'Selecione pelo menos um usuário para a equipe',
+      );
+      return;
+    }
     setState(() => _saving = true);
     final members = _members
         .map((m) => {'userId': m.userId, 'role': m.role})
@@ -255,6 +316,7 @@ class _TeamFormPageState extends State<TeamFormPage> {
             isActive: _isActive,
             useInSaleForms: _useInSaleForms,
             members: members,
+            unitId: _unitId,
           )
         : await CompanyTeamService.instance.createTeam(
             name: name,
@@ -263,6 +325,7 @@ class _TeamFormPageState extends State<TeamFormPage> {
                 : _description.text.trim(),
             color: _color,
             members: members,
+            unitId: _unitId,
           );
     if (!mounted) return;
     if (res.success) {
@@ -410,8 +473,8 @@ class _TeamFormPageState extends State<TeamFormPage> {
               physics: const NeverScrollableScrollPhysics(),
               padding: const EdgeInsets.symmetric(horizontal: _padH),
               itemCount: 7,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (_, __) =>
+              separatorBuilder: (_, _) => const SizedBox(width: 12),
+              itemBuilder: (_, _) =>
                   const SkeletonBox(width: 48, height: 48, borderRadius: 24),
             ),
           ),
@@ -578,6 +641,8 @@ class _TeamFormPageState extends State<TeamFormPage> {
                     hint: 'Opcional — foco, região, especialidade…',
                   ),
                 ),
+                const SizedBox(height: 12),
+                _buildUnitField(),
               ],
             ),
           ),
@@ -666,6 +731,293 @@ class _TeamFormPageState extends State<TeamFormPage> {
         ),
       ],
     );
+  }
+
+  // ─── Unidade (filial) — select com corpo de input ──────────────────────────
+
+  OrgUnit? get _selectedUnit {
+    final id = _unitId;
+    if (id == null || id.isEmpty) return null;
+    for (final u in _units) {
+      if (u.id == id) return u;
+    }
+    return null;
+  }
+
+  /// Linha de apoio da unidade — paridade com `descreverUnidade` do web.
+  String _describeUnit(OrgUnit u) {
+    final parts = <String>[];
+    final desc = u.description?.trim() ?? '';
+    if (desc.isNotEmpty) parts.add(desc);
+    final managers = u.managers
+        .map((m) => m.name.trim().split(RegExp(r'\s+')).first)
+        .where((n) => n.isNotEmpty)
+        .toList();
+    if (managers.length == 1) {
+      parts.add('Gestor: ${managers.first}');
+    } else if (managers.length > 1) {
+      parts.add('Gestores: ${managers.take(2).join(', ')}');
+    }
+    parts.add(u.teamCount == 1 ? '1 equipe' : '${u.teamCount} equipes');
+    return parts.join(' · ');
+  }
+
+  Widget _buildUnitField() {
+    if (_unitsLoading) {
+      return const SkeletonBox(height: 56, borderRadius: 14);
+    }
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    final selected = _selectedUnit;
+    final hasValue = (_unitId ?? '').isNotEmpty;
+    final label = selected?.name ??
+        (hasValue ? (_unitNameFallback ?? 'Unidade atual') : null);
+    final dotColor = selected != null
+        ? Color(selected.colorValue)
+        : secondary.withValues(alpha: 0.6);
+
+    String helper;
+    if (_unitsError != null) {
+      helper = 'Não foi possível carregar as unidades. Toque para tentar de novo.';
+    } else if (_units.isEmpty) {
+      helper =
+          'Nenhuma unidade ativa. Cadastre uma unidade antes de criar a equipe.';
+    } else {
+      helper = 'Define a filial dona da equipe — não muda sozinha depois.';
+    }
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: _saving
+          ? null
+          : () {
+              if (_unitsError != null) {
+                _loadUnits();
+                return;
+              }
+              if (_units.isEmpty) {
+                _snack(
+                  'Cadastre uma unidade antes de criar a equipe.',
+                );
+                return;
+              }
+              _pickUnit();
+            },
+      child: InputDecorator(
+        isEmpty: label == null,
+        decoration: _dec(
+          'Unidade (filial) *',
+          hint: 'Selecione a unidade…',
+          errorText:
+              _unitError ? 'Selecione a unidade (filial) da equipe.' : null,
+        ).copyWith(
+          enabled: !_saving,
+          helperText: _unitError ? null : helper,
+          helperMaxLines: 3,
+          errorMaxLines: 2,
+          suffixIcon: Icon(
+            _unitsError != null
+                ? LucideIcons.refreshCw
+                : LucideIcons.chevronDown,
+            size: 18,
+            color: secondary,
+          ),
+        ),
+        child: label == null
+            ? null
+            : Row(
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: dotColor,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: ThemeHelpers.textColor(context),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  Future<void> _pickUnit() async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.55),
+      builder: (ctx) {
+        final secondary = ThemeHelpers.textSecondaryColor(ctx);
+        final maxH = MediaQuery.of(ctx).size.height * 0.75;
+        return Container(
+          constraints: BoxConstraints(maxHeight: maxH),
+          decoration: BoxDecoration(
+            color: ThemeHelpers.backgroundColor(ctx),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+            border: Border.all(
+              color: ThemeHelpers.borderColor(ctx).withValues(alpha: 0.4),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 10, bottom: 4),
+                child: Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: ThemeHelpers.borderColor(ctx)
+                          .withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 6, 10, 12),
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(
+                      color: ThemeHelpers.borderLightColor(ctx),
+                    ),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Unidade (filial)',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.3,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'A filial dona da equipe.',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12.5, color: secondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Fechar',
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      icon: Icon(LucideIcons.x, size: 20, color: secondary),
+                    ),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 16),
+                  itemCount: _units.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 2),
+                  itemBuilder: (_, i) {
+                    final u = _units[i];
+                    final isSel = u.id == _unitId;
+                    final tone = Color(u.colorValue);
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => Navigator.of(ctx).pop(u.id),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          color: isSel
+                              ? _teamColor.withValues(alpha: _isDark ? 0.16 : 0.08)
+                              : null,
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 12,
+                              height: 12,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: tone,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    u.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 14.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: ThemeHelpers.textColor(ctx),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _describeUnit(u),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      height: 1.3,
+                                      color: secondary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (isSel) ...[
+                              const SizedBox(width: 8),
+                              Icon(LucideIcons.check, size: 18, color: _accent),
+                            ],
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (picked == null || !mounted) return;
+    HapticFeedback.selectionClick();
+    setState(() {
+      _unitId = picked;
+      _unitError = false;
+    });
   }
 
   String _membersSubtitle() {
@@ -929,7 +1281,7 @@ class _TeamFormPageState extends State<TeamFormPage> {
             padding: const EdgeInsets.symmetric(horizontal: _padH),
             physics: const BouncingScrollPhysics(),
             itemCount: _teamColors.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            separatorBuilder: (_, _) => const SizedBox(width: 12),
             itemBuilder: (_, i) => _buildSwatch(_teamColors[i]),
           ),
         ),
@@ -1199,7 +1551,7 @@ class _TeamFormPageState extends State<TeamFormPage> {
               child: Image.network(
                 m.avatar!,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => monogram(),
+                errorBuilder: (_, _, _) => monogram(),
                 loadingBuilder: (_, child, progress) =>
                     progress == null ? child : monogram(),
               ),

@@ -4,12 +4,17 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/module_access_service.dart';
+import '../../../shared/services/tag_service.dart';
+import '../../../shared/utils/input_formatters.dart';
+import '../../../shared/utils/masks.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/admin_user_model.dart';
 import '../services/admin_users_service.dart';
-import '../utils/permission_meta.dart';
+import '../utils/permission_rules.dart';
+import '../widgets/user_access_widgets.dart';
 
 /// Acento por papel — torna a subtela coerente com QUEM se edita (Corretor,
 /// Gerente, Admin, Master). O vermelho da marca fica reservado para a ação
@@ -47,8 +52,11 @@ String _roleLabel(String role) {
 }
 
 /// Tela de **Editar Usuário** (mobile, identidade própria — sem banner, flush).
-/// Permite alterar papel, gestor responsável (obrigatório p/ corretor), acesso
-/// ao app e permissões (grade de categorias → painel focado).
+/// Paridade com o `EditUserPage` do web: dados básicos (nome, email com
+/// checagem de disponibilidade, telefone, nova senha opcional), papel,
+/// gestores (obrigatório p/ corretor), cargo/superior (admin/master), tags e
+/// permissões com as regras do web (fixas, dependências, alçada do editor,
+/// módulos do plano, trava do proprietário).
 class EditUserPage extends StatefulWidget {
   const EditUserPage({super.key, required this.user});
 
@@ -69,7 +77,7 @@ class _EditUserPageState extends State<EditUserPage> {
   int _errorStatus = 0;
   Object? _errorRaw;
 
-  final List<MapEntry<String, List<UserPermission>>> _catalog = [];
+  PermissionSelection? _sel;
   List<AdminUser> _managers = [];
 
   /// Usuário exibido no hero — começa com o item da lista e é substituído pelo
@@ -77,13 +85,39 @@ class _EditUserPageState extends State<EditUserPage> {
   late AdminUser _user;
 
   late String _role;
-  Set<String> _selectedPerms = {};
   Set<String> _selectedManagers = {};
+
+  // Dados básicos.
+  final _name = TextEditingController();
+  final _email = TextEditingController();
+  final _phone = TextEditingController();
+  final _password = TextEditingController();
+  final _emailFocus = FocusNode();
+  bool _showPassword = false;
+  bool _validatingEmail = false;
+  String? _nameError;
+  String? _emailError;
+  String? _passwordError;
+
+  // Tags.
+  List<Tag> _tags = [];
+  bool _tagsLoading = true;
+  Set<String> _selectedTags = {};
+
+  // Cargo / superior (só admin/master alteram — regra do back).
+  String? _jobLevelId;
+  String? _reportsToUserId;
 
   // Snapshot inicial p/ detectar alterações.
   late String _role0;
   Set<String> _perms0 = {};
   Set<String> _managers0 = {};
+  Set<String> _tags0 = {};
+  String _name0 = '';
+  String _email0 = '';
+  String _phone0 = '';
+  String? _jobLevelId0;
+  String? _reportsToUserId0;
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
   Color get _accent => _roleAccent(_role, _isDark);
@@ -92,12 +126,39 @@ class _EditUserPageState extends State<EditUserPage> {
   bool get _isUser => _role == 'user';
   bool get _isPrivileged => _role == 'admin' || _role == 'master';
 
+  String get _actorRole =>
+      ModuleAccessService.instance.userRole?.toLowerCase().trim() ?? '';
+  bool get _elevatedActor => _actorRole == 'admin' || _actorRole == 'master';
+
   @override
   void initState() {
     super.initState();
     _user = widget.user;
     _role = widget.user.role.toLowerCase();
+    _role0 = _role;
+    _emailFocus.addListener(() {
+      if (!_emailFocus.hasFocus && mounted && !_loading) {
+        _validateEmailRemote();
+      }
+    });
     _bootstrap();
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _email.dispose();
+    _phone.dispose();
+    _password.dispose();
+    _emailFocus.dispose();
+    super.dispose();
+  }
+
+  String _maskPhone(String? raw) {
+    final v = (raw ?? '').trim();
+    final digits = v.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return '';
+    return digits.length <= 11 ? Masks.phone(digits) : v;
   }
 
   Future<void> _bootstrap() async {
@@ -118,46 +179,115 @@ class _EditUserPageState extends State<EditUserPage> {
     final catalogRes = results[1];
     final managersRes = results[2];
 
-    if (catalogRes.success && catalogRes.data != null) {
-      final data = catalogRes.data! as Map<String, List<UserPermission>>;
-      final entries = data.entries.where((e) => e.value.isNotEmpty).toList()
-        ..sort((a, b) => PermissionMeta.categoryLabel(a.key)
-            .toLowerCase()
-            .compareTo(PermissionMeta.categoryLabel(b.key).toLowerCase()));
-      _catalog
-        ..clear()
-        ..addAll(entries);
-    }
     if (managersRes.success && managersRes.data != null) {
       _managers = (managersRes.data! as List<AdminUser>)
           .where((m) => m.id != widget.user.id)
           .toList();
     }
     if (detailRes.success && detailRes.data != null) {
-      final u = detailRes.data! as AdminUser;
-      _user = u;
-      _role = u.role.toLowerCase();
-      _selectedPerms = {...u.permissionIds};
-      _selectedManagers = {...u.managerIds};
-    } else {
-      _selectedPerms = {...widget.user.permissionIds};
-      _selectedManagers = {...widget.user.managerIds};
+      _user = detailRes.data! as AdminUser;
     }
+    final u = _user;
+    _role = u.role.toLowerCase();
+    _selectedManagers = {...u.managerIds};
+    _name.text = u.name;
+    _email.text = u.email;
+    _phone.text = _maskPhone(u.phone);
+    _password.clear();
+    _jobLevelId = u.jobLevelId;
+    _reportsToUserId = u.reportsToUserId;
+
+    PermissionSelection? sel;
+    if (catalogRes.success && catalogRes.data != null) {
+      final ma = ModuleAccessService.instance;
+      sel = PermissionSelection(
+        isEdit: true,
+        catalog: catalogRes.data! as Map<String, List<UserPermission>>,
+        actorRole: _actorRole,
+        actorPermissionNames: ma.userPermissionNames,
+        companyModules: ma.companyModules,
+        baselineNames: u.permissionNames,
+        editingOwner: u.owner,
+        role: _role,
+      );
+      if (sel.ownerLocked) {
+        // Proprietário travado: a grade só mostra o que ele tem.
+        sel.selected = {...u.permissionIds};
+      } else if (u.permissionNames.isNotEmpty) {
+        sel.initialize(currentNames: u.permissionNames);
+      } else {
+        sel.initialize(
+          currentNames: [
+            for (final id in u.permissionIds) ?sel.byId(id)?.name,
+          ],
+        );
+      }
+    }
+    _sel = sel;
 
     _role0 = _role;
-    _perms0 = {..._selectedPerms};
+    _perms0 = {...?sel?.selected};
     _managers0 = {..._selectedManagers};
+    _name0 = _name.text;
+    _email0 = _email.text;
+    _phone0 = _phone.text;
+    _jobLevelId0 = _jobLevelId;
+    _reportsToUserId0 = _reportsToUserId;
 
     setState(() {
       _loading = false;
-      if (!catalogRes.success && _catalog.isEmpty) {
+      if (sel == null) {
         _error =
             catalogRes.message ?? 'Não foi possível carregar as permissões.';
         _errorStatus = catalogRes.statusCode;
         _errorRaw = catalogRes.error;
       }
     });
+    _loadTags();
   }
+
+  Future<void> _loadTags() async {
+    setState(() => _tagsLoading = true);
+    final results = await Future.wait([
+      TagService.instance.getTags(),
+      TagService.instance.getUserTags(widget.user.id),
+    ]);
+    if (!mounted) return;
+    final all = results[0];
+    final mine = results[1];
+    setState(() {
+      _tagsLoading = false;
+      if (all.success && all.data != null) _tags = all.data!;
+      final ids = mine.success && mine.data != null
+          ? mine.data!.map((t) => t.id).toSet()
+          : {..._user.tagIds};
+      _selectedTags = ids;
+      _tags0 = {...ids};
+    });
+  }
+
+  Future<void> _validateEmailRemote() async {
+    final email = _email.text.trim();
+    if (email.isEmpty || !_validEmail(email) || email == _email0.trim()) {
+      return;
+    }
+    setState(() => _validatingEmail = true);
+    final ok = await AdminUsersService.instance.validateEmailAvailable(
+      email,
+      excludeUserId: widget.user.id,
+    );
+    if (!mounted) return;
+    setState(() {
+      _validatingEmail = false;
+      if (ok == false) {
+        _emailError = 'Email já está em uso';
+      } else if (ok == null) {
+        _emailError = 'Erro ao verificar disponibilidade';
+      }
+    });
+  }
+
+  bool _validEmail(String v) => RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(v);
 
   bool _setEquals(Set<String> a, Set<String> b) =>
       a.length == b.length && a.containsAll(b);
@@ -165,35 +295,130 @@ class _EditUserPageState extends State<EditUserPage> {
   bool get _dirty =>
       _role != _role0 ||
       (_isUser && !_setEquals(_selectedManagers, _managers0)) ||
-      !_setEquals(_selectedPerms, _perms0);
+      !_setEquals(_sel?.selected ?? {}, _perms0) ||
+      !_setEquals(_selectedTags, _tags0) ||
+      _name.text != _name0 ||
+      _email.text != _email0 ||
+      _phone.text != _phone0 ||
+      _password.text.isNotEmpty ||
+      _jobLevelId != _jobLevelId0 ||
+      _reportsToUserId != _reportsToUserId0;
 
   bool get _managerMissing => _isUser && _selectedManagers.isEmpty;
 
-  int get _totalPerms => _catalog.fold(0, (s, e) => s + e.value.length);
+  /// Permissões efetivas (proprietário travado mantém as que já tem).
+  bool get _permissionsMissing {
+    final sel = _sel;
+    if (sel == null) return false;
+    if (sel.ownerLocked) return _perms0.isEmpty;
+    return sel.selected.isEmpty;
+  }
+
+  void _onRoleChanged(String r) {
+    setState(() {
+      _role = r;
+      _sel?.setRole(r);
+    });
+  }
+
+  /// `validateForm` do web — devolve a primeira mensagem de erro.
+  String? _validate() {
+    final errors = <String>[];
+    _nameError = null;
+    _emailError = _emailError == 'Email já está em uso' ? _emailError : null;
+    _passwordError = null;
+
+    if (_name.text.trim().isEmpty) {
+      _nameError = 'Nome é obrigatório';
+      errors.add(_nameError!);
+    }
+    final email = _email.text.trim();
+    if (email.isEmpty) {
+      _emailError = 'Email é obrigatório';
+      errors.add(_emailError!);
+    } else if (!_validEmail(email)) {
+      _emailError = 'Email inválido';
+      errors.add(_emailError!);
+    }
+    if (_password.text.isNotEmpty && _password.text.length < 6) {
+      _passwordError = 'Senha deve ter pelo menos 6 caracteres';
+      errors.add(_passwordError!);
+    }
+    if (_managerMissing) {
+      errors.add(
+        'Gestor é obrigatório para usuários com perfil Colaborador. Selecione ao menos um gestor.',
+      );
+    }
+    if (_role == 'admin' && _role0 != 'admin' && !_elevatedActor) {
+      errors.add(
+        'Apenas Administrador ou Master podem definir a função Proprietário.',
+      );
+    }
+    if (_permissionsMissing) {
+      errors.add('É obrigatório selecionar pelo menos 1 permissão');
+    }
+    _sel?.mergeFixed();
+    if (errors.isEmpty) return null;
+    return errors.length == 1
+        ? errors.first
+        : '${errors.first} (${errors.length} campos precisam ser corrigidos)';
+  }
 
   Future<void> _save() async {
-    if (_saving) return;
-    if (_managerMissing) {
-      _snack('Selecione ao menos um gestor para o corretor.', error: true);
+    if (_saving || !_dirty) return;
+    final problem = _validate();
+    if (problem != null) {
+      setState(() {});
+      _snack(problem, error: true);
       return;
     }
-    if (!_dirty) return;
     setState(() => _saving = true);
 
-    // Acesso ao app é controlado por empresa (mobile_app_access_for_all),
-    // sem toggle individual. Papel / gestores / permissões:
+    // Disponibilidade do email antes de salvar (exclui o próprio usuário).
+    final email = _email.text.trim();
+    final available = await AdminUsersService.instance.validateEmailAvailable(
+      email,
+      excludeUserId: widget.user.id,
+    );
+    if (!mounted) return;
+    if (available == false) {
+      setState(() {
+        _saving = false;
+        _emailError = 'Email já está em uso';
+      });
+      _snack('Email já está em uso por outro usuário.', error: true);
+      return;
+    }
+
+    final sel = _sel;
     final res = await AdminUsersService.instance.updateUser(
       widget.user.id,
+      name: _name.text.trim(),
+      email: email,
+      phone: _phone.text != _phone0 ? _phone.text.trim() : null,
+      password: _password.text.isNotEmpty ? _password.text : null,
       role: _role != _role0 ? _role : null,
       managerIds: _isUser ? _selectedManagers.toList() : null,
-      permissionIds: _selectedPerms.toList(),
+      // Proprietário: só o master altera as permissões — não envia.
+      permissionIds:
+          sel == null || sel.ownerLocked ? null : sel.idsForSave(),
+      tagIds: _selectedTags.toList(),
+      isAvailableForPublicSite: _user.isAvailableForPublicSite,
+      includeHierarchy: _elevatedActor,
+      jobLevelId: _jobLevelId,
+      reportsToUserId: _reportsToUserId,
     );
     if (!mounted) return;
     setState(() => _saving = false);
     if (res.success) {
+      // Permissões do próprio usuário mudaram → recarrega.
+      if (ModuleAccessService.instance.userId == widget.user.id) {
+        await ModuleAccessService.instance.refreshPermissions();
+      }
+      if (!mounted) return;
       Navigator.of(context).pop(true);
     } else {
-      _snack(res.message ?? 'Falha ao salvar.', error: true);
+      _snack(res.message ?? 'Erro ao atualizar usuário', error: true);
     }
   }
 
@@ -225,276 +450,266 @@ class _EditUserPageState extends State<EditUserPage> {
 
   // ─── Conteúdo ──────────────────────────────────────────────────────────
 
+  InputDecoration _dec(
+    String label, {
+    String? hint,
+    String? errorText,
+    Widget? prefixIcon,
+    Widget? suffixIcon,
+  }) =>
+      InputDecoration(
+        labelText: label,
+        hintText: hint,
+        errorText: errorText,
+        errorMaxLines: 2,
+        prefixIcon: prefixIcon,
+        suffixIcon: suffixIcon,
+        filled: true,
+        fillColor: ThemeHelpers.cardBackgroundColor(context),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+          ),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: _accent, width: 1.6),
+        ),
+      );
+
+  /// Duas colunas quando cabe (largura e escala de fonte); senão empilha.
+  Widget _twoCols(Widget a, Widget b) {
+    return LayoutBuilder(
+      builder: (context, c) {
+        final fits = c.maxWidth >= 360 &&
+            MediaQuery.textScalerOf(context).scale(14) <= 16;
+        if (!fits) {
+          return Column(children: [a, const SizedBox(height: 12), b]);
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: a),
+            const SizedBox(width: 10),
+            Expanded(child: b),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildContent() {
+    final sel = _sel;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
     return ListView(
       padding: const EdgeInsets.fromLTRB(_padH, 14, _padH, 20),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       children: [
         _FlushHero(user: _user, role: _role, accent: _accent),
+        const SizedBox(height: _gap),
+        _SectionLabel(
+          icon: LucideIcons.userRound,
+          label: 'DADOS BÁSICOS',
+          accent: _accent,
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _name,
+          enabled: !_saving,
+          textCapitalization: TextCapitalization.words,
+          onChanged: (_) => setState(() => _nameError = null),
+          decoration: _dec(
+            'Nome completo',
+            hint: 'Ex: Maria Silva',
+            errorText: _nameError,
+          ),
+        ),
+        const SizedBox(height: 12),
+        _twoCols(
+          TextField(
+            controller: _email,
+            focusNode: _emailFocus,
+            enabled: !_saving,
+            keyboardType: TextInputType.emailAddress,
+            autocorrect: false,
+            onChanged: (_) => setState(() => _emailError = null),
+            decoration: _dec(
+              'Email',
+              hint: 'usuario@empresa.com',
+              errorText: _emailError,
+              suffixIcon: _validatingEmail
+                  ? const Padding(
+                      padding: EdgeInsets.all(14),
+                      child: SkeletonBox(width: 16, height: 16, borderRadius: 4),
+                    )
+                  : null,
+            ),
+          ),
+          TextField(
+            controller: _phone,
+            enabled: !_saving,
+            keyboardType: TextInputType.phone,
+            inputFormatters: [PhoneInputFormatter()],
+            onChanged: (_) => setState(() {}),
+            decoration: _dec('Telefone', hint: '(00) 00000-0000'),
+          ),
+        ),
         const SizedBox(height: _gap),
         // Sem título (só "Permissões" tem): o segmented já é autoexplicativo.
         _RoleSegmented(
           current: _role,
           includeMaster: _role0 == 'master',
-          onChanged: (r) => setState(() => _role = r),
+          onChanged: _onRoleChanged,
         ),
         // Gestor responsável: exclusivo de corretor.
         if (_isUser) ...[
           const SizedBox(height: 14),
-          _buildManagerSelector(),
+          UaManagerSelector(
+            managers: _managers,
+            selected: _selectedManagers,
+            missing: _managerMissing,
+            accent: _accent,
+            onAdd: () => showUaManagerSheet(
+              context: context,
+              managers: _managers,
+              selected: _selectedManagers,
+              accent: _accent,
+              onToggle: (id) => setState(() {
+                if (!_selectedManagers.remove(id)) _selectedManagers.add(id);
+              }),
+            ),
+            onRemove: (id) => setState(() => _selectedManagers.remove(id)),
+          ),
         ],
+        // Cargo e superior: só administrador/master alteram (regra do back).
+        if (_elevatedActor) ...[
+          const SizedBox(height: _gap),
+          _SectionLabel(
+            icon: LucideIcons.network,
+            label: 'HIERARQUIA',
+            accent: _accent,
+          ),
+          const SizedBox(height: 12),
+          UaHierarchyFields(
+            jobLevelId: _jobLevelId,
+            reportsToUserId: _reportsToUserId,
+            userId: widget.user.id,
+            accent: _accent,
+            enabled: !_saving,
+            onChanged: (level, superior) => setState(() {
+              _jobLevelId = level;
+              _reportsToUserId = superior;
+            }),
+          ),
+        ],
+        const SizedBox(height: _gap),
+        _SectionLabel(
+          icon: LucideIcons.keyRound,
+          label: 'SEGURANÇA',
+          accent: _accent,
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _password,
+          enabled: !_saving,
+          obscureText: !_showPassword,
+          autocorrect: false,
+          enableSuggestions: false,
+          onChanged: (_) => setState(() => _passwordError = null),
+          decoration: _dec(
+            'Nova senha',
+            hint: 'Deixe em branco para manter a senha atual',
+            errorText: _passwordError,
+            suffixIcon: IconButton(
+              tooltip: _showPassword ? 'Ocultar senha' : 'Mostrar senha',
+              onPressed: () => setState(() => _showPassword = !_showPassword),
+              icon: Icon(
+                _showPassword ? LucideIcons.eyeOff : LucideIcons.eye,
+                size: 18,
+                color: secondary,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: _gap),
+        _SectionLabel(
+          icon: LucideIcons.tag,
+          label: 'TAGS',
+          accent: _accent,
+        ),
+        const SizedBox(height: 12),
+        UaTagSelector(
+          tags: _tags,
+          selected: _selectedTags,
+          maxTags: 10,
+          accent: _accent,
+          loading: _tagsLoading,
+          enabled: !_saving,
+          onToggle: (id) => setState(() {
+            if (!_selectedTags.remove(id)) _selectedTags.add(id);
+          }),
+        ),
         const SizedBox(height: _gap),
         _SectionLabel(
           icon: LucideIcons.shieldCheck,
           label: 'PERMISSÕES',
           accent: _accent,
-          trailing: _CountPill(
-            text: '${_selectedPerms.length}/$_totalPerms',
-            color: _accent,
-          ),
+          trailing: sel == null
+              ? null
+              : _CountPill(
+                  text: '${sel.selected.length}/${sel.visibleTotal}',
+                  color: _accent,
+                ),
         ),
         const SizedBox(height: 11),
-        if (_isPrivileged) ...[
+        if (sel != null && sel.ownerLocked) ...[
+          const UaNoticeBanner(
+            notice: PermissionNotice(
+              'Apenas o usuário master pode alterar as permissões do proprietário.',
+            ),
+          ),
+          const SizedBox(height: 11),
+        ] else if (_isPrivileged) ...[
           _PrivilegedNote(role: _role),
           const SizedBox(height: 11),
         ],
-        if (_error != null && _catalog.isEmpty)
+        if (_permissionsMissing) ...[
+          const UaNoticeBanner(
+            notice: PermissionNotice(
+              'É obrigatório selecionar pelo menos 1 permissão',
+            ),
+          ),
+          const SizedBox(height: 11),
+        ],
+        if (sel == null)
           _ErrorInline(
-            message: _error!,
+            message: _error ?? 'Não foi possível carregar as permissões.',
             statusCode: _errorStatus,
             error: _errorRaw,
             onRetry: _bootstrap,
           )
         else
-          _buildPermissionGrid(),
-      ],
-    );
-  }
-
-  // ─── Gestor ─────────────────────────────────────────────────────────────
-
-  Widget _buildManagerSelector() {
-    final selected = _managers.where((m) => _selectedManagers.contains(m.id))
-        .toList()
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    final unknown = _selectedManagers
-        .where((id) => _managers.every((m) => m.id != id))
-        .toList();
-    final empty = selected.isEmpty && unknown.isEmpty;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Botão de adicionar SEMPRE no topo da seção.
-        _AddGestorButton(
-          missing: _managerMissing,
-          accent: _accent,
-          onTap: _openManagerSheet,
-        ),
-        if (empty && _managerMissing) ...[
-          const SizedBox(height: 7),
-          Text(
-            'Obrigatório para corretores — selecione ao menos um gestor.',
-            style: TextStyle(
-              fontSize: 11.5,
-              fontWeight: FontWeight.w600,
-              color: AppColors.status.error,
-            ),
-          ),
-        ],
-        if (!empty) ...[
-          const SizedBox(height: 10),
-          // Chips horizontais (wrap), ordenados.
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final m in selected)
-                _ManagerChip(
-                  name: m.name,
-                  avatarUrl: m.avatar,
-                  accent: _accent,
-                  onRemove: () =>
-                      setState(() => _selectedManagers.remove(m.id)),
-                ),
-              for (final id in unknown)
-                _ManagerChip(
-                  name: 'Gestor',
-                  avatarUrl: null,
-                  accent: _accent,
-                  onRemove: () => setState(() => _selectedManagers.remove(id)),
-                ),
-            ],
-          ),
-        ],
-      ],
-    );
-  }
-
-  Future<void> _openManagerSheet() async {
-    final searchCtrl = TextEditingController();
-    String q = '';
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setSheet) {
-            final filtered = _managers.where((m) {
-              if (q.isEmpty) return true;
-              return m.name.toLowerCase().contains(q) ||
-                  m.email.toLowerCase().contains(q);
-            }).toList();
-            return _SheetShell(
-              title: 'Gestor responsável',
-              subtitle: 'Toque para vincular ou remover.',
+          UaPermissionGrid(
+            selection: sel,
+            accent: _accent,
+            horizontalPadding: _padH,
+            onOpenCategory: (category, perms) => showUaPermissionCategorySheet(
+              context: context,
+              selection: sel,
+              category: category,
+              perms: perms,
               accent: _accent,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _SheetSearch(
-                    controller: searchCtrl,
-                    accent: _accent,
-                    onChanged: (v) => setSheet(() => q = v.trim().toLowerCase()),
-                  ),
-                  const SizedBox(height: 8),
-                  Flexible(
-                    child: filtered.isEmpty
-                        ? Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 28),
-                            child: Text(
-                              'Nenhum gestor encontrado.',
-                              style: TextStyle(
-                                color: ThemeHelpers.textSecondaryColor(ctx),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          )
-                        : ListView.separated(
-                            shrinkWrap: true,
-                            itemCount: filtered.length,
-                            separatorBuilder: (_, _) => const SizedBox(height: 6),
-                            itemBuilder: (_, i) {
-                              final m = filtered[i];
-                              final on = _selectedManagers.contains(m.id);
-                              return _ManagerRow(
-                                user: m,
-                                selected: on,
-                                accent: _accent,
-                                onTap: () {
-                                  setState(() {
-                                    if (on) {
-                                      _selectedManagers.remove(m.id);
-                                    } else {
-                                      _selectedManagers.add(m.id);
-                                    }
-                                  });
-                                  setSheet(() {});
-                                },
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-    searchCtrl.dispose();
-  }
-
-  // ─── Permissões (grade → painel focado) ───────────────────────────────────
-
-  Widget _buildPermissionGrid() {
-    final w = (MediaQuery.sizeOf(context).width - (_padH * 2) - 12) / 2;
-    return Wrap(
-      spacing: 12,
-      runSpacing: 12,
-      children: [
-        for (final entry in _catalog)
-          SizedBox(
-            width: w,
-            child: _CategoryTile(
-              category: entry.key,
-              perms: entry.value,
-              selected: _selectedPerms,
-              accent: _accent,
-              onTap: () => _openCategorySheet(entry.key, entry.value),
+              onChanged: () => setState(() {}),
             ),
           ),
       ],
-    );
-  }
-
-  Future<void> _openCategorySheet(
-      String category, List<UserPermission> perms) async {
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setSheet) {
-            final ids = perms.map((p) => p.id).toSet();
-            final allOn = ids.every(_selectedPerms.contains);
-            final active = perms.where((p) => _selectedPerms.contains(p.id))
-                .length;
-            return _SheetShell(
-              title: PermissionMeta.categoryLabel(category),
-              subtitle: '$active de ${perms.length} ativas',
-              accent: _accent,
-              icon: PermissionMeta.categoryIcon(category),
-              trailing: TextButton.icon(
-                onPressed: () {
-                  setState(() {
-                    if (allOn) {
-                      _selectedPerms.removeAll(ids);
-                    } else {
-                      _selectedPerms.addAll(ids);
-                    }
-                  });
-                  setSheet(() {});
-                },
-                style: TextButton.styleFrom(foregroundColor: _accent),
-                icon: Icon(
-                    allOn ? LucideIcons.squareCheckBig : LucideIcons.square,
-                    size: 16),
-                label: Text(allOn ? 'Limpar' : 'Tudo'),
-              ),
-              child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: perms.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 6),
-                itemBuilder: (_, i) {
-                  final p = perms[i];
-                  final on = _selectedPerms.contains(p.id);
-                  return _PermRow(
-                    label: PermissionMeta.actionLabel(p.name),
-                    description: PermissionMeta.permissionDescription(
-                      p.name,
-                      fallback: p.description,
-                    ),
-                    selected: on,
-                    accent: _accent,
-                    onTap: () {
-                      setState(() {
-                        if (on) {
-                          _selectedPerms.remove(p.id);
-                        } else {
-                          _selectedPerms.add(p.id);
-                        }
-                      });
-                      setSheet(() {});
-                    },
-                  );
-                },
-              ),
-            );
-          },
-        );
-      },
     );
   }
 
@@ -546,6 +761,8 @@ class _EditUserPageState extends State<EditUserPage> {
                     : blocked
                         ? 'Selecione um gestor'
                         : (_dirty ? 'Salvar alterações' : 'Tudo salvo'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                     fontWeight: FontWeight.w900,
                     fontSize: 14.5,
@@ -687,7 +904,7 @@ class _FlushHero extends StatelessWidget {
             width: 60,
             height: 60,
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => initialsFallback,
+            errorBuilder: (_, _, _) => initialsFallback,
             loadingBuilder: (_, child, prog) =>
                 prog == null ? child : initialsFallback,
           )
@@ -1049,583 +1266,6 @@ class _RoleChip extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-// ───────────────────────────────────────────────────────────────────────────
-// Gestor — chips + picker
-// ───────────────────────────────────────────────────────────────────────────
-
-/// Botão "Adicionar gestor" — fica sempre no topo da seção. Pill horizontal;
-/// tom de alerta (vermelho) quando obrigatório e ainda sem gestor.
-class _AddGestorButton extends StatelessWidget {
-  const _AddGestorButton({
-    required this.missing,
-    required this.accent,
-    required this.onTap,
-  });
-  final bool missing;
-  final Color accent;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final tone = missing ? AppColors.status.error : accent;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-        decoration: BoxDecoration(
-          color: tone.withValues(alpha: missing ? 0.07 : 0.08),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: tone.withValues(alpha: 0.4)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.userPlus, size: 15, color: tone),
-            const SizedBox(width: 7),
-            Text(
-              'Adicionar gestor',
-              style: TextStyle(
-                  color: tone, fontWeight: FontWeight.w800, fontSize: 12.5),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Chip horizontal de um gestor vinculado — avatar + primeiro nome + remover.
-class _ManagerChip extends StatelessWidget {
-  const _ManagerChip(
-      {required this.name,
-      required this.avatarUrl,
-      required this.accent,
-      required this.onRemove});
-  final String name;
-  final String? avatarUrl;
-  final Color accent;
-  final VoidCallback onRemove;
-
-  String get _first => name.trim().split(RegExp(r'\s+')).first;
-  String get _initials {
-    final p = name.trim().split(RegExp(r'\s+'));
-    if (p.isEmpty || p.first.isEmpty) return '?';
-    if (p.length == 1) return p.first.substring(0, 1).toUpperCase();
-    return '${p.first[0]}${p.last[0]}'.toUpperCase();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final hasPhoto = (avatarUrl ?? '').trim().isNotEmpty;
-    final initialsBox = Container(
-      width: 24,
-      height: 24,
-      color: accent,
-      alignment: Alignment.center,
-      child: Text(
-        _initials,
-        style: const TextStyle(
-            color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.w900),
-      ),
-    );
-    return Container(
-      padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
-      decoration: BoxDecoration(
-        color: accent.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: accent.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ClipOval(
-            child: SizedBox(
-              width: 24,
-              height: 24,
-              child: hasPhoto
-                  ? Image.network(
-                      avatarUrl!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => initialsBox,
-                      loadingBuilder: (_, child, prog) =>
-                          prog == null ? child : initialsBox,
-                    )
-                  : initialsBox,
-            ),
-          ),
-          const SizedBox(width: 7),
-          Text(
-            _first,
-            style: TextStyle(
-                color: accent, fontWeight: FontWeight.w800, fontSize: 12.5),
-          ),
-          const SizedBox(width: 6),
-          GestureDetector(
-            onTap: onRemove,
-            child: Icon(LucideIcons.x, size: 14, color: accent),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ManagerRow extends StatelessWidget {
-  const _ManagerRow({
-    required this.user,
-    required this.selected,
-    required this.accent,
-    required this.onTap,
-  });
-  final AdminUser user;
-  final bool selected;
-  final Color accent;
-  final VoidCallback onTap;
-
-  String get _initials {
-    final p = user.name.trim().split(RegExp(r'\s+'));
-    if (p.isEmpty || p.first.isEmpty) return '?';
-    if (p.length == 1) return p.first.substring(0, 1).toUpperCase();
-    return '${p.first[0]}${p.last[0]}'.toUpperCase();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final textColor = ThemeHelpers.textColor(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: selected ? accent.withValues(alpha: 0.08) : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected
-                ? accent.withValues(alpha: 0.4)
-                : ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
-          ),
-        ),
-        child: Row(
-          children: [
-            Builder(builder: (_) {
-              final hasPhoto = (user.avatar ?? '').trim().isNotEmpty;
-              final initialsBox = Container(
-                width: 34,
-                height: 34,
-                color: selected ? accent : secondary.withValues(alpha: 0.25),
-                alignment: Alignment.center,
-                child: Text(
-                  _initials,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w900),
-                ),
-              );
-              return ClipOval(
-                child: SizedBox(
-                  width: 34,
-                  height: 34,
-                  child: hasPhoto
-                      ? Image.network(
-                          user.avatar!,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => initialsBox,
-                          loadingBuilder: (_, child, prog) =>
-                              prog == null ? child : initialsBox,
-                        )
-                      : initialsBox,
-                ),
-              );
-            }),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    user.name,
-                    style: TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w800,
-                        color: textColor),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    '${user.roleLabel} · ${user.email}',
-                    style: TextStyle(fontSize: 11.5, color: secondary),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Icon(
-              selected ? LucideIcons.circleCheckBig : LucideIcons.circle,
-              size: 20,
-              color: selected ? accent : secondary.withValues(alpha: 0.6),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ───────────────────────────────────────────────────────────────────────────
-// Permissões — tile de categoria + linha no painel focado
-// ───────────────────────────────────────────────────────────────────────────
-
-class _CategoryTile extends StatelessWidget {
-  const _CategoryTile({
-    required this.category,
-    required this.perms,
-    required this.selected,
-    required this.accent,
-    required this.onTap,
-  });
-
-  final String category;
-  final List<UserPermission> perms;
-  final Set<String> selected;
-  final Color accent;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final textColor = ThemeHelpers.textColor(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    final total = perms.length;
-    final active = perms.where((p) => selected.contains(p.id)).length;
-    final frac = total == 0 ? 0.0 : active / total;
-    final on = active > 0;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: on ? accent.withValues(alpha: 0.05) : Colors.transparent,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: on
-                ? accent.withValues(alpha: 0.4)
-                : ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: on
-                        ? accent.withValues(alpha: 0.16)
-                        : ThemeHelpers.borderColor(context).withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(9),
-                  ),
-                  child: Icon(PermissionMeta.categoryIcon(category),
-                      size: 16, color: on ? accent : secondary),
-                ),
-                const Spacer(),
-                if (on)
-                  Text(
-                    '$active/$total',
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w900,
-                        color: accent,
-                        fontFeatures: const [FontFeature.tabularFigures()]),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 9),
-            Text(
-              PermissionMeta.categoryLabel(category),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                color: textColor,
-                height: 1.15,
-                letterSpacing: -0.2,
-              ),
-            ),
-            const SizedBox(height: 8),
-            // Barra de progresso fina.
-            ClipRRect(
-              borderRadius: BorderRadius.circular(2),
-              child: LinearProgressIndicator(
-                value: frac,
-                minHeight: 3,
-                backgroundColor:
-                    ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
-                valueColor: AlwaysStoppedAnimation(accent),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              on ? '$active ativas' : 'nenhuma',
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w600,
-                color: on ? accent : secondary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PermRow extends StatelessWidget {
-  const _PermRow({
-    required this.label,
-    required this.description,
-    required this.selected,
-    required this.accent,
-    required this.onTap,
-  });
-  final String label;
-  final String? description;
-  final bool selected;
-  final Color accent;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final textColor = ThemeHelpers.textColor(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(11),
-        decoration: BoxDecoration(
-          color: selected ? accent.withValues(alpha: 0.08) : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected
-                ? accent.withValues(alpha: 0.4)
-                : ThemeHelpers.borderColor(context).withValues(alpha: 0.5),
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 22,
-              height: 22,
-              decoration: BoxDecoration(
-                color: selected ? accent : Colors.transparent,
-                borderRadius: BorderRadius.circular(7),
-                border: Border.all(
-                  color: selected
-                      ? accent
-                      : ThemeHelpers.borderColor(context).withValues(alpha: 0.8),
-                  width: 1.6,
-                ),
-              ),
-              child: selected
-                  ? const Icon(Icons.check_rounded, size: 15, color: Colors.white)
-                  : null,
-            ),
-            const SizedBox(width: 11),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w800,
-                      color: selected ? textColor : secondary,
-                    ),
-                  ),
-                  if ((description ?? '').isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      description!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11, color: secondary),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ───────────────────────────────────────────────────────────────────────────
-// Sheet shell + busca (reuso entre gestor e permissões)
-// ───────────────────────────────────────────────────────────────────────────
-
-class _SheetShell extends StatelessWidget {
-  const _SheetShell({
-    required this.title,
-    required this.subtitle,
-    required this.accent,
-    required this.child,
-    this.icon,
-    this.trailing,
-  });
-
-  final String title;
-  final String subtitle;
-  final Color accent;
-  final Widget child;
-  final IconData? icon;
-  final Widget? trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    final textColor = ThemeHelpers.textColor(context);
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Container(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.sizeOf(context).height * 0.8,
-      ),
-      decoration: BoxDecoration(
-        color: ThemeHelpers.cardBackgroundColor(context),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border.all(
-            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.5)),
-      ),
-      padding: EdgeInsets.fromLTRB(
-          18, 10, 18, 16 + MediaQuery.paddingOf(context).bottom),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(
-            child: Container(
-              width: 38,
-              height: 4,
-              decoration: BoxDecoration(
-                color: ThemeHelpers.borderColor(context),
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              if (icon != null) ...[
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(11),
-                  ),
-                  child: Icon(icon, size: 18, color: accent),
-                ),
-                const SizedBox(width: 11),
-              ],
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                        color: textColor,
-                        letterSpacing: -0.3,
-                      ),
-                    ),
-                    const SizedBox(height: 1),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: secondary),
-                    ),
-                  ],
-                ),
-              ),
-              ?trailing,
-            ],
-          ),
-          const SizedBox(height: 14),
-          Flexible(child: child),
-        ],
-      ),
-    );
-  }
-}
-
-class _SheetSearch extends StatelessWidget {
-  const _SheetSearch({
-    required this.controller,
-    required this.accent,
-    required this.onChanged,
-  });
-  final TextEditingController controller;
-  final Color accent;
-  final ValueChanged<String> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final secondary = ThemeHelpers.textSecondaryColor(context);
-    return Container(
-      height: 46,
-      decoration: BoxDecoration(
-        color: ThemeHelpers.borderLightColor(context).withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          const SizedBox(width: 12),
-          Icon(LucideIcons.search, size: 16, color: secondary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              cursorColor: accent,
-              onChanged: onChanged,
-              style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w700,
-                color: ThemeHelpers.textColor(context),
-              ),
-              decoration: InputDecoration(
-                hintText: 'Buscar…',
-                hintStyle: TextStyle(
-                    color: secondary.withValues(alpha: 0.7),
-                    fontWeight: FontWeight.w500,
-                    fontSize: 13),
-                filled: false,
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                isDense: true,
-                contentPadding: EdgeInsets.zero,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-        ],
       ),
     );
   }

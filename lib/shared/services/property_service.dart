@@ -333,11 +333,24 @@ class NamedEntityWithAddress {
   }
 }
 
-/// Tipos de propriedade
+/// Tipos de propriedade — os 16 do back (`imobx/src/entities/property.entity.ts`),
+/// na mesma ordem e com os mesmos rótulos de `PropertyTypeOptions` do web
+/// (`imobx-front/src/types/property.ts`).
 enum PropertyType {
   house('house', 'Casa'),
+  townhouse('townhouse', 'Sobrado'),
   apartment('apartment', 'Apartamento'),
+  penthouse('penthouse', 'Cobertura'),
+  studio('studio', 'Studio'),
+  loft('loft', 'Loft'),
+  kitnet('kitnet', 'Kitnet'),
+  duplex('duplex', 'Duplex'),
+  triplex('triplex', 'Triplex'),
   commercial('commercial', 'Comercial'),
+  office('office', 'Sala Comercial'),
+  store('store', 'Loja'),
+  warehouse('warehouse', 'Galpão'),
+  farm('farm', 'Fazenda'),
   land('land', 'Terreno'),
   rural('rural', 'Rural');
 
@@ -348,26 +361,50 @@ enum PropertyType {
 
   static PropertyType? fromString(String? value) {
     if (value == null) return null;
-    try {
-      return PropertyType.values.firstWhere((e) => e.value == value);
-    } catch (e) {
-      return null;
+    final v = value.trim().toLowerCase();
+    if (v.isEmpty) return null;
+    for (final e in PropertyType.values) {
+      if (e.value == v) return e;
     }
+    return null;
+  }
+
+  /// Rótulo de um valor cru vindo da API — cai no próprio valor quando o
+  /// tipo não é conhecido (mesma regra do `translatePropertyType` do web).
+  static String labelOf(String? raw) {
+    final t = fromString(raw);
+    if (t != null) return t.label;
+    return raw?.trim() ?? '';
   }
 }
 
-/// Status de propriedade — alinhado a `PropertyStatus` do backend (`imobx`).
+/// Status de propriedade — os 17 do backend (`imobx`), na ordem e com os
+/// rótulos de `PropertyStatusOptions` do web.
 enum PropertyStatus {
   draft('draft', 'Rascunho'),
-  pendingApproval('pending_approval', 'Aguardando aprovação'),
   pendingOwnerAuthorization(
     'pending_owner_authorization',
     'Aguardando autorização do proprietário',
   ),
+  pendingApproval('pending_approval', 'Aguardando aprovação'),
+  pendingPublication(
+    'pending_publication',
+    'Aguardando publicação no site',
+  ),
   available('available', 'Disponível'),
+  // Funil de locação (etapas entre Disponível e Locado).
+  inService('in_service', 'Em Atendimento'),
+  visitScheduled('visit_scheduled', 'Visita Agendada'),
+  inVisit('in_visit', 'Em Visita'),
+  inNegotiation('in_negotiation', 'Em Negociação'),
+  proposalReceived('proposal_received', 'Proposta Recebida'),
+  registrationAnalysis('registration_analysis', 'Análise Cadastral'),
+  documentation('documentation', 'Documentação'),
+  contractDrafting('contract_drafting', 'Contrato em Elaboração'),
+  signature('signature', 'Assinatura'),
   rented('rented', 'Alugado'),
   sold('sold', 'Vendido'),
-  maintenance('maintenance', 'Em Manutenção');
+  maintenance('maintenance', 'Manutenção');
 
   final String value;
   final String label;
@@ -378,10 +415,35 @@ enum PropertyStatus {
     if (value == null) return null;
     final v = value.trim().toLowerCase();
     if (v.isEmpty) return null;
-    try {
-      return PropertyStatus.values.firstWhere((e) => e.value == v);
-    } catch (e) {
-      return null;
+    for (final e in PropertyStatus.values) {
+      if (e.value == v) return e;
+    }
+    return null;
+  }
+
+  /// Rótulo de um valor cru vindo da API — cai no próprio valor quando o
+  /// status não é conhecido (mesma regra do `translatePropertyStatus` do web).
+  static String labelOf(String? raw) {
+    final s = fromString(raw);
+    if (s != null) return s.label;
+    return raw?.trim() ?? '';
+  }
+
+  /// Etapa do funil de locação (aba "Em negociação" do web).
+  bool get isRentalFunnel {
+    switch (this) {
+      case PropertyStatus.inService:
+      case PropertyStatus.visitScheduled:
+      case PropertyStatus.inVisit:
+      case PropertyStatus.inNegotiation:
+      case PropertyStatus.proposalReceived:
+      case PropertyStatus.registrationAnalysis:
+      case PropertyStatus.documentation:
+      case PropertyStatus.contractDrafting:
+      case PropertyStatus.signature:
+        return true;
+      default:
+        return false;
     }
   }
 
@@ -395,8 +457,28 @@ enum PropertyStatus {
         return 'Aguardando aprov.';
       case PropertyStatus.pendingOwnerAuthorization:
         return 'Aguard. proprietário';
+      case PropertyStatus.pendingPublication:
+        return 'Aguard. publicação';
       case PropertyStatus.available:
         return 'Disponível';
+      case PropertyStatus.inService:
+        return 'Em atendimento';
+      case PropertyStatus.visitScheduled:
+        return 'Visita agendada';
+      case PropertyStatus.inVisit:
+        return 'Em visita';
+      case PropertyStatus.inNegotiation:
+        return 'Em negociação';
+      case PropertyStatus.proposalReceived:
+        return 'Proposta recebida';
+      case PropertyStatus.registrationAnalysis:
+        return 'Análise cadastral';
+      case PropertyStatus.documentation:
+        return 'Documentação';
+      case PropertyStatus.contractDrafting:
+        return 'Contrato';
+      case PropertyStatus.signature:
+        return 'Assinatura';
       case PropertyStatus.rented:
         return 'Alugado';
       case PropertyStatus.sold:
@@ -415,6 +497,14 @@ class Property {
   final String description;
   final PropertyType type;
   final PropertyStatus status;
+
+  /// Valor cru de `type` como veio da API. Quando o back devolve um tipo que o
+  /// app não conhece, `type` cai no fallback só para a UI, e este campo guarda o
+  /// valor real: a edição NUNCA reenvia o fallback no PATCH (paridade de dados).
+  final String typeRaw;
+
+  /// Valor cru de `status` como veio da API (mesma regra de [typeRaw]).
+  final String statusRaw;
   final String address;
   final String street;
   final String number;
@@ -532,6 +622,8 @@ class Property {
     required this.description,
     required this.type,
     required this.status,
+    String? typeRaw,
+    String? statusRaw,
     required this.address,
     required this.street,
     required this.number,
@@ -605,7 +697,25 @@ class Property {
     this.mcmvSubsidy,
     this.mcmvDocumentation,
     this.mcmvNotes,
-  });
+  })  : typeRaw = (typeRaw == null || typeRaw.trim().isEmpty)
+            ? type.value
+            : typeRaw.trim().toLowerCase(),
+        statusRaw = (statusRaw == null || statusRaw.trim().isEmpty)
+            ? status.value
+            : statusRaw.trim().toLowerCase();
+
+  /// `true` quando o tipo cru é um dos 16 conhecidos (o PATCH só envia `type`
+  /// nesse caso).
+  bool get typeIsKnown => PropertyType.fromString(typeRaw) != null;
+
+  /// `true` quando o status cru é um dos 17 conhecidos.
+  bool get statusIsKnown => PropertyStatus.fromString(statusRaw) != null;
+
+  /// Rótulo do tipo — do enum quando conhecido, senão o próprio valor cru.
+  String get typeLabel => PropertyType.labelOf(typeRaw);
+
+  /// Rótulo do status — do enum quando conhecido, senão o próprio valor cru.
+  String get statusLabel => PropertyStatus.labelOf(statusRaw);
 
   factory Property.fromJson(Map<String, dynamic> json) {
     // Helper para converter valores que podem vir como String ou num
@@ -648,8 +758,12 @@ class Property {
       code: json['code']?.toString(),
       title: json['title']?.toString() ?? '',
       description: json['description']?.toString() ?? '',
+      // Tipo/status desconhecidos: o enum recebe um fallback só para a UI e o
+      // valor real fica em typeRaw/statusRaw (nunca regravado pelo app).
       type: PropertyType.fromString(json['type']?.toString()) ?? PropertyType.house,
       status: PropertyStatus.fromString(json['status']?.toString()) ?? PropertyStatus.draft,
+      typeRaw: json['type']?.toString(),
+      statusRaw: json['status']?.toString(),
       address: json['address']?.toString() ?? '',
       street: json['street']?.toString() ?? '',
       number: json['number']?.toString() ?? '',
@@ -1243,6 +1357,81 @@ class PropertyFilters {
   }
 }
 
+/// Imóvel que coincide com o endereço de um cadastro novo — espelho de
+/// `PropertyDuplicateCandidate` do back (`POST /properties/duplicate-check` e
+/// corpo do 409 `PROPERTY_DUPLICATE_DETECTED`).
+class PropertyDuplicateCandidate {
+  final String id;
+  final String? code;
+  final String title;
+  final String street;
+  final String number;
+  final String neighborhood;
+  final String city;
+  final String state;
+  final String? propertyUnity;
+  final String? complement;
+
+  const PropertyDuplicateCandidate({
+    required this.id,
+    this.code,
+    required this.title,
+    required this.street,
+    required this.number,
+    required this.neighborhood,
+    required this.city,
+    required this.state,
+    this.propertyUnity,
+    this.complement,
+  });
+
+  factory PropertyDuplicateCandidate.fromJson(Map<String, dynamic> json) {
+    String? opt(dynamic v) {
+      final s = v?.toString().trim() ?? '';
+      return s.isEmpty ? null : s;
+    }
+
+    return PropertyDuplicateCandidate(
+      id: _readAnyId(json),
+      code: opt(json['code']),
+      title: json['title']?.toString().trim() ?? '',
+      street: json['street']?.toString().trim() ?? '',
+      number: json['number']?.toString().trim() ?? '',
+      neighborhood: json['neighborhood']?.toString().trim() ?? '',
+      city: json['city']?.toString().trim() ?? '',
+      state: json['state']?.toString().trim() ?? '',
+      propertyUnity: opt(json['propertyUnity']),
+      complement: opt(json['complement']),
+    );
+  }
+
+  /// Lista vinda da API (`duplicates`), ignorando itens sem id.
+  static List<PropertyDuplicateCandidate> listFrom(dynamic raw) {
+    if (raw is! List) return const [];
+    final out = <PropertyDuplicateCandidate>[];
+    for (final item in raw) {
+      if (item is Map) {
+        final c = PropertyDuplicateCandidate.fromJson(
+          Map<String, dynamic>.from(item),
+        );
+        if (c.id.isNotEmpty) out.add(c);
+      }
+    }
+    return out;
+  }
+}
+
+/// Resposta de `POST /properties/duplicate-check`.
+class PropertyDuplicateCheckResult {
+  final bool hasDuplicate;
+  final List<PropertyDuplicateCandidate> duplicates;
+
+  const PropertyDuplicateCheckResult({
+    required this.hasDuplicate,
+    required this.duplicates,
+  });
+}
+
 /// Serviço de Propriedades
 class PropertyService {
   PropertyService._();
@@ -1663,6 +1852,79 @@ class PropertyService {
         statusCode: 0,
       );
     }
+  }
+
+  /// Checagem de duplicidade de endereço antes de cadastrar — mesmo endpoint e
+  /// mesmo corpo do `checkDuplicateForCreation` do web (`street`, `number`,
+  /// `neighborhood`, `city`, `state` e, quando houver, `condominiumId`,
+  /// `propertyUnity`, `complement` (até 100 caracteres) e `type`).
+  Future<ApiResponse<PropertyDuplicateCheckResult>> checkDuplicate(
+    Map<String, dynamic> payload,
+  ) async {
+    try {
+      final response = await _apiService.post<Map<String, dynamic>>(
+        '/properties/duplicate-check',
+        body: payload,
+      );
+      if (response.success && response.data != null) {
+        final root = response.data!;
+        final duplicates =
+            PropertyDuplicateCandidate.listFrom(root['duplicates']);
+        return ApiResponse.success(
+          data: PropertyDuplicateCheckResult(
+            hasDuplicate: root['hasDuplicate'] == true || duplicates.isNotEmpty,
+            duplicates: duplicates,
+          ),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao verificar duplicidade',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_SERVICE] duplicate-check: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// `true` quando o `POST /properties` voltou 409 por duplicidade de
+  /// endereço (`PROPERTY_DUPLICATE_DETECTED`). O filtro global de exceções do
+  /// back devolve só `statusCode`/`errorCode`/`message` — o `code` e a lista
+  /// `duplicates` do `ConflictException` somem no caminho —, então a mensagem
+  /// fixa do back ("… cadastro duplicado.") também identifica o caso.
+  static bool isDuplicateConflict(ApiResponse<dynamic> response) {
+    if (response.success || response.statusCode != 409) return false;
+    const code = 'PROPERTY_DUPLICATE_DETECTED';
+    final body = response.error;
+    if (body is Map) {
+      if (body['code']?.toString() == code ||
+          body['errorCode']?.toString() == code) {
+        return true;
+      }
+      final details = body['details'];
+      if (details is Map && details['code']?.toString() == code) return true;
+    }
+    return (response.message ?? '').toLowerCase().contains('cadastro duplicado');
+  }
+
+  /// Candidatos que vierem no corpo do 409 (raiz ou `details`), se vierem.
+  static List<PropertyDuplicateCandidate> duplicatesFromConflict(
+    ApiResponse<dynamic> response,
+  ) {
+    final body = response.error;
+    if (body is! Map) return const [];
+    final direct = PropertyDuplicateCandidate.listFrom(body['duplicates']);
+    if (direct.isNotEmpty) return direct;
+    final details = body['details'];
+    if (details is Map) {
+      return PropertyDuplicateCandidate.listFrom(details['duplicates']);
+    }
+    return const [];
   }
 
   /// Atualiza propriedade

@@ -140,6 +140,11 @@ class ChatRoom {
   final DateTime createdAt;
   final DateTime updatedAt;
   final bool? isArchived;
+
+  /// Silenciada por mim (`isMutedByMe` do back, 29/09/2026). A sala continua
+  /// na lista, mas mensagem nova não acende o badge — regra do web
+  /// (`useChatUnreadByRoom`); o back já zera o unreadCount dela.
+  final bool? isMuted;
   final int? unreadCount;
 
   ChatRoom({
@@ -155,6 +160,7 @@ class ChatRoom {
     required this.createdAt,
     required this.updatedAt,
     this.isArchived,
+    this.isMuted,
     this.unreadCount,
   });
 
@@ -190,7 +196,17 @@ class ChatRoom {
       updatedAt: DateTime.parse(
         json['updatedAt']?.toString() ?? json['updated_at']?.toString() ?? '',
       ),
-      isArchived: json['isArchived'] as bool? ?? json['is_archived'] as bool?,
+      // 29/09/2026: o back devolve o arquivamento como `isArchivedByMe`
+      // (é por participante, não da sala). Sem ler esse nome, toda sala
+      // chegava com isArchived nulo. `isArchived` fica como fallback.
+      isArchived:
+          json['isArchivedByMe'] as bool? ??
+          json['isArchived'] as bool? ??
+          json['is_archived'] as bool?,
+      isMuted:
+          json['isMutedByMe'] as bool? ??
+          json['isMuted'] as bool? ??
+          json['is_muted'] as bool?,
       unreadCount:
           (json['unreadCount'] as num?)?.toInt() ??
           (json['unread_count'] as num?)?.toInt(),
@@ -212,6 +228,7 @@ class ChatRoom {
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
       if (isArchived != null) 'isArchived': isArchived,
+      if (isMuted != null) 'isMuted': isMuted,
       if (unreadCount != null) 'unreadCount': unreadCount,
     };
   }
@@ -255,6 +272,67 @@ class ChatRoom {
 
     return null;
   }
+
+  /// Cópia com os campos informados trocados (29/09/2026). A tela copiava a
+  /// sala campo a campo em cada evento, e todo campo novo (ex.: [isMuted])
+  /// se perdia na cópia sem ninguém perceber.
+  ChatRoom copyWith({
+    String? name,
+    String? imageUrl,
+    String? lastMessage,
+    DateTime? lastMessageAt,
+    List<ChatParticipant>? participants,
+    DateTime? updatedAt,
+    bool? isArchived,
+    bool? isMuted,
+    int? unreadCount,
+  }) {
+    return ChatRoom(
+      id: id,
+      companyId: companyId,
+      type: type,
+      name: name ?? this.name,
+      createdBy: createdBy,
+      imageUrl: imageUrl ?? this.imageUrl,
+      lastMessage: lastMessage ?? this.lastMessage,
+      lastMessageAt: lastMessageAt ?? this.lastMessageAt,
+      participants: participants ?? this.participants,
+      createdAt: createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      isArchived: isArchived ?? this.isArchived,
+      isMuted: isMuted ?? this.isMuted,
+      unreadCount: unreadCount ?? this.unreadCount,
+    );
+  }
+
+  /// Cópia com o arquivamento definido (29/09/2026): as salas que vêm em
+  /// `archivedRooms` são arquivadas por definição, mesmo que o item não
+  /// traga `isArchivedByMe`.
+  ChatRoom withArchived(bool archived) => copyWith(isArchived: archived);
+}
+
+/// Resultado de GET /chat/rooms (29/09/2026).
+///
+/// Desde 13/05/2026 o back devolve `{ rooms, archivedRooms }` (ativas e
+/// arquivadas por mim) com ETag. O app só aceitava lista e caía em
+/// "Formato de resposta inesperado", quebrando a lista e o badge do chat.
+/// [notModified] = o servidor respondeu 304: as listas vêm vazias e NÃO
+/// devem substituir as que a tela já tem (o web apagava "Arquivadas" assim).
+class ChatRoomsResult {
+  final List<ChatRoom> rooms;
+  final List<ChatRoom> archivedRooms;
+  final bool notModified;
+
+  const ChatRoomsResult({
+    required this.rooms,
+    required this.archivedRooms,
+    this.notModified = false,
+  });
+
+  const ChatRoomsResult.notModified()
+    : rooms = const [],
+      archivedRooms = const [],
+      notModified = true;
 }
 
 /// Mensagem de Chat

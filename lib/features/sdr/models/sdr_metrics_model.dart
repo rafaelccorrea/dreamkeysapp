@@ -56,6 +56,8 @@ class SdrSummary {
     required this.inQualification,
     required this.conversionRate,
     required this.entriesCohort,
+    this.lostByEntry = 0,
+    this.transferredByEntry = 0,
   });
 
   final int totalLeads;
@@ -75,6 +77,13 @@ class SdrSummary {
 
   /// Total real de entradas no período (base do funil por coorte).
   final int entriesCohort;
+
+  /// Perdidos cujo card foi criado no período (leitura por entrada — base do
+  /// funil do web). `lost` é a leitura pela data da perda.
+  final int lostByEntry;
+
+  /// Transferidos cujo lead de origem foi criado no período.
+  final int transferredByEntry;
 
   static const SdrSummary zero = SdrSummary(
     totalLeads: 0,
@@ -99,6 +108,8 @@ class SdrSummary {
       inQualification: _asInt(json['inQualification']),
       conversionRate: _asDouble(json['conversionRate']),
       entriesCohort: _asInt(json['entriesCohort'] ?? json['totalEntries']),
+      lostByEntry: _asInt(json['lostByEntry']),
+      transferredByEntry: _asInt(json['transferredByEntry']),
     );
   }
 }
@@ -349,6 +360,9 @@ class SdrMetrics {
     required this.lossReasons,
     required this.topBrokers,
     this.whatsapp,
+    this.byColumn = const [],
+    this.listTotals = SdrListTotals.zero,
+    this.transferAggregates = SdrTransferAggregates.empty,
   });
 
   final SdrSummary summary;
@@ -361,6 +375,15 @@ class SdrMetrics {
   final List<SdrLossReason> lossReasons;
   final List<SdrTopBroker> topBrokers;
   final SdrWhatsappMetrics? whatsapp;
+
+  /// Leads por coluna do funil SDR (aba Funil do web).
+  final List<SdrColumnMetric> byColumn;
+
+  /// Tamanho real das listas de leads — vem mesmo com `lists=none`.
+  final SdrListTotals listTotals;
+
+  /// Agregados de transferência (também vêm com `lists=none`).
+  final SdrTransferAggregates transferAggregates;
 
   static const SdrMetrics empty = SdrMetrics(
     summary: SdrSummary.zero,
@@ -408,11 +431,236 @@ class SdrMetrics {
           ? SdrWhatsappMetrics.fromJson(
               Map<String, dynamic>.from(json['whatsapp'] as Map))
           : null,
+      byColumn: (_asMapList(json['byColumn'])
+              .map(SdrColumnMetric.fromJson)
+              .toList()
+            ..sort((a, b) => a.position.compareTo(b.position)))
+          .toList(growable: false),
+      listTotals: json['listTotals'] is Map
+          ? SdrListTotals.fromJson(
+              Map<String, dynamic>.from(json['listTotals'] as Map))
+          : SdrListTotals.fromLists(json),
+      transferAggregates: json['transferAggregates'] is Map
+          ? SdrTransferAggregates.fromJson(
+              Map<String, dynamic>.from(json['transferAggregates'] as Map))
+          : SdrTransferAggregates.empty,
     );
   }
 }
 
-/// Equipe (opção do filtro do dashboard). Vem de `GET /teams`.
+/// Funil (projeto do Kanban) — catálogo que traduz equipe em `projectId`.
+/// Só ativos e não pessoais entram (`filterDashboardKanbanProjects` do web).
+class SdrProjectOption {
+  const SdrProjectOption({
+    required this.id,
+    required this.name,
+    this.teamId,
+    this.teamIds = const [],
+  });
+
+  final String id;
+  final String name;
+  final String? teamId;
+
+  /// Equipes vinculadas por compartilhamento (`kanban_project_teams`).
+  final List<String> teamIds;
+
+  /// `projectBelongsToTeams` do web: equipe principal OU compartilhada.
+  bool belongsToAny(Set<String> teams) {
+    if (teams.isEmpty) return false;
+    final primary = teamId?.trim() ?? '';
+    if (primary.isNotEmpty && teams.contains(primary)) return true;
+    return teamIds.any((t) => teams.contains(t.trim()));
+  }
+
+  static SdrProjectOption? tryParse(Map<String, dynamic> json) {
+    final id = _asString(json['id']);
+    if (id.isEmpty) return null;
+    final status = _asString(json['status']).toLowerCase();
+    if (json['isPersonal'] == true) return null;
+    if (status.isNotEmpty && status != 'active') return null;
+    final shared = <String>[];
+    final rawTeams = json['teamIds'];
+    if (rawTeams is List) {
+      for (final t in rawTeams) {
+        final v = t?.toString().trim() ?? '';
+        if (v.isNotEmpty) shared.add(v);
+      }
+    }
+    final teamObjs = json['teams'];
+    if (teamObjs is List) {
+      for (final t in teamObjs) {
+        if (t is Map && t['id'] != null) shared.add(t['id'].toString());
+      }
+    }
+    final team = json['team'];
+    return SdrProjectOption(
+      id: id,
+      name: _asString(json['name'], 'Funil'),
+      teamId: json['teamId']?.toString() ??
+          (team is Map ? team['id']?.toString() : null),
+      teamIds: shared,
+    );
+  }
+}
+
+/// Opção genérica de filtro (campanha, pessoa, tag, mídia).
+class SdrFilterOption {
+  const SdrFilterOption({required this.value, required this.label, this.hint});
+
+  final String value;
+  final String label;
+
+  /// Procedência curta (ex.: "Meta", "Sistema") mostrada no seletor.
+  final String? hint;
+}
+
+/// Leads por coluna do funil (ordenados pela posição da coluna).
+class SdrColumnMetric {
+  const SdrColumnMetric({
+    required this.columnId,
+    required this.columnTitle,
+    required this.position,
+    required this.totalLeads,
+  });
+
+  final String columnId;
+  final String columnTitle;
+  final int position;
+  final int totalLeads;
+
+  factory SdrColumnMetric.fromJson(Map<String, dynamic> json) {
+    return SdrColumnMetric(
+      columnId: _asString(json['columnId']),
+      columnTitle: _asString(json['columnTitle'], 'Coluna'),
+      position: _asInt(json['position']),
+      totalLeads: _asInt(json['totalLeads']),
+    );
+  }
+}
+
+/// Tamanho real das listas de leads (vem mesmo com `lists=none`).
+class SdrListTotals {
+  const SdrListTotals({
+    required this.transferList,
+    required this.lostLeadsList,
+    required this.qualificationLeadsList,
+    required this.periodLeadsList,
+  });
+
+  final int transferList;
+  final int lostLeadsList;
+  final int qualificationLeadsList;
+  final int periodLeadsList;
+
+  static const SdrListTotals zero = SdrListTotals(
+    transferList: 0,
+    lostLeadsList: 0,
+    qualificationLeadsList: 0,
+    periodLeadsList: 0,
+  );
+
+  factory SdrListTotals.fromJson(Map<String, dynamic> json) => SdrListTotals(
+        transferList: _asInt(json['transferList']),
+        lostLeadsList: _asInt(json['lostLeadsList']),
+        qualificationLeadsList: _asInt(json['qualificationLeadsList']),
+        periodLeadsList: _asInt(json['periodLeadsList']),
+      );
+
+  /// Back antigo (sem `listTotals`): conta pelas próprias listas.
+  factory SdrListTotals.fromLists(Map<String, dynamic> json) => SdrListTotals(
+        transferList: (json['transferList'] as List?)?.length ?? 0,
+        lostLeadsList: (json['lostLeadsList'] as List?)?.length ?? 0,
+        qualificationLeadsList:
+            (json['qualificationLeadsList'] as List?)?.length ?? 0,
+        periodLeadsList: (json['periodLeadsList'] as List?)?.length ?? 0,
+      );
+}
+
+/// Par rótulo + contagem dos agregados de transferência.
+class SdrLabelCount {
+  const SdrLabelCount({required this.label, required this.count});
+
+  final String label;
+  final int count;
+
+  factory SdrLabelCount.fromJson(Map<String, dynamic> json) => SdrLabelCount(
+        label: _asString(json['label'], 'Não identificado'),
+        count: _asInt(json['count']),
+      );
+}
+
+/// Agregados de transferência (`transferAggregates`).
+class SdrTransferAggregates {
+  const SdrTransferAggregates({
+    required this.byDestinationTeam,
+    required this.byDestinationFunnel,
+    required this.byAttendant,
+    required this.byTransferredBy,
+    required this.byResponsible,
+  });
+
+  final List<SdrLabelCount> byDestinationTeam;
+  final List<SdrLabelCount> byDestinationFunnel;
+
+  /// SDR dono do lead na tarefa original.
+  final List<SdrLabelCount> byAttendant;
+
+  /// Quem executou a transferência no Kanban.
+  final List<SdrLabelCount> byTransferredBy;
+
+  /// Corretor que recebeu.
+  final List<SdrLabelCount> byResponsible;
+
+  static const SdrTransferAggregates empty = SdrTransferAggregates(
+    byDestinationTeam: [],
+    byDestinationFunnel: [],
+    byAttendant: [],
+    byTransferredBy: [],
+    byResponsible: [],
+  );
+
+  bool get isEmpty =>
+      byDestinationTeam.isEmpty &&
+      byDestinationFunnel.isEmpty &&
+      byAttendant.isEmpty &&
+      byTransferredBy.isEmpty &&
+      byResponsible.isEmpty;
+
+  static final RegExp _uuid = RegExp(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+    caseSensitive: false,
+  );
+
+  /// `transferAggToGroups` do web: rótulo que é UUID vira "Não identificado"
+  /// e as contagens se somam; ordena do maior para o menor.
+  static List<SdrLabelCount> _grouped(dynamic raw) {
+    final map = <String, int>{};
+    for (final r in _asMapList(raw).map(SdrLabelCount.fromJson)) {
+      final l = r.label.trim();
+      final label = l.isEmpty || _uuid.hasMatch(l) ? 'Não identificado' : l;
+      map[label] = (map[label] ?? 0) + r.count;
+    }
+    return map.entries
+        .map((e) => SdrLabelCount(label: e.key, count: e.value))
+        .toList()
+      ..sort((a, b) => b.count.compareTo(a.count));
+  }
+
+  factory SdrTransferAggregates.fromJson(Map<String, dynamic> json) =>
+      SdrTransferAggregates(
+        byDestinationTeam: _grouped(json['byDestinationTeam']),
+        byDestinationFunnel: _grouped(json['byDestinationFunnel']),
+        byAttendant: _grouped(json['byAttendant']),
+        byTransferredBy: _grouped(json['byTransferredBy']),
+        byResponsible: _grouped(json['byResponsible']),
+      );
+}
+
+/// Equipe (opção do filtro do dashboard).
+///
+/// 29/09/2026 (sdr-09): vem de `GET /kanban/teams?allActive=true`, a mesma
+/// fonte do web (antes era `GET /teams`, que devolve outro conjunto).
 class SdrTeamOption {
   const SdrTeamOption({required this.id, required this.name});
 

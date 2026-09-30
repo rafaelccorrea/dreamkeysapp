@@ -42,6 +42,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
   Profile? _profile;
   List<Tag> _availableTags = [];
   List<String> _selectedTagIds = [];
+  // Tags como estavam ao abrir — decide se o PUT /tags/user/:id/set é
+  // necessário (a rota é só Admin/Master no back).
+  Set<String> _initialTagIds = {};
   bool _isLoading = true;
   bool _isLoadingTags = false;
   bool _isSaving = false;
@@ -86,8 +89,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
               _profile!.phone ?? _profile!.cellphone ?? '',
             );
             _selectedTagIds = _profile!.tagIds?.toList() ?? [];
+            _initialTagIds = _selectedTagIds.toSet();
             _isLoading = false;
           });
+          _loadUserTags(_profile!.id);
         } else {
           setState(() {
             _errorMessage = response.message ?? 'Erro ao carregar perfil';
@@ -104,6 +109,23 @@ class _EditProfilePageState extends State<EditProfilePage> {
           _isLoading = false;
         });
       }
+    }
+  }
+
+  /// Tags atuais do usuário — GET /tags/user/:userId, como o web. O GET
+  /// /auth/profile não traz tagIds; sem isto a seleção nascia vazia e o
+  /// salvar apagava as tags existentes.
+  Future<void> _loadUserTags(String userId) async {
+    if (userId.isEmpty) return;
+    try {
+      final res = await TagService.instance.getUserTags(userId);
+      if (!mounted || !res.success || res.data == null) return;
+      setState(() {
+        _selectedTagIds = res.data!.map((t) => t.id).toList();
+        _initialTagIds = _selectedTagIds.toSet();
+      });
+    } catch (_) {
+      // Mantém o fallback de profile.tagIds (igual ao web).
     }
   }
 
@@ -140,14 +162,45 @@ class _EditProfilePageState extends State<EditProfilePage> {
     });
 
     try {
-      // Telefone segue SEM máscara para a API (dígitos), como a tela antiga
-      // enviava — a máscara é só de exibição.
+      // Telefone segue SEM máscara (dígitos) — a máscara é só de exibição.
+      // Como o web: name, phone e tagIds vão SEMPRE (phone vazio quando
+      // apagado, tagIds vazio quando todas foram desmarcadas).
       final phoneDigits = Masks.unmaskPhone(_phoneController.text);
       final response = await ProfileService.instance.updateProfile(
         name: _nameController.text.trim(),
-        phone: phoneDigits.isNotEmpty ? phoneDigits : null,
-        tagIds: _selectedTagIds.isNotEmpty ? _selectedTagIds : null,
+        phone: phoneDigits,
+        tagIds: _selectedTagIds,
       );
+
+      // O PUT /auth/profile descarta tagIds (whitelist); quem grava as tags
+      // é o PUT /tags/user/:id/set — segundo passo do web.
+      if (response.success && response.data != null) {
+        final tagsChanged =
+            _selectedTagIds.toSet().length != _initialTagIds.length ||
+            !_selectedTagIds.toSet().containsAll(_initialTagIds);
+        final userId = _profile?.id ?? '';
+        if (tagsChanged && userId.isNotEmpty) {
+          final tagsRes = await TagService.instance.setUserTags(
+            userId,
+            _selectedTagIds,
+          );
+          if (!tagsRes.success) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    'Dados salvos, mas as tags não: '
+                    '${tagsRes.message ?? 'erro ao salvar as tags'}',
+                  ),
+                  backgroundColor: AppColors.status.error,
+                ),
+              );
+            }
+            return;
+          }
+          _initialTagIds = _selectedTagIds.toSet();
+        }
+      }
 
       if (mounted) {
         if (response.success && response.data != null) {

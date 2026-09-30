@@ -12,6 +12,13 @@ import 'public_site_shared.dart';
 /// decide onde encaixar (novo no fim, edição no lugar). Validação local:
 /// rótulo obrigatório (máx. 80) e URL obrigatória (https:// completado
 /// automaticamente quando falta o esquema).
+///
+/// 29/09/2026 (integ-01): o botão de captação (`kind: lead_form`, criado no
+/// web) agora sobrevive ao "Salvar links" do app e aparece na lista. Ele não
+/// tem URL — o web esconde o campo e manda `url: ''` —, então aqui a edição
+/// dele muda só o rótulo: o campo de URL some e não é validado. O resto
+/// (tipo, cor, ícone, subtítulo) segue do original pelo `copyWith`. Criar um
+/// botão de captação novo pelo app fica para o integ-30.
 class BioLinkEditSheet extends StatefulWidget {
   final BioPageLink? initial;
 
@@ -43,6 +50,9 @@ class _BioLinkEditSheetState extends State<BioLinkEditSheet> {
 
   bool get _isEditing => widget.initial != null;
 
+  /// Editando um botão de captação existente (sem URL).
+  bool get _isLeadForm => widget.initial?.isLeadForm == true;
+
   @override
   void initState() {
     super.initState();
@@ -67,16 +77,21 @@ class _BioLinkEditSheetState extends State<BioLinkEditSheet> {
 
   void _submit() {
     final label = _labelController.text.trim();
-    final url = _normalizeUrl(_urlController.text);
+    final isLeadForm = _isLeadForm;
+    final url = isLeadForm ? '' : _normalizeUrl(_urlController.text);
 
     String? labelError;
     String? urlError;
     if (label.isEmpty) labelError = 'Informe o texto do botão';
     if (label.length > 80) labelError = 'Máximo de 80 caracteres';
-    if (url.isEmpty) {
-      urlError = 'Informe o endereço do link';
-    } else if (Uri.tryParse(url)?.host.isNotEmpty != true) {
-      urlError = 'Endereço inválido — ex.: https://wa.me/5511999999999';
+    // Botão de captação não tem URL: nada a validar (o back aceita url
+    // vazia só nesse tipo, e o toJson do modelo já força `url: ''`).
+    if (!isLeadForm) {
+      if (url.isEmpty) {
+        urlError = 'Informe o endereço do link';
+      } else if (Uri.tryParse(url)?.host.isNotEmpty != true) {
+        urlError = 'Endereço inválido — ex.: https://wa.me/5511999999999';
+      }
     }
 
     if (labelError != null || urlError != null) {
@@ -95,7 +110,11 @@ class _BioLinkEditSheetState extends State<BioLinkEditSheet> {
           order: 0,
           isActive: true,
         );
-    Navigator.of(context).pop(base.copyWith(label: label, url: url));
+    Navigator.of(context).pop(
+      isLeadForm
+          ? base.copyWith(label: label)
+          : base.copyWith(label: label, url: url),
+    );
   }
 
   @override
@@ -175,7 +194,11 @@ class _BioLinkEditSheetState extends State<BioLinkEditSheet> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            _isEditing ? 'Editar link' : 'Novo link',
+                            _isLeadForm
+                                ? 'Editar botão de captação'
+                                : (_isEditing ? 'Editar link' : 'Novo link'),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.w900,
                               color: ThemeHelpers.textColor(context),
@@ -203,7 +226,8 @@ class _BioLinkEditSheetState extends State<BioLinkEditSheet> {
                 SiteFilledField(
                   controller: _labelController,
                   label: 'Texto do botão',
-                  hint: 'Fale no WhatsApp',
+                  // Mesmo placeholder do web para cada tipo de botão.
+                  hint: _isLeadForm ? 'Quero ser atendido' : 'Fale no WhatsApp',
                   icon: LucideIcons.type,
                   maxLength: 80,
                   accent: accent,
@@ -225,29 +249,59 @@ class _BioLinkEditSheetState extends State<BioLinkEditSheet> {
                   ),
                 ],
                 const SizedBox(height: 12),
-                SiteFilledField(
-                  controller: _urlController,
-                  label: 'Endereço (URL)',
-                  hint: 'https://wa.me/5511999999999',
-                  icon: LucideIcons.link,
-                  keyboardType: TextInputType.url,
-                  accent: accent,
-                  onChanged: (_) {
-                    if (_urlError != null) {
-                      setState(() => _urlError = null);
-                    }
-                  },
-                ),
-                if (_urlError != null) ...[
-                  const SizedBox(height: 5),
-                  Text(
-                    _urlError!,
-                    style: TextStyle(
-                      color: danger,
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                    ),
+                if (_isLeadForm)
+                  // No lugar da URL, o que o botão faz — mesma explicação do
+                  // "Ação do botão" do web, sem mandar ninguém para o painel.
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Icon(
+                          LucideIcons.userRoundPlus,
+                          size: 16,
+                          color: accent,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Abre um formulário de captação (nome e telefone) '
+                          'no lugar de um link — o lead vira card no funil de '
+                          'leads da página. Este botão não usa URL.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: secondary,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                else ...[
+                  SiteFilledField(
+                    controller: _urlController,
+                    label: 'Endereço (URL)',
+                    hint: 'https://wa.me/5511999999999',
+                    icon: LucideIcons.link,
+                    keyboardType: TextInputType.url,
+                    accent: accent,
+                    onChanged: (_) {
+                      if (_urlError != null) {
+                        setState(() => _urlError = null);
+                      }
+                    },
                   ),
+                  if (_urlError != null) ...[
+                    const SizedBox(height: 5),
+                    Text(
+                      _urlError!,
+                      style: TextStyle(
+                        color: danger,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                 ],
                 const SizedBox(height: 20),
                 Row(

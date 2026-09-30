@@ -52,6 +52,7 @@ import '../../features/proposals/pages/create_proposal_page.dart';
 import '../../features/proposals/pages/proposals_page.dart';
 import '../../features/sale_forms/pages/sale_forms_page.dart';
 import '../../features/sale_forms/pages/sale_forms_dashboard_page.dart';
+import '../../features/proposals/pages/proposals_dashboard_page.dart';
 import '../../features/sale_forms/pages/sale_form_detail_page.dart';
 import '../../features/sale_forms/pages/sale_form_pending_signatures_page.dart';
 import '../../shared/widgets/permission_route.dart';
@@ -251,6 +252,7 @@ class AppRoutes {
   // Fichas de proposta de compra
   static const String proposals = '/proposals';
   static const String proposalCreate = '/proposals/create';
+  static const String proposalsDashboard = '/proposals/dashboard';
   static String proposalEdit(String id) => '/proposals/$id/edit';
 
   static const String saleForms = '/sale-forms';
@@ -274,6 +276,11 @@ class AppRoutes {
   static const String visitCreate = '/visits/create';
   static String visitDetails(String id) => '/visits/$id';
   static String visitEdit(String id) => '/visits/$id/edit';
+
+  /// Gestão de Visitas (29/09/2026): a mesma lista de visitas aberta na
+  /// visão da empresa (`scope=all`, `visit:manage`), como a rota
+  /// /visit-reports do web. Fora do prefixo /visits/ para não virar id.
+  static const String visitReports = '/visit-reports';
 
   // Condomínios & Empreendimentos
   static const String condominiums = '/condominiums';
@@ -681,6 +688,8 @@ class AppRoutes {
       return _buildRoute(const ProposalsPage(), settings);
     } else if (routeName == AppRoutes.proposalCreate) {
       return _buildRoute(const CreateProposalPage(), settings);
+    } else if (routeName == AppRoutes.proposalsDashboard) {
+      return _buildRoute(const ProposalsDashboardPage(), settings);
     } else if (routeName != null &&
         routeName.startsWith('/proposals/')) {
       final segments = routeName.split('/');
@@ -725,6 +734,9 @@ class AppRoutes {
       return _buildRoute(const CheckInManagePage(), settings);
     } else if (routeName == AppRoutes.visits) {
       return _buildRoute(const VisitsPage(), settings);
+    } else if (routeName == AppRoutes.visitReports) {
+      // Gestão de Visitas (29/09/2026): mesma tela, aberta em scope=all.
+      return _buildRoute(const VisitsPage(openManagement: true), settings);
     } else if (routeName == AppRoutes.visitCreate) {
       // Deve vir ANTES do prefixo genérico de /visits/, senão "create" vira id.
       return _buildRoute(const VisitReportFormPage(), settings);

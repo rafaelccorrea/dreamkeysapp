@@ -93,8 +93,12 @@ class DocumentSignature {
       metadata: json['metadata'] != null
           ? Map<String, dynamic>.from(json['metadata'])
           : null,
-      createdAt: DateTime.parse(json['createdAt']),
-      updatedAt: DateTime.parse(json['updatedAt']),
+      createdAt:
+          DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
+          DateTime.now(),
+      updatedAt:
+          DateTime.tryParse(json['updatedAt']?.toString() ?? '') ??
+          DateTime.now(),
       document: json['document'] != null
           ? DocumentSignatureDocument.fromJson(json['document'])
           : null,
@@ -149,6 +153,11 @@ enum DocumentSignatureStatus {
   final String label;
 
   const DocumentSignatureStatus(this.value, this.label);
+
+  /// Ainda dá para assinar pelo link (aguardando ou só visualizado).
+  bool get isSignable =>
+      this == DocumentSignatureStatus.pending ||
+      this == DocumentSignatureStatus.viewed;
 
   static DocumentSignatureStatus fromString(String value) {
     return DocumentSignatureStatus.values.firstWhere(
@@ -217,6 +226,135 @@ class DocumentSignatureUser {
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
       email: json['email']?.toString() ?? '',
+    );
+  }
+}
+
+/// Tipo de signatário na tela "Enviar para assinatura" — paridade com
+/// `SignerType` do web (`external` | `client` | `user`).
+enum SignerKind {
+  external('external', 'Signatário externo'),
+  client('client', 'Cliente do sistema'),
+  user('user', 'Usuário do sistema');
+
+  final String value;
+  final String label;
+
+  const SignerKind(this.value, this.label);
+}
+
+/// Um signatário do lote enviado em
+/// `POST /documents/:documentId/signatures/batch`.
+class SignatureSignerInput {
+  final String? clientId;
+  final String? userId;
+  final String signerName;
+  final String signerEmail;
+  final String? signerPhone;
+  final String? signerCpf;
+
+  const SignatureSignerInput({
+    this.clientId,
+    this.userId,
+    required this.signerName,
+    required this.signerEmail,
+    this.signerPhone,
+    this.signerCpf,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      if (clientId != null && clientId!.isNotEmpty) 'clientId': clientId,
+      if (userId != null && userId!.isNotEmpty) 'userId': userId,
+      'signerName': signerName,
+      'signerEmail': signerEmail,
+      if (signerPhone != null && signerPhone!.isNotEmpty)
+        'signerPhone': signerPhone,
+      if (signerCpf != null && signerCpf!.isNotEmpty) 'signerCpf': signerCpf,
+    };
+  }
+}
+
+/// Resposta do envio em lote: quantas assinaturas nasceram e os erros por
+/// signatário (o back cria as que der e devolve o resto em `errors`).
+class BatchSignatureResult {
+  final List<DocumentSignature> signatures;
+  final int total;
+  final int success;
+  final List<String> errors;
+
+  BatchSignatureResult({
+    required this.signatures,
+    required this.total,
+    required this.success,
+    required this.errors,
+  });
+
+  factory BatchSignatureResult.fromJson(Map<String, dynamic> json) {
+    final rawSignatures = json['signatures'];
+    final rawErrors = json['errors'];
+    final errors = <String>[];
+    if (rawErrors is List) {
+      for (final e in rawErrors) {
+        if (e is Map) {
+          // O back devolve `{ signer: SignerDto, error }` — o signatário é um
+          // objeto; mostra nome ou e-mail, nunca o mapa cru.
+          final signer = e['signer'];
+          final who = (signer is Map
+                  ? (signer['signerName'] ?? signer['signerEmail'] ?? '')
+                  : (signer ?? e['signerEmail'] ?? ''))
+              .toString();
+          final why = (e['error'] ?? e['message'] ?? '').toString();
+          errors.add(who.isEmpty ? why : '$who: $why');
+        } else if (e != null) {
+          errors.add(e.toString());
+        }
+      }
+    }
+    final signatures = <DocumentSignature>[];
+    if (rawSignatures is List) {
+      for (final s in rawSignatures) {
+        if (s is Map) {
+          try {
+            signatures.add(
+              DocumentSignature.fromJson(Map<String, dynamic>.from(s)),
+            );
+          } catch (_) {}
+        }
+      }
+    }
+    return BatchSignatureResult(
+      signatures: signatures,
+      total: int.tryParse(json['total']?.toString() ?? '') ??
+          signatures.length,
+      success: int.tryParse(json['success']?.toString() ?? '') ??
+          signatures.length,
+      errors: errors,
+    );
+  }
+}
+
+/// Usuário ativo da empresa oferecido como signatário (`GET /admin/users`
+/// com `active=true&allCompanyUsers=true`, igual ao web).
+class SignerUserOption {
+  final String id;
+  final String name;
+  final String email;
+  final String? phone;
+
+  SignerUserOption({
+    required this.id,
+    required this.name,
+    required this.email,
+    this.phone,
+  });
+
+  factory SignerUserOption.fromJson(Map<String, dynamic> json) {
+    return SignerUserOption(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      email: json['email']?.toString() ?? '',
+      phone: json['phone']?.toString(),
     );
   }
 }

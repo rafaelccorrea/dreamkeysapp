@@ -86,40 +86,84 @@ class ChatApiService {
     }
   }
 
-  /// Listar todas as salas do usuário
-  Future<ApiResponse<List<ChatRoom>>> getRooms() async {
+  /// Converte uma lista crua de salas, descartando só o item que não parseia.
+  List<ChatRoom> _parseRoomList(dynamic raw) {
+    if (raw is! List) return <ChatRoom>[];
+    return raw
+        .map((e) {
+          try {
+            return ChatRoom.fromJson(Map<String, dynamic>.from(e as Map));
+          } catch (e) {
+            debugPrint('❌ [CHAT_API] Erro ao parsear sala: $e');
+            return null;
+          }
+        })
+        .whereType<ChatRoom>()
+        .toList();
+  }
+
+  /// Listar as salas do usuário: ativas + arquivadas por ele.
+  ///
+  /// 29/09/2026 — paridade com `chatApi.getRooms` do web: o back responde
+  /// `{ rooms, archivedRooms }` (formato atual), mas o app aceita também a
+  /// lista pura (formato antigo) e o 304 do ETag, que volta como
+  /// [ChatRoomsResult.notModified] para a tela manter o que já tem.
+  Future<ApiResponse<ChatRoomsResult>> getRooms() async {
     try {
       debugPrint('💬 [CHAT_API] Listando salas...');
-      
+
       final response = await _apiService.get<dynamic>(
         ApiConstants.chatRooms,
       );
 
+      // 304 Not Modified: corpo vazio. Não é erro nem lista vazia.
+      if (response.statusCode == 304) {
+        debugPrint('✅ [CHAT_API] Salas sem mudança (304)');
+        return ApiResponse.success(
+          data: const ChatRoomsResult.notModified(),
+          statusCode: 304,
+        );
+      }
+
       if (response.success && response.data != null) {
         try {
-          List<ChatRoom> rooms;
-          
-          if (response.data is List) {
-            final dataList = response.data as List<dynamic>;
-            rooms = dataList
-                .map((e) {
-                  try {
-                    return ChatRoom.fromJson(e as Map<String, dynamic>);
-                  } catch (e) {
-                    debugPrint('❌ [CHAT_API] Erro ao parsear sala: $e');
-                    return null;
-                  }
-                })
-                .whereType<ChatRoom>()
-                .toList();
-          } else {
-            throw Exception('Formato de resposta inesperado: ${response.data.runtimeType}');
+          dynamic data = response.data;
+          // Tolera um envelope `{ success, data: {...} }` caso o back passe
+          // a embrulhar a resposta, sem confundir com o formato atual.
+          if (data is Map &&
+              !data.containsKey('rooms') &&
+              data['data'] != null) {
+            data = data['data'];
           }
-          
-          debugPrint('✅ [CHAT_API] ${rooms.length} salas carregadas');
-          
+
+          final ChatRoomsResult result;
+          if (data is List) {
+            // Formato antigo: lista única. Separa pela marca da própria sala.
+            final all = _parseRoomList(data);
+            result = ChatRoomsResult(
+              rooms: all.where((r) => r.isArchived != true).toList(),
+              archivedRooms: all.where((r) => r.isArchived == true).toList(),
+            );
+          } else if (data is Map) {
+            result = ChatRoomsResult(
+              rooms: _parseRoomList(data['rooms']),
+              archivedRooms: _parseRoomList(data['archivedRooms'])
+                  .map((r) => r.withArchived(true))
+                  .toList(),
+            );
+          } else {
+            throw Exception(
+              'Formato de resposta inesperado: ${data.runtimeType}',
+            );
+          }
+
+          debugPrint(
+            '✅ [CHAT_API] ${result.rooms.length} salas ativas e '
+            '${result.archivedRooms.length} arquivadas',
+          );
+
           return ApiResponse.success(
-            data: rooms,
+            data: result,
             statusCode: response.statusCode,
           );
         } catch (e, stackTrace) {

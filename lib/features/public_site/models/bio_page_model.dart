@@ -67,7 +67,43 @@ String? buildBioPublicUrl(String? slug) {
 
 // ─── Link ────────────────────────────────────────────────────────────────────
 
+/// Tipo do botão: `link` abre a URL; `lead_form` é o **botão de captação**
+/// (abre o formulário de lead no site público e vira card no Kanban).
+const String kBioLinkKindLink = 'link';
+const String kBioLinkKindLeadForm = 'lead_form';
+
+/// Ícones aceitos pelo back (`BIO_LINK_ICONS`) — paridade com
+/// `BIO_LINK_ICON_OPTIONS` do `bioPageApi.ts`. `''` = automático (pela URL).
+const List<({String id, String label})> kBioLinkIconOptions = [
+  (id: '', label: 'Automático (pela URL)'),
+  (id: 'whatsapp', label: 'WhatsApp'),
+  (id: 'instagram', label: 'Instagram'),
+  (id: 'facebook', label: 'Facebook'),
+  (id: 'youtube', label: 'YouTube'),
+  (id: 'tiktok', label: 'TikTok'),
+  (id: 'x', label: 'X (Twitter)'),
+  (id: 'linkedin', label: 'LinkedIn'),
+  (id: 'telegram', label: 'Telegram'),
+  (id: 'pinterest', label: 'Pinterest'),
+  (id: 'spotify', label: 'Spotify'),
+  (id: 'email', label: 'E-mail'),
+  (id: 'phone', label: 'Telefone'),
+  (id: 'maps', label: 'Mapa / localização'),
+  (id: 'site', label: 'Site / genérico'),
+];
+
+/// Sentinela do `copyWith` para distinguir "não mexer" de "limpar (null)".
+const Object _keep = Object();
+
 /// Um link da página — paridade com `BioPageLink` (`bioPageApi.ts`).
+///
+/// 29/09/2026 (integ-01): antes o app só serializava id/label/url/order/
+/// isActive/color/color2. O back (`sanitizeLinks`) recebia o link sem `kind`
+/// e descartava o botão de captação (url vazia), além de zerar ícone e
+/// subtítulo — um "Salvar links" no app destruía a personalização Premium
+/// feita no web. Agora `kind`, `icon` e `subtitle` fazem a ida e a volta, e
+/// qualquer campo que o back mandar e o app ainda não conheça fica em
+/// [extras] e volta intacto no `toJson`.
 class BioPageLink {
   final String id;
   final String label;
@@ -77,6 +113,18 @@ class BioPageLink {
   final String? color;
   final String? color2;
 
+  /// `'link'` (ou null = link comum) | `'lead_form'` (botão de captação).
+  final String? kind;
+
+  /// Ícone escolhido à mão (Premium); null/vazio = detectado pela URL.
+  final String? icon;
+
+  /// Segunda linha do botão (Premium), até 60 caracteres.
+  final String? subtitle;
+
+  /// Campos desconhecidos do payload — devolvidos como vieram.
+  final Map<String, dynamic> extras;
+
   const BioPageLink({
     required this.id,
     required this.label,
@@ -85,9 +133,33 @@ class BioPageLink {
     required this.isActive,
     this.color,
     this.color2,
+    this.kind,
+    this.icon,
+    this.subtitle,
+    this.extras = const {},
   });
 
+  bool get isLeadForm => kind == kBioLinkKindLeadForm;
+
+  static const Set<String> _knownKeys = {
+    'id',
+    'label',
+    'url',
+    'order',
+    'isActive',
+    'color',
+    'color2',
+    'kind',
+    'icon',
+    'subtitle',
+  };
+
   factory BioPageLink.fromJson(Map<String, dynamic> json) {
+    final extras = <String, dynamic>{
+      for (final e in json.entries)
+        if (!_knownKeys.contains(e.key)) e.key: e.value,
+    };
+    final rawKind = _asString(json['kind'])?.trim();
     return BioPageLink(
       id: _asString(json['id']) ?? '',
       label: _asString(json['label']) ?? '',
@@ -96,24 +168,46 @@ class BioPageLink {
       isActive: _asBool(json['isActive'], fallback: true),
       color: _asString(json['color']),
       color2: _asString(json['color2']),
+      kind: (rawKind == null || rawKind.isEmpty) ? null : rawKind,
+      icon: _asString(json['icon']),
+      subtitle: _asString(json['subtitle']),
+      extras: extras,
     );
   }
 
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'label': label,
-        'url': url,
-        'order': order,
-        'isActive': isActive,
-        if (color != null) 'color': color,
-        if (color2 != null) 'color2': color2,
-      };
+  /// Botão de captação vai SEMPRE com `url: ''` (paridade com o save do
+  /// `BioLinkConfigPage.tsx`) — o back aceita url vazia só nesse tipo.
+  Map<String, dynamic> toJson() {
+    final trimmedIcon = icon?.trim();
+    final trimmedSubtitle = subtitle?.trim();
+    return {
+      ...extras,
+      'id': id,
+      'label': label,
+      'url': isLeadForm ? '' : url,
+      'order': order,
+      'isActive': isActive,
+      if (kind != null) 'kind': kind,
+      // null explícito limpa no back; ausente também vira null no sanitize.
+      'color': color,
+      'color2': color2,
+      'icon': (trimmedIcon == null || trimmedIcon.isEmpty) ? null : trimmedIcon,
+      'subtitle': (trimmedSubtitle == null || trimmedSubtitle.isEmpty)
+          ? null
+          : trimmedSubtitle,
+    };
+  }
 
   BioPageLink copyWith({
     String? label,
     String? url,
     int? order,
     bool? isActive,
+    Object? color = _keep,
+    Object? color2 = _keep,
+    Object? kind = _keep,
+    Object? icon = _keep,
+    Object? subtitle = _keep,
   }) {
     return BioPageLink(
       id: id,
@@ -121,8 +215,13 @@ class BioPageLink {
       url: url ?? this.url,
       order: order ?? this.order,
       isActive: isActive ?? this.isActive,
-      color: color,
-      color2: color2,
+      color: identical(color, _keep) ? this.color : color as String?,
+      color2: identical(color2, _keep) ? this.color2 : color2 as String?,
+      kind: identical(kind, _keep) ? this.kind : kind as String?,
+      icon: identical(icon, _keep) ? this.icon : icon as String?,
+      subtitle:
+          identical(subtitle, _keep) ? this.subtitle : subtitle as String?,
+      extras: extras,
     );
   }
 }
@@ -131,9 +230,13 @@ class BioPageLink {
 
 /// Configuração da página Link in Bio — paridade com `BioPageConfig`.
 ///
-/// `customization` fica como mapa cru: o mobile não edita esses campos
-/// (cores/fundo são Premium do web) e devolver o mapa intacto no PATCH evita
-/// apagar configurações feitas no painel.
+/// `customization` fica como mapa cru: o app ainda não edita aparência
+/// (cores/fundo/fonte são do painel web) e nenhum save do app manda essa
+/// chave, então o que o web configurou fica intacto.
+///
+/// 29/09/2026: `subscriptionId` e o funil dos leads (`leadKanban*`) são só
+/// lidos por enquanto — o seletor de funil é do integ-30 (P1), e os PATCHs
+/// do app não mandam essas chaves (o back só mexe no funil quando elas vêm).
 class BioPageConfig {
   final String id;
   final String companyId;
@@ -151,6 +254,14 @@ class BioPageConfig {
   final bool premiumTemplateUnlocked;
   final double? subscriptionMonthlyTotal;
   final double? premiumAddonMonthlyPrice;
+  final String? subscriptionId;
+
+  /// Funil de destino dos leads do botão de captação (null = fallback do
+  /// back: funil padrão do WhatsApp, depois o primeiro funil ativo).
+  final String? leadKanbanProjectId;
+
+  /// Coluna de entrada no funil acima (null = primeira coluna ativa).
+  final String? leadKanbanColumnId;
   final DateTime? updatedAt;
 
   const BioPageConfig({
@@ -170,6 +281,9 @@ class BioPageConfig {
     this.premiumTemplateUnlocked = false,
     this.subscriptionMonthlyTotal,
     this.premiumAddonMonthlyPrice,
+    this.subscriptionId,
+    this.leadKanbanProjectId,
+    this.leadKanbanColumnId,
     this.updatedAt,
   });
 
@@ -199,6 +313,9 @@ class BioPageConfig {
       premiumTemplateUnlocked: _asBool(json['premiumTemplateUnlocked']),
       subscriptionMonthlyTotal: _asDouble(json['subscriptionMonthlyTotal']),
       premiumAddonMonthlyPrice: _asDouble(json['premiumAddonMonthlyPrice']),
+      subscriptionId: _asString(json['subscriptionId']),
+      leadKanbanProjectId: _asString(json['leadKanbanProjectId']),
+      leadKanbanColumnId: _asString(json['leadKanbanColumnId']),
       updatedAt: _asDate(json['updatedAt']),
     );
   }
@@ -211,6 +328,10 @@ class BioPageConfig {
   }
 
   int get activeLinkCount => links.where((l) => l.isActive).length;
+
+  /// Paridade com `temBotaoDeCaptacao` do web (usado pelo seletor de funil).
+  bool get hasActiveLeadFormButton =>
+      links.any((l) => l.isActive && l.isLeadForm);
 }
 
 // ─── Templates ───────────────────────────────────────────────────────────────

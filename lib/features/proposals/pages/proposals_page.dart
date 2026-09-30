@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/purchase_proposals_service.dart';
+import '../../../core/routes/app_routes.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../sale_forms/widgets/fichas_filters_kit.dart';
 import '../widgets/proposal_card.dart';
 import '../widgets/proposal_row_actions.dart';
 import '../widgets/proposal_signatures_sheet.dart';
 import '../widgets/proposals_filters_sheet.dart';
+import 'proposals_dashboard_page.dart';
 import 'create_proposal_page.dart';
 
 const double _kPadH = 16;
@@ -262,6 +265,16 @@ class _ProposalsPageState extends State<ProposalsPage> {
       title: 'Fichas de proposta',
       currentBottomNavIndex: -1,
       showBottomNavigation: false,
+      actions: [
+        // Painel de propostas (web: /fichas-proposta/dashboard).
+        if (ProposalsDashboardPage.canOpen())
+          IconButton(
+            tooltip: 'Dashboard de propostas',
+            icon: const Icon(LucideIcons.chartColumn, size: 19),
+            onPressed: () =>
+                Navigator.of(context).pushNamed(AppRoutes.proposalsDashboard),
+          ),
+      ],
       body: Stack(
         children: [
           RefreshIndicator(

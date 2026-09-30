@@ -40,8 +40,18 @@ class _ScopeState {
 /// (folhinha de calendário + faixa de assinaturas pendentes clicável) no topo
 /// e lista agrupada por dia, com cabeçalhos de data pt-BR e itens em trilho
 /// de timeline. Sem hero editorial — a identidade aqui é o calendário.
+///
+/// Duas portas no menu, como no web (29/09/2026): "Lista de Visitas"
+/// (`/visits`, só as próprias, `visit:view`) e "Gestão de Visitas"
+/// (`/visit-reports`, toda a empresa, `visit:manage`). No web são duas telas
+/// com a MESMA lista e alcance diferente; aqui é uma tela com as duas abas, e
+/// [openManagement] decide em qual delas ela abre.
 class VisitsPage extends StatefulWidget {
-  const VisitsPage({super.key});
+  const VisitsPage({super.key, this.openManagement = false});
+
+  /// Abre direto na visão da empresa (`scope=all`). Sem `visit:manage` a tela
+  /// fica nas próprias visitas — o back recusaria o `scope=all` com 403.
+  final bool openManagement;
 
   @override
   State<VisitsPage> createState() => _VisitsPageState();
@@ -54,7 +64,7 @@ class _VisitsPageState extends State<VisitsPage> {
   static const double _kSectionGap = 12;
   static const int _pageSize = 25;
 
-  _VisitScope _activeScope = _VisitScope.mine;
+  late _VisitScope _activeScope;
   final Map<_VisitScope, _ScopeState> _state = {
     _VisitScope.mine: _ScopeState(),
     _VisitScope.all: _ScopeState(),
@@ -81,11 +91,34 @@ class _VisitsPageState extends State<VisitsPage> {
   bool get _canManage =>
       ModuleAccessService.instance.hasPermission(VisitReportAccess.manage);
 
+  /// Entra na tela quem vê as próprias visitas (`visit:view`, rota /visits do
+  /// web) OU quem gere as da empresa (`visit:manage`, rota /visit-reports do
+  /// web, que não cobra `visit:view`).
+  bool get _canOpen => _canView || _canManage;
+
+  /// As duas abas só fazem sentido quando os dois alcances estão liberados.
+  bool get _showScopeRail => _canView && _canManage;
+
   @override
   void initState() {
     super.initState();
-    _loadScope(_VisitScope.mine);
+    _activeScope = _initialScope();
+    if (_canOpen) _loadScope(_activeScope);
   }
+
+  /// Escopo de abertura (29/09/2026): a porta "Gestão de Visitas" do menu cai
+  /// direto na visão da empresa; quem só tem `visit:manage` também, porque a
+  /// aba "Minhas visitas" é a de `visit:view`.
+  _VisitScope _initialScope() {
+    if (_canManage && (widget.openManagement || !_canView)) {
+      return _VisitScope.all;
+    }
+    return _VisitScope.mine;
+  }
+
+  /// Título da barra acompanha o alcance, com os nomes das telas do web.
+  String get _pageTitle =>
+      _activeScope == _VisitScope.all ? 'Gestão de Visitas' : 'Visitas';
 
   @override
   void dispose() {
@@ -389,15 +422,15 @@ class _VisitsPageState extends State<VisitsPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_canView) {
-      return const AppScaffold(
-        title: 'Visitas',
+    if (!_canOpen) {
+      return AppScaffold(
+        title: _pageTitle,
         showBottomNavigation: false,
-        body: _DeniedView(),
+        body: const _DeniedView(),
       );
     }
     return AppScaffold(
-      title: 'Visitas',
+      title: _pageTitle,
       showBottomNavigation: false,
       body: Stack(
         children: [
@@ -421,7 +454,7 @@ class _VisitsPageState extends State<VisitsPage> {
                   child: _buildSearchRow(context),
                 ),
                 const SizedBox(height: _kSectionGap),
-                if (_canManage) _buildScopeRail(context),
+                if (_showScopeRail) _buildScopeRail(context),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
                       _kPagePadH, _kSectionGap, _kPagePadH, 0),

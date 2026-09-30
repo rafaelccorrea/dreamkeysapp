@@ -108,11 +108,45 @@ class TagService {
     }
   }
 
+  /// Define (substitui) as tags de um usuário — PUT /tags/user/:userId/set,
+  /// o mesmo passo que o web dá depois do PUT /auth/profile. O PUT do perfil
+  /// descarta tagIds (whitelist do ValidationPipe), então é este que grava.
+  /// Lista vazia é válida: remove todas as tags.
+  Future<ApiResponse<void>> setUserTags(
+    String userId,
+    List<String> tagIds,
+  ) async {
+    try {
+      final response = await _apiService.put<dynamic>(
+        '/tags/user/$userId/set',
+        body: {'tagIds': tagIds},
+      );
+      if (response.success) {
+        return ApiResponse.success(
+          data: null,
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao salvar as tags',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [TAG_SERVICE] Erro ao salvar tags do usuário: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
   /// Busca tags de um usuário específico
   Future<ApiResponse<List<Tag>>> getUserTags(String userId) async {
     try {
       final response = await _apiService.get<dynamic>(
-        '/users/$userId/tags',
+        // Rota real do back: GET /tags/user/:userId (TagsController).
+        '/tags/user/$userId',
       );
 
       if (response.success && response.data != null) {

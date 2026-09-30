@@ -10,6 +10,8 @@ import '../../../core/constants/api_constants.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/api_service.dart';
+import '../services/client_service.dart';
+import '../utils/client_spreadsheet.dart';
 
 /// Modal para importação assíncrona de clientes via Excel.
 class AsyncExcelImportModal extends StatefulWidget {
@@ -34,6 +36,9 @@ class _AsyncExcelImportModalState extends State<AsyncExcelImportModal> {
   int? _successCount;
   int? _errorCount;
   double? _progress;
+  bool _hasErrorFile = false;
+  bool _downloadingErrors = false;
+  bool _autoDownloadedErrors = false;
 
   Color _accentColor(BuildContext context) {
     return Theme.of(context).brightness == Brightness.dark
@@ -149,8 +154,10 @@ class _AsyncExcelImportModalState extends State<AsyncExcelImportModal> {
                 const SizedBox(height: 2),
                 Text(
                   _jobId == null
-                      ? 'Suba uma planilha .xlsx ou .xls para iniciar'
+                      ? 'Suba uma planilha .xlsx, .xls ou .csv para iniciar'
                       : 'Acompanhe o processamento em tempo real',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: ThemeHelpers.textSecondaryColor(context),
                     fontWeight: FontWeight.w600,
@@ -245,7 +252,7 @@ class _AsyncExcelImportModalState extends State<AsyncExcelImportModal> {
                     )
                   else
                     Text(
-                      'Aceitamos arquivos .xlsx ou .xls com cabeçalho.',
+                      'Aceitamos arquivos .xlsx, .xls ou .csv com cabeçalho.',
                       textAlign: TextAlign.center,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: ThemeHelpers.textSecondaryColor(context),
@@ -275,12 +282,97 @@ class _AsyncExcelImportModalState extends State<AsyncExcelImportModal> {
           ),
         ),
         const SizedBox(height: 14),
+        _buildTemplateCard(context, accent),
+        const SizedBox(height: 14),
         _buildHintCard(context, accent),
         if (_errorMessage != null) ...[
           const SizedBox(height: 14),
           _buildErrorBanner(context, _errorMessage!),
         ],
       ],
+    );
+  }
+
+  /// "Template (Opcional)" do web: modelo com as colunas que a importação
+  /// entende, uma linha de instruções e exemplos.
+  Widget _buildTemplateCard(BuildContext context, Color accent) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: ThemeHelpers.cardBackgroundColor(context),
+        border: Border.all(
+          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.42),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Modelo de planilha (opcional)',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: ThemeHelpers.textColor(context),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Baixe o modelo com as colunas esperadas, a linha de instruções '
+            'e exemplos de preenchimento.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: ThemeHelpers.textSecondaryColor(context),
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _isUploading
+                      ? null
+                      : () => _downloadTemplate(csv: false),
+                  icon: const Icon(Icons.table_chart_outlined, size: 18),
+                  label: const Text(
+                    'Excel (.xlsx)',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _isUploading
+                      ? null
+                      : () => _downloadTemplate(csv: true),
+                  icon: const Icon(Icons.description_outlined, size: 18),
+                  label: const Text(
+                    'CSV (.csv)',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -498,12 +590,22 @@ class _AsyncExcelImportModalState extends State<AsyncExcelImportModal> {
             ],
           ),
         ),
-        if (completed && (_errorCount ?? 0) > 0) ...[
+        if (completed && (_errorCount ?? 0) > 0 && _hasErrorFile) ...[
           const SizedBox(height: 12),
           OutlinedButton.icon(
-            onPressed: _downloadErrorFile,
-            icon: const Icon(Icons.download_rounded, size: 18),
-            label: const Text('Baixar planilha de erros'),
+            onPressed: _downloadingErrors ? null : _downloadErrorFile,
+            icon: _downloadingErrors
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.download_rounded, size: 18),
+            label: Text(
+              _downloadingErrors
+                  ? 'Baixando…'
+                  : 'Baixar planilha de erros',
+            ),
             style: OutlinedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 12),
               shape: RoundedRectangleBorder(
@@ -648,7 +750,7 @@ class _AsyncExcelImportModalState extends State<AsyncExcelImportModal> {
     try {
       final result = await FilePicker.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['xlsx', 'xls'],
+        allowedExtensions: ['xlsx', 'xls', 'csv'],
       );
       if (result != null && result.files.single.path != null) {
         setState(() {
@@ -766,22 +868,47 @@ class _AsyncExcelImportModalState extends State<AsyncExcelImportModal> {
         if (response.statusCode >= 200 && response.statusCode < 300) {
           final data = jsonDecode(response.body) as Map<String, dynamic>;
           if (!mounted) break;
+          int? asInt(dynamic v) =>
+              v is num ? v.toInt() : int.tryParse(v?.toString() ?? '');
           setState(() {
             _status = data['status']?.toString();
-            _totalRows = data['totalRows'] as int?;
-            _processedRows = data['processedRows'] as int?;
-            _successCount = data['successCount'] as int?;
-            _errorCount = data['errorCount'] as int?;
+            _totalRows = asInt(data['totalRows']);
+            _processedRows = asInt(data['processedRows']);
+            // O job do back expõe `successfulImports`/`failedImports`
+            // (AsyncBulkImportService); os nomes antigos ficam de reserva.
+            _successCount =
+                asInt(data['successfulImports'] ?? data['successCount']);
+            _errorCount = asInt(data['failedImports'] ?? data['errorCount']);
+            _hasErrorFile = data['hasErrorFile'] == true;
             if (_totalRows != null &&
                 _processedRows != null &&
                 _totalRows! > 0) {
               _progress = (_processedRows! / _totalRows!) * 100;
+            } else if (data['progress'] is num) {
+              _progress = (data['progress'] as num).toDouble();
+            }
+            if (data['status']?.toString() == 'failed') {
+              final errs = data['errors'];
+              if (errs is List && errs.isNotEmpty) {
+                final first = errs.first;
+                final msg = first is Map ? first['error'] : first;
+                if (msg != null) _errorMessage = msg.toString();
+              }
             }
           });
 
           if (_status == 'completed' || _status == 'failed') {
             setState(() => _isPolling = false);
             widget.onImportComplete?.call();
+            // Igual ao web: terminou com erros e há planilha → baixa sozinho.
+            if (_status == 'completed' &&
+                (_errorCount ?? 0) > 0 &&
+                _hasErrorFile &&
+                !_autoDownloadedErrors) {
+              _autoDownloadedErrors = true;
+              await Future.delayed(const Duration(seconds: 1));
+              if (mounted) await _downloadErrorFile();
+            }
             break;
           }
         }
@@ -794,15 +921,158 @@ class _AsyncExcelImportModalState extends State<AsyncExcelImportModal> {
     }
   }
 
+  /// `GET /clients/import-jobs/:jobId/errors` → arquivo
+  /// `erros_importacao_<jobId>.xlsx`, aberto na folha de compartilhar.
   Future<void> _downloadErrorFile() async {
-    if (_jobId == null) return;
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Download de erros em desenvolvimento'),
-        backgroundColor: AppColors.status.info,
-      ),
-    );
+    final jobId = _jobId;
+    if (jobId == null || _downloadingErrors) return;
+    setState(() => _downloadingErrors = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final response = await ClientService.instance.downloadImportErrors(jobId);
+      if (!mounted) return;
+      if (response.success && response.data != null) {
+        await ClientSpreadsheet.shareBytes(
+          bytes: response.data!,
+          fileName: 'erros_importacao_$jobId.xlsx',
+          subject: 'Planilha de erros da importação',
+        );
+        if (!mounted) return;
+        messenger.showSnackBar(
+          SnackBar(
+            content: const Text('Planilha de erros baixada com sucesso!'),
+            backgroundColor: AppColors.status.success,
+          ),
+        );
+      } else {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              response.message ?? 'Erro ao baixar planilha de erros.',
+            ),
+            backgroundColor: AppColors.status.error,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Erro ao baixar planilha de erros: $e'),
+          backgroundColor: AppColors.status.error,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _downloadingErrors = false);
+    }
+  }
+
+  /// Modelo de importação — mesmas colunas, instruções e exemplos do
+  /// `generateClientTemplate` do web (`utils/excelTemplate.ts`).
+  Future<void> _downloadTemplate({required bool csv}) async {
+    const headers = <Object?>[
+      'nome',
+      'email',
+      'cpf',
+      'telefone_principal',
+      'telefone_secundario',
+      'whatsapp',
+      'endereco',
+      'numero',
+      'complemento',
+      'bairro',
+      'cidade',
+      'estado',
+      'cep',
+      'valor_minimo',
+      'valor_maximo',
+      'tipo_interesse',
+      'observacoes',
+    ];
+    const comments = <Object?>[
+      'Nome completo (OBRIGATÓRIO)',
+      'Email (opcional)',
+      'CPF apenas números, 11 dígitos (OBRIGATÓRIO)',
+      'Telefone principal apenas números (OBRIGATÓRIO)',
+      'Telefone secundário apenas números (opcional)',
+      'WhatsApp apenas números (opcional)',
+      'Nome da rua/avenida (OBRIGATÓRIO)',
+      'Número do endereço (OBRIGATÓRIO)',
+      'Complemento: apto, sala, etc (opcional)',
+      'Bairro (OBRIGATÓRIO)',
+      'Cidade (OBRIGATÓRIO)',
+      'Estado: SP, RJ, MG, etc - 2 letras (OBRIGATÓRIO)',
+      'CEP apenas números, 8 dígitos (OBRIGATÓRIO)',
+      'Valor mínimo em números (opcional)',
+      'Valor máximo em números (opcional)',
+      'comprador, vendedor, locatario, locador, investidor (OBRIGATÓRIO)',
+      'Observações gerais (opcional)',
+    ];
+    // No .xlsx os valores vão como número; no .csv, como texto.
+    final examples = <List<Object?>>[
+      [
+        'João Silva', 'joao.silva@example.com', '12345678901', '11987654321',
+        '11912345678', '11987654321', 'Rua das Flores', '123', 'Apto 401',
+        'Jardim Paulista', 'São Paulo', 'SP', '01234567',
+        csv ? '100000' : 100000, csv ? '500000' : 500000, 'comprador',
+        'Cliente interessado em apartamentos de 2 quartos',
+      ],
+      [
+        'Maria Oliveira', 'maria.o@example.com', '98765432100', '21998765432',
+        null, '21998765432', 'Avenida Principal', '456', null, 'Centro',
+        'Rio de Janeiro', 'RJ', '20000000', null, csv ? '800000' : 800000,
+        'vendedor', 'Proprietária de casa no centro',
+      ],
+      [
+        'Pedro Santos', 'pedro@example.com', '11122233344', '11999887766',
+        '11988776655', '11999887766', 'Rua dos Lírios', '789', 'Casa',
+        'Jardim América', 'Belo Horizonte', 'MG', '30123456',
+        csv ? '200000' : 200000, csv ? '600000' : 600000, 'comprador',
+        'Interessado em casas com garagem',
+      ],
+      [
+        'Ana Costa', 'ana.costa@example.com', '55566677788', '11977665544',
+        null, '11977665544', 'Av. Paulista', '1000', 'Sala 50', 'Bela Vista',
+        'São Paulo', 'SP', '01310100', null, null, 'locador',
+        'Proprietária de apartamento para locação',
+      ],
+    ];
+    final rows = <List<Object?>>[headers, comments, ...examples];
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final bytes = csv
+          ? ClientSpreadsheet.buildCsv(rows)
+          : ClientSpreadsheet.buildXlsx(
+              sheetName: 'Clientes',
+              rows: rows,
+              columnWidths: const [
+                20, 25, 15, 15, 15, 15, 25, 8, 15, 15, 15, 5, 10, 12, 12,
+                15, 40,
+              ],
+            );
+      await ClientSpreadsheet.shareBytes(
+        bytes: bytes,
+        fileName: csv ? 'template_clientes.csv' : 'template_clientes.xlsx',
+        subject: 'Modelo de importação de clientes',
+      );
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Template ${csv ? 'CSV' : 'XLSX'} baixado com sucesso!',
+          ),
+          backgroundColor: AppColors.status.success,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Erro ao gerar o modelo: $e'),
+          backgroundColor: AppColors.status.error,
+        ),
+      );
+    }
   }
 }
 

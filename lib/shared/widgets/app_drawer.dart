@@ -21,11 +21,13 @@ import 'skeleton_box.dart';
 import '../../features/notifications/controllers/notification_controller.dart';
 import '../../features/chat/controllers/chat_unread_controller.dart';
 import '../../features/kanban/controllers/kanban_controller.dart';
+import '../../features/visit_reports/models/visit_report_access.dart';
 
 /// Drawer (menu lateral) — itens alinhados ao menu **visível** do web
 /// (`imobx-front/src/components/layout/Drawer.tsx`): sem Chat, Matches,
-/// Checklists, Documentos, Vistorias/Chaves no menu (no web estão `hidden`),
-/// sem entradas “em breve”.
+/// Checklists, Vistorias/Chaves no menu (no web estão `hidden`), sem
+/// entradas “em breve”. Documentos (Biblioteca) está visível no web e aqui
+/// também.
 class AppDrawer extends StatefulWidget {
   final String? userName;
   final String? userEmail;
@@ -59,9 +61,11 @@ class _AppDrawerState extends State<AppDrawer> {
   bool _imoveisExpanded = false;
   bool _vendasCrmExpanded = false;
   bool _colaboradoresExpanded = false;
+  bool _documentosExpanded = false;
   bool _suporteExpanded = false;
   bool _integracoesExpanded = false;
   bool _configExpanded = false;
+  bool _visitasExpanded = false;
 
   /// Lista para o seletor de empresa (Master)
   List<Company> _masterCompanies = [];
@@ -196,6 +200,13 @@ class _AppDrawerState extends State<AppDrawer> {
         activeRoute.startsWith('/tickets') || activeRoute == AppRoutes.help;
 
     final expandIntegracoes = activeRoute.startsWith('/integrations');
+
+    // Visitas (29/09/2026): lista (/visits*) e gestão (/visit-reports) abrem
+    // o menu já no grupo delas, como os outros grupos.
+    if (activeRoute.startsWith(AppRoutes.visits) ||
+        activeRoute == AppRoutes.visitReports) {
+      setState(() => _visitasExpanded = true);
+    }
 
     final expandConfig =
         activeRoute == AppRoutes.settings ||
@@ -969,6 +980,10 @@ class _AppDrawerState extends State<AppDrawer> {
     final suporteGroupActive =
         activeRoute.startsWith('/tickets') || activeRoute == AppRoutes.help;
 
+    final documentosGroupActive = activeRoute == AppRoutes.documents ||
+        activeRoute.startsWith('/documents/') ||
+        activeRoute == AppRoutes.signatures;
+
     final integracoesGroupActive = activeRoute.startsWith('/integrations');
 
     final configGroupActive =
@@ -1053,10 +1068,26 @@ class _AppDrawerState extends State<AppDrawer> {
         ModuleAccessService.instance.hasCompanyModule('property_management') &&
         ModuleAccessService.instance.hasPermission('condominium:view');
 
-    // OCULTOS do menu (rotas vivas), espelhando o menu do web: Visitas,
+    // Visitas (29/09/2026): no web o grupo "Visitas" (módulo visit_report) é
+    // VISÍVEL, com "Lista de Visitas" (/visits) e "Gestão de Visitas"
+    // (/visit-reports). O app escondia os dois achando que o web também
+    // escondia. As cercas moram em VisitReportAccess: módulo + permissão +
+    // ao menos uma ação do módulo, como o canShowDrawerItem do web.
+    final canSeeVisitsList = VisitReportAccess.canSeeListInMenu;
+    final canSeeVisitsManagement = VisitReportAccess.canSeeManagementInMenu;
+    final showVisitasGroup = canSeeVisitsList || canSeeVisitsManagement;
+
+    // OCULTOS do menu (rotas vivas), espelhando o menu do web:
     // MCMV, Metas, Checklists, Locações/Seguros/Crédito/Régua,
     // Gamificação/Prêmios, Zezin, Automações e analytics avançado.
     // Patrimônio voltou ao menu em 09/09/2026 (ver canSeeAssets).
+
+    // Documentos > Biblioteca (/documents) — no web: document_management +
+    // document:read. Assinaturas (/documents/signatures no web) tem a mesma
+    // cerca.
+    final canSeeDocuments =
+        ModuleAccessService.instance.hasCompanyModule('document_management') &&
+        ModuleAccessService.instance.hasPermission('document:read');
 
     // WhatsApp inbox (paridade com /whatsapp do web: módulo api_integrations
     // + ANY-OF whatsapp:view / whatsapp:view_messages).
@@ -1066,8 +1097,12 @@ class _AppDrawerState extends State<AppDrawer> {
             ModuleAccessService.instance
                 .hasPermission('whatsapp:view_messages'));
 
-    // SDR com IA (/sdr) e Comissões (/commissions): ocultos do menu por
-    // decisão de produto — rotas continuam vivas.
+    // Dash SDR (/sdr): gate do CRM, igual ao web (kanban_management +
+    // kanban:view_all_teams). Comissões (/commissions): oculto do menu por
+    // decisão de produto — rota continua viva.
+    final canSeeSdrDash =
+        ModuleAccessService.instance.hasCompanyModule('kanban_management') &&
+        ModuleAccessService.instance.hasPermission('kanban:view_all_teams');
 
     // Central de Integrações (any-of dos módulos/permissões do web).
     final canSeeIntegrations = (ModuleAccessService.instance
@@ -1166,6 +1201,22 @@ class _AppDrawerState extends State<AppDrawer> {
                               );
                             },
                           ),
+                          if (canSeeSdrDash)
+                            _buildDrawerItem(
+                              context: context,
+                              currentRoute: activeRoute,
+                              route: AppRoutes.sdr,
+                              icon: LucideIcons.headset,
+                              activeIcon: LucideIcons.headset,
+                              title: 'Dash SDR',
+                              accent: accent,
+                              showLeadingTile: true,
+                              onTap: () {
+                                Navigator.pop(context);
+                                if (activeRoute == AppRoutes.sdr) return;
+                                Navigator.of(context).pushNamed(AppRoutes.sdr);
+                              },
+                            ),
                           if (canSeeMultichannel)
                             _buildDrawerItem(
                               context: context,
@@ -1193,6 +1244,71 @@ class _AppDrawerState extends State<AppDrawer> {
                               context,
                             ).withValues(alpha: 0.5),
                           ),
+                          // Visitas (29/09/2026): mesmo lugar do menu web,
+                          // onde o grupo vem antes de Vendas & CRM.
+                          if (showVisitasGroup)
+                            _buildExpansionTile(
+                              context: context,
+                              title: 'Visitas',
+                              icon: LucideIcons.calendarCheck,
+                              activeIcon: LucideIcons.calendarCheck,
+                              isExpanded: _visitasExpanded,
+                              groupActive:
+                                  activeRoute.startsWith(AppRoutes.visits) ||
+                                      activeRoute == AppRoutes.visitReports,
+                              accent: accent,
+                              onExpansionChanged: (expanded) {
+                                setState(() {
+                                  _visitasExpanded = expanded;
+                                });
+                              },
+                              children: [
+                                if (canSeeVisitsList)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.visits,
+                                    icon: LucideIcons.list,
+                                    activeIcon: LucideIcons.list,
+                                    title: 'Lista de Visitas',
+                                    accent: accent,
+                                    isActive: activeRoute.startsWith(
+                                      AppRoutes.visits,
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute == AppRoutes.visits) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.visits);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                                if (canSeeVisitsManagement)
+                                  _buildDrawerItem(
+                                    context: context,
+                                    currentRoute: activeRoute,
+                                    route: AppRoutes.visitReports,
+                                    icon: LucideIcons.clipboardCheck,
+                                    activeIcon: LucideIcons.clipboardCheck,
+                                    title: 'Gestão de Visitas',
+                                    accent: accent,
+                                    onTap: () {
+                                      Navigator.pop(context);
+                                      if (activeRoute ==
+                                          AppRoutes.visitReports) {
+                                        return;
+                                      }
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamed(AppRoutes.visitReports);
+                                    },
+                                    isSubItem: true,
+                                  ),
+                              ],
+                            ),
                           if (showVendasCrmGroup) ...[
                             _buildExpansionTile(
                               context: context,
@@ -1231,7 +1347,7 @@ class _AppDrawerState extends State<AppDrawer> {
                                     },
                                     isSubItem: true,
                                   ),
-                                // SDR com IA: oculto do menu (rota /sdr viva).
+                                // Dash SDR: no bloco Dashboard (gate do CRM).
                                 if (canSeeKanban)
                                   _buildDrawerItem(
                                     context: context,
@@ -1262,8 +1378,9 @@ class _AppDrawerState extends State<AppDrawer> {
                                     isSubItem: true,
                                   ),
                                 // Fichas moram em Vendas & CRM (posição do
-                                // menu web). Visitas e MCMV: ocultos como no
-                                // web (rotas /visits e /mcmv/* vivas).
+                                // menu web). Visitas têm grupo próprio, antes
+                                // de Vendas & CRM; MCMV segue oculto como no
+                                // web (rotas /mcmv/* vivas).
                                 if (canSeeSaleForms)
                                   _buildDrawerItem(
                                     context: context,
@@ -1570,6 +1687,66 @@ class _AppDrawerState extends State<AppDrawer> {
                                     },
                                     isSubItem: true,
                                   ),
+                              ],
+                            ),
+                          if (canSeeDocuments)
+                            _buildExpansionTile(
+                              context: context,
+                              title: 'Documentos',
+                              icon: LucideIcons.folderOpen,
+                              activeIcon: LucideIcons.folderOpen,
+                              isExpanded: _documentosExpanded,
+                              groupActive: documentosGroupActive,
+                              accent: accent,
+                              onExpansionChanged: (expanded) {
+                                setState(() {
+                                  _documentosExpanded = expanded;
+                                });
+                              },
+                              children: [
+                                _buildDrawerItem(
+                                  context: context,
+                                  currentRoute: activeRoute,
+                                  route: AppRoutes.documents,
+                                  icon: LucideIcons.library,
+                                  activeIcon: LucideIcons.library,
+                                  title: 'Biblioteca',
+                                  accent: accent,
+                                  isActive:
+                                      activeRoute == AppRoutes.documents ||
+                                          activeRoute.startsWith(
+                                            '/documents/',
+                                          ),
+                                  onTap: () {
+                                    Navigator.pop(context);
+                                    if (activeRoute == AppRoutes.documents) {
+                                      return;
+                                    }
+                                    Navigator.of(
+                                      context,
+                                    ).pushNamed(AppRoutes.documents);
+                                  },
+                                  isSubItem: true,
+                                ),
+                                _buildDrawerItem(
+                                  context: context,
+                                  currentRoute: activeRoute,
+                                  route: AppRoutes.signatures,
+                                  icon: LucideIcons.penLine,
+                                  activeIcon: LucideIcons.penLine,
+                                  title: 'Assinaturas',
+                                  accent: accent,
+                                  onTap: () {
+                                    Navigator.pop(context);
+                                    if (activeRoute == AppRoutes.signatures) {
+                                      return;
+                                    }
+                                    Navigator.of(
+                                      context,
+                                    ).pushNamed(AppRoutes.signatures);
+                                  },
+                                  isSubItem: true,
+                                ),
                               ],
                             ),
                           if (canSeeCalendar)

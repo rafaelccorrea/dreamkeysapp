@@ -77,10 +77,12 @@ class LoginFlowService {
             
             // 2FA_SETUP_REQUIRED - 2FA obrigatório mas não configurado
             if (errorCode == '2FA_SETUP_REQUIRED') {
-              final suggestion = details?['suggestion']?.toString() ?? 
-                  'Configure o 2FA através das configurações antes de fazer login';
-              return LoginFlowResult.error(
-                message: 'Autenticação de dois fatores é obrigatória para sua empresa. $suggestion',
+              // Como o web: abre a configuração do 2FA (QR + código) em vez
+              // de barrar o login com uma mensagem.
+              return LoginFlowResult.requires2FASetup(
+                email: email,
+                password: password,
+                rememberMe: rememberMe,
               );
             }
             
@@ -118,10 +120,13 @@ class LoginFlowService {
         }
       }
 
-      // Se requer 2FA mas usuário não configurou, retornar erro
+      // Empresa exige 2FA e o usuário ainda não configurou: abre o setup
+      // (QR + código), como o modal de setup do web.
       if (requires2FA && !hasTwoFactorConfigured) {
-        return LoginFlowResult.error(
-          message: 'Autenticação de dois fatores requerida mas não configurada',
+        return LoginFlowResult.requires2FASetup(
+          email: email,
+          password: password,
+          rememberMe: rememberMe,
         );
       }
 
@@ -151,10 +156,12 @@ class LoginFlowService {
           
           // 2FA_SETUP_REQUIRED - 2FA obrigatório mas não configurado
           if (errorCode == '2FA_SETUP_REQUIRED') {
-            final suggestion = details?['suggestion']?.toString() ?? 
-                'Configure o 2FA através das configurações antes de fazer login';
-            return LoginFlowResult.error(
-              message: 'Autenticação de dois fatores é obrigatória para sua empresa. $suggestion',
+            // Como o web: abre a configuração do 2FA (QR + código) em vez
+            // de barrar o login com uma mensagem.
+            return LoginFlowResult.requires2FASetup(
+              email: email,
+              password: password,
+              rememberMe: rememberMe,
             );
           }
           
@@ -349,6 +356,10 @@ class LoginFlowResult {
   final String? route;
   final String message;
   final bool requires2FA;
+
+  /// Empresa exige 2FA e o usuário ainda não configurou — a tela de login
+  /// abre o TwoFactorSetupPage com [email]/[password].
+  final bool requires2FASetup;
   final String? tempToken;
   final String? email;
   final String? password;
@@ -359,6 +370,7 @@ class LoginFlowResult {
     this.route,
     required this.message,
     this.requires2FA = false,
+    this.requires2FASetup = false,
     this.tempToken,
     this.email,
     this.password,
@@ -396,6 +408,21 @@ class LoginFlowResult {
       message: 'Autenticação de dois fatores requerida',
       requires2FA: true,
       tempToken: tempToken,
+      email: email,
+      password: password,
+      rememberMe: rememberMe,
+    );
+  }
+
+  factory LoginFlowResult.requires2FASetup({
+    required String email,
+    required String password,
+    required bool rememberMe,
+  }) {
+    return LoginFlowResult(
+      success: false,
+      message: 'Configure a autenticação de dois fatores para continuar',
+      requires2FASetup: true,
       email: email,
       password: password,
       rememberMe: rememberMe,

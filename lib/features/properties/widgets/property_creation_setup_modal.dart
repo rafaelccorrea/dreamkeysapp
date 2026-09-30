@@ -10,6 +10,7 @@ import '../../../shared/services/property_service.dart';
 import '../../../shared/utils/error_cause.dart';
 import '../../../shared/utils/property_finalidade.dart';
 import '../../../shared/widgets/app_error_state.dart';
+import '../utils/property_type_visual.dart';
 import 'finalidade_picker.dart';
 
 /// Modos de origem de endereço — espelho do web `PropertyCreationAddressMode`.
@@ -512,43 +513,35 @@ class _PropertyCreationSetupPageState extends State<PropertyCreationSetupPage> {
 
   // ---------- Type grid ----------
 
-  static const List<({PropertyType value, String label, IconData icon})>
-      _typeOptions = [
-    (value: PropertyType.house, label: 'Casa', icon: Icons.home_rounded),
-    (
-      value: PropertyType.apartment,
-      label: 'Apartamento',
-      icon: Icons.apartment_rounded
-    ),
-    (
-      value: PropertyType.commercial,
-      label: 'Comercial',
-      icon: Icons.business_rounded
-    ),
-    (value: PropertyType.land, label: 'Terreno', icon: Icons.location_on_rounded),
-    (value: PropertyType.rural, label: 'Rural', icon: Icons.cottage_rounded),
-  ];
-
   Widget _typeGrid(BuildContext context) {
     final theme = Theme.of(context);
     return LayoutBuilder(
       builder: (context, c) {
-        // 2 colunas em telas estreitas, 3 nas mais largas — espelho do web
-        // que usa `auto-fill, minmax(140px, 1fr)`.
-        final crossAxisCount = c.maxWidth >= 480 ? 3 : 2;
-        return GridView.count(
+        // Os 16 tipos do back, na ordem e com os rótulos de
+        // `PropertyTypeOptions` do web. Grade de 3 colunas no celular e 4 nas
+        // telas largas (o web usa 4 → 3 → 2); altura fixa por célula para as
+        // 16 pastilhas não esticarem o setup.
+        final crossAxisCount = c.maxWidth >= 480 ? 4 : 3;
+        return GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: crossAxisCount,
-          crossAxisSpacing: 10,
-          mainAxisSpacing: 10,
-          childAspectRatio: 1.55,
-          children: _typeOptions.map((opt) {
-            final selected = _type == opt.value;
-            return _typeCard(theme, opt.label, opt.icon, selected, () {
-              _onTypeChanged(opt.value);
-            });
-          }).toList(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: crossAxisCount,
+            crossAxisSpacing: 8,
+            mainAxisSpacing: 8,
+            mainAxisExtent: 78,
+          ),
+          itemCount: PropertyType.values.length,
+          itemBuilder: (context, i) {
+            final t = PropertyType.values[i];
+            return _typeCard(
+              theme,
+              t.label,
+              PropertyTypeVisual.rounded(t),
+              _type == t,
+              () => _onTypeChanged(t),
+            );
+          },
         );
       },
     );
@@ -590,20 +583,27 @@ class _PropertyCreationSetupPageState extends State<PropertyCreationSetupPage> {
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: border, width: selected ? 1.6 : 1),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 22, color: fg),
-              const SizedBox(height: 8),
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: fg,
-                  fontSize: 13,
-                  letterSpacing: 0.1,
+              Icon(icon, size: 20, color: fg),
+              const SizedBox(height: 6),
+              // "Sala Comercial" quebra em 2 linhas; Flexible impede estouro
+              // com fonte ampliada.
+              Flexible(
+                child: Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: fg,
+                    fontSize: 12.5,
+                    letterSpacing: 0.1,
+                    height: 1.15,
+                  ),
                 ),
               ),
             ],

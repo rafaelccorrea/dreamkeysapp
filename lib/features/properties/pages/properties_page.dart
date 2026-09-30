@@ -25,6 +25,7 @@ import '../../../../core/routes/app_routes.dart';
 import '../models/property_wizard_pop_result.dart';
 import '../utils/property_edit_permissions.dart';
 import '../utils/property_status_visual.dart';
+import '../utils/property_type_visual.dart';
 
 // Formatter de moeda
 final _currencyFormatter = NumberFormat.currency(
@@ -1132,7 +1133,8 @@ class _PropertiesPageState extends State<PropertiesPage> {
       if (p.hasPendingOffers == true) {
         sumPending += p.pendingOffersCount ?? 1;
       }
-      switch (p.status) {
+      // Status que o app não conhece não cai no balde de "Rascunho".
+      switch (p.statusIsKnown ? p.status : null) {
         case PropertyStatus.available:
           available++;
           break;
@@ -1147,10 +1149,14 @@ class _PropertiesPageState extends State<PropertiesPage> {
           break;
         case PropertyStatus.pendingApproval:
         case PropertyStatus.pendingOwnerAuthorization:
+        case PropertyStatus.pendingPublication:
           pendingReview++;
           break;
         case PropertyStatus.maintenance:
           maintenance++;
+          break;
+        default:
+          // Etapas do funil de locação: não entram em nenhum balde acima.
           break;
       }
       if (p.salePrice != null) {
@@ -2327,6 +2333,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
                               children: [
                                 PropertyStatusPill(
                                   status: property.status,
+                                  rawStatus: property.statusRaw,
                                   short: true,
                                   dense: true,
                                 ),
@@ -2389,7 +2396,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
                           const SizedBox(width: 3),
                           Flexible(
                             child: Text(
-                              property.type.label,
+                              // Rótulo do tipo cru: tipo que o app não
+                              // conhece aparece como veio, nunca como "Casa".
+                              property.typeLabel,
                               style: TextStyle(
                                 color: secondaryColor,
                                 fontWeight: FontWeight.w700,
@@ -2545,20 +2554,8 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 
-  IconData _typeIconCompact(PropertyType type) {
-    switch (type) {
-      case PropertyType.house:
-        return Icons.home_outlined;
-      case PropertyType.apartment:
-        return Icons.apartment;
-      case PropertyType.commercial:
-        return Icons.storefront_outlined;
-      case PropertyType.land:
-        return Icons.terrain_outlined;
-      case PropertyType.rural:
-        return Icons.agriculture_outlined;
-    }
-  }
+  IconData _typeIconCompact(PropertyType type) =>
+      PropertyTypeVisual.outlined(type);
 
   Widget _buildEmptyPropertiesState(BuildContext context, ThemeData theme) {
     final accent = _portfolioAccentColor(context);

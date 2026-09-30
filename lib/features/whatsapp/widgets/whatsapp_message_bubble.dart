@@ -6,6 +6,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../models/whatsapp_models.dart';
 import 'whatsapp_conversation_card.dart' show whatsAppMessageTypeIcon;
+import 'whatsapp_midia_da_bolha.dart';
 
 /// Bolha de mensagem — estilo **WhatsApp para iPhone**:
 /// - enviada em verde suave (verde semântico do tema) com texto de alto
@@ -25,11 +26,20 @@ class WhatsAppMessageBubble extends StatelessWidget {
   final bool isFirstInGroup;
   final bool isLastInGroup;
 
+  /// Renova a URL assinada da mídia (vale 1 h no S3) quando ela falha ou
+  /// venceu — a conversa relê a mensagem (29/09/2026).
+  final WhatsAppRenovarMidia? onRenovarMidia;
+
+  /// Nome do contato, para o título da imagem em tela cheia.
+  final String? contactLabel;
+
   const WhatsAppMessageBubble({
     super.key,
     required this.message,
     this.isFirstInGroup = true,
     this.isLastInGroup = true,
+    this.onRenovarMidia,
+    this.contactLabel,
   });
 
   @override
@@ -179,58 +189,66 @@ class WhatsAppMessageBubble extends StatelessWidget {
     );
   }
 
+  /// Mídia da bolha (29/09/2026): imagem e figurinha desenhadas (tela cheia
+  /// ao tocar), áudio/nota de voz e vídeo com "tocar", documento com "abrir"
+  /// — antes só a imagem aparecia e o resto pedia para abrir o painel web.
+  /// Sem arquivo no servidor, "{Tipo} indisponível" como no web.
   Widget _buildMedia(BuildContext context, ThemeData theme, Color metaColor) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    // Imagem com URL assinada (válida ~1h) — erro cai num placeholder.
-    if (message.messageType == WhatsAppMessageType.image &&
-        message.mediaUrl != null) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 230, maxHeight: 260),
-          child: Image.network(
-            message.mediaUrl!,
-            fit: BoxFit.cover,
-            errorBuilder: (context, error, stack) => _mediaFallback(
-              context,
-              metaColor,
-              icon: LucideIcons.image,
-              label: 'Imagem indisponível',
-              hint: 'O link desta mídia expirou.',
-            ),
-            loadingBuilder: (context, child, progress) {
-              if (progress == null) return child;
-              return Container(
-                width: 210,
-                height: 150,
-                color: (isDark ? Colors.white : Colors.black)
-                    .withValues(alpha: 0.06),
-                child: Center(
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: metaColor,
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      );
+    final temArquivo = (message.mediaUrl ?? '').trim().isNotEmpty;
+    switch (message.messageType) {
+      case WhatsAppMessageType.image:
+      case WhatsAppMessageType.sticker:
+        if (!temArquivo) return _midiaAusente(context, metaColor);
+        return WhatsAppImagemDaBolha(
+          message: message,
+          onRenovarMidia: onRenovarMidia,
+          titulo: message.isOutbound ? 'Você' : contactLabel,
+          figurinha: message.messageType == WhatsAppMessageType.sticker,
+        );
+      case WhatsAppMessageType.audio:
+      case WhatsAppMessageType.voice:
+      case WhatsAppMessageType.video:
+        if (!temArquivo) return _midiaAusente(context, metaColor);
+        return WhatsAppMidiaTocavel(
+          message: message,
+          onRenovarMidia: onRenovarMidia,
+        );
+      case WhatsAppMessageType.document:
+        if (!temArquivo) return _midiaAusente(context, metaColor);
+        return WhatsAppDocumentoDaBolha(
+          message: message,
+          onRenovarMidia: onRenovarMidia,
+        );
+      case WhatsAppMessageType.location:
+      case WhatsAppMessageType.contact:
+      case WhatsAppMessageType.text:
+      case WhatsAppMessageType.unknown:
+        // Localização e contato ainda sem desenho próprio no app: o conteúdo
+        // deles vem do webhookData (item à parte da paridade).
+        final fileName = (message.mediaFileName ?? '').trim();
+        return _mediaFallback(
+          context,
+          metaColor,
+          icon: whatsAppMessageTypeIcon(message.messageType),
+          label: message.messageType.label,
+          hint: fileName.isNotEmpty
+              ? fileName
+              : 'Abra no painel para visualizar.',
+        );
     }
+  }
 
-    // Demais mídias: chip com ícone do tipo + nome do arquivo (quando houver).
-    final fileName = (message.mediaFileName ?? '').trim();
+  /// Mídia que chegou sem arquivo (download do WhatsApp falhou no back).
+  Widget _midiaAusente(BuildContext context, Color metaColor) {
+    final tipo = message.messageType;
+    final rotulo = tipo == WhatsAppMessageType.voice ? 'Nota de voz' : tipo.label;
+    final nome = (message.mediaFileName ?? '').trim();
     return _mediaFallback(
       context,
       metaColor,
-      icon: whatsAppMessageTypeIcon(message.messageType),
-      label: message.messageType.label,
-      hint: fileName.isNotEmpty ? fileName : 'Abra no painel para visualizar.',
+      icon: whatsAppMessageTypeIcon(tipo),
+      label: '$rotulo indisponível',
+      hint: nome.isNotEmpty ? nome : null,
     );
   }
 
@@ -239,7 +257,7 @@ class WhatsAppMessageBubble extends StatelessWidget {
     Color metaColor, {
     required IconData icon,
     required String label,
-    required String hint,
+    String? hint,
   }) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
@@ -274,16 +292,17 @@ class WhatsAppMessageBubble extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                Text(
-                  hint,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: metaColor,
-                    fontWeight: FontWeight.w500,
-                    fontSize: 10.5,
+                if (hint != null && hint.isNotEmpty)
+                  Text(
+                    hint,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: metaColor,
+                      fontWeight: FontWeight.w500,
+                      fontSize: 10.5,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
               ],
             ),
           ),

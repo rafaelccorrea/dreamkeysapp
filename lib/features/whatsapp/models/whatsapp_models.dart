@@ -3,6 +3,8 @@
 // `GET /whatsapp/templates` e `GET /whatsapp/unofficial/config/status` do
 // backend NestJS. Parsing 100% defensivo (null/string/number tolerante).
 
+import 'whatsapp_message_content.dart';
+
 // ─── Helpers de parsing ──────────────────────────────────────────────────────
 
 int _toInt(dynamic v) {
@@ -269,6 +271,22 @@ class WhatsAppMessage {
   final DateTime? createdAt;
   final DateTime? readAt;
 
+  /// Tipo bruto como o back gravou (29/09/2026): o enum acima fecha em
+  /// `unknown` o que não conhece ('reaction', 'poll'…), e o rótulo honesto da
+  /// bolha precisa do nome original.
+  final String rawType;
+
+  /// wamid da Meta (ou id do Baileys) — é por ele que uma resposta cita esta
+  /// mensagem e que a reação aponta o alvo.
+  final String? whatsappMessageId;
+
+  /// wamid da mensagem que ESTA responde (citação) ou alvo da reação.
+  final String? replyToMessageId;
+
+  /// Dados crus do webhook: conteúdo de reação/localização/contato/aviso e o
+  /// motivo da falha de envio (`failure`). Paridade com o web (29/09/2026).
+  final Map<String, dynamic>? webhookData;
+
   const WhatsAppMessage({
     required this.id,
     required this.phoneNumber,
@@ -293,7 +311,47 @@ class WhatsAppMessage {
     this.integrationSource = WhatsAppIntegrationSource.unknown,
     this.createdAt,
     this.readAt,
+    this.rawType = 'text',
+    this.whatsappMessageId,
+    this.replyToMessageId,
+    this.webhookData,
   });
+
+  /// Cópia com a URL de mídia renovada ou o status trocado (reenviar).
+  WhatsAppMessage copyWith({
+    String? mediaUrl,
+    WhatsAppMessageStatus? status,
+  }) {
+    return WhatsAppMessage(
+      id: id,
+      phoneNumber: phoneNumber,
+      contactName: contactName,
+      contactAvatarUrl: contactAvatarUrl,
+      messageType: messageType,
+      direction: direction,
+      message: message,
+      mediaUrl: mediaUrl ?? this.mediaUrl,
+      mediaMimeType: mediaMimeType,
+      mediaFileName: mediaFileName,
+      status: status ?? this.status,
+      clientId: clientId,
+      clientName: clientName,
+      kanbanTaskId: kanbanTaskId,
+      userId: userId,
+      userName: userName,
+      isAiResponse: isAiResponse,
+      assignedToId: assignedToId,
+      assignedToName: assignedToName,
+      detectedSource: detectedSource,
+      integrationSource: integrationSource,
+      createdAt: createdAt,
+      readAt: readAt,
+      rawType: rawType,
+      whatsappMessageId: whatsappMessageId,
+      replyToMessageId: replyToMessageId,
+      webhookData: webhookData,
+    );
+  }
 
   bool get isOutbound => direction == WhatsAppMessageDirection.outbound;
   bool get isInbound => direction == WhatsAppMessageDirection.inbound;
@@ -302,12 +360,13 @@ class WhatsAppMessage {
   bool get isUnread =>
       isInbound && readAt == null && status != WhatsAppMessageStatus.read;
 
-  /// Texto de pré-visualização para a lista de conversas.
+  /// Texto de pré-visualização para a lista de conversas — a mesma verdade
+  /// da bolha (29/09/2026): reação vira "Reagiu com X", localização vira
+  /// "Localização: …", aviso do WhatsApp aparece como tal. Antes caía em
+  /// "Mensagem" sempre que `message` vinha vazio.
   String get preview {
-    final text = (message ?? '').trim();
-    if (text.isNotEmpty) return text;
-    if (messageType.isMedia) return messageType.label;
-    return 'Mensagem';
+    final p = previaDaMensagem(this).trim();
+    return p.isEmpty ? 'Mensagem' : p;
   }
 
   factory WhatsAppMessage.fromJson(Map<String, dynamic> json) {
@@ -343,6 +402,10 @@ class WhatsAppMessage {
           _toStringOrNull(json['integrationSource'])),
       createdAt: _toDate(json['createdAt']),
       readAt: _toDate(json['readAt']),
+      rawType: (_toStringOrNull(json['messageType']) ?? 'text').toLowerCase(),
+      whatsappMessageId: _toStringOrNull(json['whatsappMessageId']),
+      replyToMessageId: _toStringOrNull(json['replyToMessageId']),
+      webhookData: _toMap(json['webhookData']),
     );
   }
 }

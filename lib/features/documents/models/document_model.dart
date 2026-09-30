@@ -204,20 +204,30 @@ class DocumentSignaturesInfo {
   final int pending;
   final int signed;
   final int rejected;
+  final bool hasSignatures;
 
   DocumentSignaturesInfo({
     required this.total,
     required this.pending,
     required this.signed,
     required this.rejected,
+    this.hasSignatures = false,
   });
 
+  /// Todas as assinaturas concluídas — o web esconde "Enviar p/ assinatura"
+  /// nesse caso (`allSigned` do `DocumentDetailsPage`).
+  bool get allSigned =>
+      hasSignatures && total > 0 && pending == 0 && signed == total;
+
   factory DocumentSignaturesInfo.fromJson(Map<String, dynamic> json) {
+    int n(Object? v) => int.tryParse(v?.toString() ?? '') ?? 0;
+    final total = n(json['total']);
     return DocumentSignaturesInfo(
-      total: json['total'] ?? 0,
-      pending: json['pending'] ?? 0,
-      signed: json['signed'] ?? 0,
-      rejected: json['rejected'] ?? 0,
+      total: total,
+      pending: n(json['pending']),
+      signed: n(json['signed']),
+      rejected: n(json['rejected']),
+      hasSignatures: json['hasSignatures'] == true || total > 0,
     );
   }
 }
@@ -228,12 +238,20 @@ class DocumentClient {
   final String name;
   final String? email;
   final String? phone;
+  final String? cpf;
+  final String? address;
+  final String? city;
+  final String? state;
 
   DocumentClient({
     required this.id,
     required this.name,
     this.email,
     this.phone,
+    this.cpf,
+    this.address,
+    this.city,
+    this.state,
   });
 
   factory DocumentClient.fromJson(Map<String, dynamic> json) {
@@ -242,6 +260,10 @@ class DocumentClient {
       name: json['name']?.toString() ?? '',
       email: json['email']?.toString(),
       phone: json['phone']?.toString(),
+      cpf: json['cpf']?.toString(),
+      address: json['address']?.toString(),
+      city: json['city']?.toString(),
+      state: json['state']?.toString(),
     );
   }
 }
@@ -252,12 +274,16 @@ class DocumentProperty {
   final String title;
   final String? code;
   final String? address;
+  final String? city;
+  final String? state;
 
   DocumentProperty({
     required this.id,
     required this.title,
     this.code,
     this.address,
+    this.city,
+    this.state,
   });
 
   factory DocumentProperty.fromJson(Map<String, dynamic> json) {
@@ -266,6 +292,8 @@ class DocumentProperty {
       title: json['title']?.toString() ?? '',
       code: json['code']?.toString(),
       address: json['address']?.toString(),
+      city: json['city']?.toString(),
+      state: json['state']?.toString(),
     );
   }
 }
