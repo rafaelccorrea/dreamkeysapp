@@ -2,7 +2,7 @@ name: Intellisys
 description: "Intellisys - Sistema Imobiliário"
 publish_to: 'none'
 
-version: 2.13.0+80
+version: 2.14.0+81
 
 environment:
   sdk: ^3.9.2
