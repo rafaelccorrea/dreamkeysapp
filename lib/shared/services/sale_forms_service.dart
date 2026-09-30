@@ -135,6 +135,27 @@ class SaleForm {
   String get id => _str(raw['id']);
   String get formNumber => _str(raw['formNumber'] ?? raw['form_number']);
   SaleFormStatus get status => parseSaleFormStatus(raw['status']);
+
+  /// Distrato (30/09/2026, paridade com `distratoDaFicha` do web): aberto =
+  /// ficha cancelada por distrato aguardando a prova no Financeiro;
+  /// concluído = o Financeiro recebeu a prova.
+  bool get distratoAberto {
+    final v = raw['distratoAbertoEm'];
+    return v != null && v.toString().isNotEmpty;
+  }
+
+  bool get distratoConcluido {
+    final v = raw['distratoConcluidoEm'];
+    return distratoAberto && v != null && v.toString().isNotEmpty;
+  }
+
+  /// Rótulo do status igual ao web: distrato vence o "Cancelada".
+  String get statusLabel {
+    if (distratoConcluido) return 'Distratada';
+    if (distratoAberto) return 'Em distrato';
+    return status.label;
+  }
+
   SaleFormType get saleFormType =>
       parseSaleFormType(raw['saleFormType'] ?? raw['sale_form_type']);
   bool get ativo => _bool(raw['ativo'], defaultValue: true);

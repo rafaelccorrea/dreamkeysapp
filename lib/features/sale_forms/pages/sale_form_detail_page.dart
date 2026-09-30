@@ -194,7 +194,7 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
                 border: Border.all(color: tone.withValues(alpha: 0.3)),
               ),
               child: Text(
-                f.status.label.toUpperCase(),
+                f.statusLabel.toUpperCase(),
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: tone,
                   fontWeight: FontWeight.w900,

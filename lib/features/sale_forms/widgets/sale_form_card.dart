@@ -117,7 +117,7 @@ class SaleFormCard extends StatelessWidget {
                               Flexible(
                                 child: _StatusPill(
                                   tone: statusTone,
-                                  label: saleForm.status.label.toUpperCase(),
+                                  label: saleForm.statusLabel.toUpperCase(),
                                 ),
                               ),
                             ],

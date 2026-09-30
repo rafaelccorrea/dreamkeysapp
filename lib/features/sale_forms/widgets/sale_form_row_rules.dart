@@ -72,16 +72,13 @@ class SaleFormRowRules {
   /// PDF: `sale_form:export` + finalizada (sistema e com assinaturas).
   bool get canPdf => _canExport && _finalized && !_deleted;
 
-  /// Distrato: update + finalizada + sem distrato aberto.
+  /// Distrato: update + finalizada + sem distrato aberto (mesma regra do web).
   ///
-  /// DESLIGADO (29/09/2026): o menu web chama `PATCH /sistema/fichas-venda/
-  /// :id/distrato`, que NÃO existe no core em produção (404 "Cannot PATCH") —
-  /// o distrato real é do Financeiro (`POST /sales/:id/distrato`, id da venda
-  /// ligada por `fichaExternalId`). Religar quando o core ganhar a rota.
-  static const bool _distratoNoCore = false;
-
+  /// Religado em 30/09/2026: o core ganhou `PATCH /sistema/fichas-venda/:id/
+  /// distrato` (cancela a ficha, marca `distratoAbertoEm` e avisa o
+  /// Financeiro com `distrato: true`). Até 29/09 a rota não existia e dava 404
+  /// no web e no app. Só funciona depois do deploy desse back.
   bool get canDistrato =>
-      _distratoNoCore &&
       _canUpdate &&
       _finalized &&
       !_deleted &&
