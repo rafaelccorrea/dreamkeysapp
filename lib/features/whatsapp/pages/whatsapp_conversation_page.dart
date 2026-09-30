@@ -1423,6 +1423,10 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     );
   }
 
+  /// Linha do composer (29/09/2026): atalho de template (canal oficial),
+  /// campo com o clipe no fim e o botão de enviar. O mesmo botão manda o
+  /// texto E a fila de anexos (`_enviar`), então acende com qualquer um dos
+  /// dois — antes só com texto, e o anexo sozinho não tinha como sair.
   Widget _buildComposerRow(
     BuildContext context, {
     required bool isDark,
@@ -1432,128 +1436,153 @@ class _WhatsAppConversationPageState extends State<WhatsAppConversationPage> {
     required Color hairline,
     required bool temConteudo,
   }) {
+    // Enquanto o seletor ainda lê os arquivos, `_enviar` ignora o toque: o
+    // botão fica apagado para não parecer que enviou.
+    final podeEnviar = temConteudo && !_sending && !_preparandoAnexos;
+    final quantosAnexos = _anexos.length;
+
     return Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            // Atalho de template (sempre disponível no canal oficial).
-            if (!_usesUnofficial)
-              Padding(
-                padding: const EdgeInsets.only(right: 7, bottom: 3),
-                child: InkResponse(
-                  radius: 21,
-                  onTap: _openTemplateSheet,
-                  child: Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: fieldFill,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: hairline),
-                    ),
-                    child:
-                        Icon(LucideIcons.badgeCheck, size: 18, color: secondary),
-                  ),
-                ),
-              ),
-            Expanded(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        // Atalho de template (sempre disponível no canal oficial).
+        if (!_usesUnofficial)
+          Padding(
+            padding: const EdgeInsets.only(right: 7, bottom: 3),
+            child: InkResponse(
+              radius: 21,
+              onTap: _openTemplateSheet,
               child: Container(
-                constraints: const BoxConstraints(minHeight: 44),
-                padding: const EdgeInsets.symmetric(horizontal: 14),
+                width: 38,
+                height: 38,
                 decoration: BoxDecoration(
                   color: fieldFill,
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.10)
-                        : Colors.black.withValues(alpha: 0.08),
-                    width: 0.8,
-                  ),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: hairline),
                 ),
-                child: TextField(
-                  controller: _composerController,
-                  focusNode: _composerFocus,
-                  minLines: 1,
-                  maxLines: 5,
-                  textCapitalization: TextCapitalization.sentences,
-                  cursorColor: green,
-                  style: TextStyle(
-                    color: ThemeHelpers.textColor(context),
-                    fontSize: 15,
-                    fontWeight: FontWeight.w500,
-                    height: 1.35,
-                    letterSpacing: -0.1,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: 'Mensagem',
-                    hintStyle: TextStyle(
-                      color: secondary.withValues(alpha: 0.7),
-                      fontWeight: FontWeight.w400,
-                      fontSize: 15,
-                    ),
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    isDense: true,
-                    contentPadding:
-                        const EdgeInsets.symmetric(vertical: 11.5),
-                  ),
-                  onChanged: (_) => setState(() {}),
-                ),
+                child:
+                    Icon(LucideIcons.badgeCheck, size: 18, color: secondary),
               ),
             ),
-            const SizedBox(width: 7),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 1),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOut,
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: !hasText || _sending
-                      ? green.withValues(alpha: isDark ? 0.35 : 0.4)
-                      : green,
-                  shape: BoxShape.circle,
-                  boxShadow: !hasText || _sending
-                      ? null
-                      : [
-                          BoxShadow(
-                            color: green.withValues(alpha: 0.35),
-                            blurRadius: 10,
-                            offset: const Offset(0, 4),
-                            spreadRadius: -2,
-                          ),
-                        ],
+          ),
+        Expanded(
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 44),
+            // Direita curta: o clipe (36) já traz o próprio respiro.
+            padding: const EdgeInsets.only(left: 14, right: 4),
+            decoration: BoxDecoration(
+              color: fieldFill,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.10)
+                    : Colors.black.withValues(alpha: 0.08),
+                width: 0.8,
+              ),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _composerController,
+                    focusNode: _composerFocus,
+                    minLines: 1,
+                    maxLines: 5,
+                    textCapitalization: TextCapitalization.sentences,
+                    cursorColor: green,
+                    style: TextStyle(
+                      color: ThemeHelpers.textColor(context),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      height: 1.35,
+                      letterSpacing: -0.1,
+                    ),
+                    decoration: InputDecoration(
+                      hintText: 'Mensagem',
+                      hintStyle: TextStyle(
+                        color: secondary.withValues(alpha: 0.7),
+                        fontWeight: FontWeight.w400,
+                        fontSize: 15,
+                      ),
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      isDense: true,
+                      contentPadding:
+                          const EdgeInsets.symmetric(vertical: 11.5),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
                 ),
-                child: Material(
-                  color: Colors.transparent,
-                  shape: const CircleBorder(),
-                  clipBehavior: Clip.antiAlias,
-                  child: InkWell(
-                    onTap: _sending ? null : _sendText,
-                    child: Center(
-                      child: _sending
-                          ? const SizedBox(
-                              width: 17,
-                              height: 17,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(
-                              LucideIcons.arrowUp,
-                              size: 21,
+                // Clipe dentro do campo, no rodapé: com o texto crescendo
+                // ele fica na última linha, como no WhatsApp.
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: _buildBotaoAnexar(context, secondary),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 7),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 1),
+          child: Semantics(
+            button: true,
+            enabled: podeEnviar,
+            // Mesmo rótulo da dica do botão no web.
+            label: quantosAnexos > 1
+                ? 'Enviar $quantosAnexos anexos'
+                : 'Enviar mensagem',
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: podeEnviar
+                    ? green
+                    : green.withValues(alpha: isDark ? 0.35 : 0.4),
+                shape: BoxShape.circle,
+                boxShadow: podeEnviar
+                    ? [
+                        BoxShadow(
+                          color: green.withValues(alpha: 0.35),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                          spreadRadius: -2,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Material(
+                color: Colors.transparent,
+                shape: const CircleBorder(),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: podeEnviar ? _enviar : null,
+                  child: Center(
+                    child: _sending
+                        ? const SizedBox(
+                            width: 17,
+                            height: 17,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
                               color: Colors.white,
                             ),
-                    ),
+                          )
+                        : const Icon(
+                            LucideIcons.arrowUp,
+                            size: 21,
+                            color: Colors.white,
+                          ),
                   ),
                 ),
               ),
             ),
-          ],
+          ),
         ),
-      ),
+      ],
     );
   }
 }

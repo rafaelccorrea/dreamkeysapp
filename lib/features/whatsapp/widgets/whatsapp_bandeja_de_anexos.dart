@@ -359,6 +359,10 @@ class WhatsAppOrigemDoAnexoSheet extends StatelessWidget {
     return showModalBottomSheet<WhatsAppOrigemDoAnexo>(
       context: context,
       useSafeArea: true,
+      // Sem isto a folha fica presa a 9/16 da altura: num celular de 568 pt
+      // (ou deitado) as três opções com a regra do canal passavam do limite.
+      // A folha cresce até o conteúdo e rola quando não cabe (29/09/2026).
+      isScrollControlled: true,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black.withValues(alpha: 0.55),
       builder: (_) => WhatsAppOrigemDoAnexoSheet(naoOficial: naoOficial),
@@ -385,78 +389,80 @@ class WhatsAppOrigemDoAnexoSheet extends StatelessWidget {
       ),
       child: SafeArea(
         top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.only(top: 10, bottom: 6),
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: ThemeHelpers.borderColor(context)
-                        .withValues(alpha: 0.55),
-                    borderRadius: BorderRadius.circular(999),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 10, bottom: 6),
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: ThemeHelpers.borderColor(context)
+                          .withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
                   ),
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 6, 20, 4),
-              child: Text(
-                'Anexar',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: ThemeHelpers.textColor(context),
-                  letterSpacing: -0.2,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 6, 20, 4),
+                child: Text(
+                  'Anexar',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: ThemeHelpers.textColor(context),
+                    letterSpacing: -0.2,
+                  ),
                 ),
               ),
-            ),
-            _opcao(
-              context,
-              icone: LucideIcons.camera,
-              cor: verde,
-              titulo: 'Câmera',
-              detalhe: naoOficial
-                  ? 'Tirar uma foto agora'
-                  : 'Tirar uma foto agora ($kRotuloDasImagens, até 5MB)',
-              valor: WhatsAppOrigemDoAnexo.camera,
-            ),
-            _opcao(
-              context,
-              icone: LucideIcons.images,
-              cor: azul,
-              titulo: naoOficial ? 'Fotos e vídeos' : 'Fotos',
-              detalhe: naoOficial
-                  ? 'Várias de uma vez, até 50MB cada'
-                  : 'Várias de uma vez ($kRotuloDasImagens, até 5MB cada)',
-              valor: WhatsAppOrigemDoAnexo.galeria,
-            ),
-            _opcao(
-              context,
-              icone: LucideIcons.paperclip,
-              cor: violeta,
-              titulo: naoOficial ? 'Arquivo' : 'Documento ou áudio',
-              detalhe: naoOficial
-                  ? 'Vídeo, áudio ou documento, até 50MB'
-                  : 'Documento ($kRotuloDosDocumentos, até 50MB) ou áudio '
-                      '($kRotuloDosAudios, até 16MB)',
-              valor: WhatsAppOrigemDoAnexo.arquivo,
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 6, 20, 14),
-              child: Text(
-                'Até $kMaximoDeAnexos arquivos por envio; cada um vira uma '
-                'mensagem, e o texto digitado vai como legenda do primeiro.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: ThemeHelpers.textSecondaryColor(context),
-                  height: 1.35,
+              _opcao(
+                context,
+                icone: LucideIcons.camera,
+                cor: verde,
+                titulo: 'Câmera',
+                detalhe: naoOficial
+                    ? 'Tirar uma foto agora'
+                    : 'Tirar uma foto agora ($kRotuloDasImagens, até 5MB)',
+                valor: WhatsAppOrigemDoAnexo.camera,
+              ),
+              _opcao(
+                context,
+                icone: LucideIcons.images,
+                cor: azul,
+                titulo: naoOficial ? 'Fotos e vídeos' : 'Fotos',
+                detalhe: naoOficial
+                    ? 'Várias de uma vez, até 50MB cada'
+                    : 'Várias de uma vez ($kRotuloDasImagens, até 5MB cada)',
+                valor: WhatsAppOrigemDoAnexo.galeria,
+              ),
+              _opcao(
+                context,
+                icone: LucideIcons.paperclip,
+                cor: violeta,
+                titulo: naoOficial ? 'Arquivo' : 'Documento ou áudio',
+                detalhe: naoOficial
+                    ? 'Vídeo, áudio ou documento, até 50MB'
+                    : 'Documento ($kRotuloDosDocumentos, até 50MB) ou áudio '
+                        '($kRotuloDosAudios, até 16MB)',
+                valor: WhatsAppOrigemDoAnexo.arquivo,
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 6, 20, 14),
+                child: Text(
+                  'Até $kMaximoDeAnexos arquivos por envio; cada um vira uma '
+                  'mensagem, e o texto digitado vai como legenda do primeiro.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textSecondaryColor(context),
+                    height: 1.35,
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

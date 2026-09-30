@@ -9,10 +9,11 @@ class DashboardFilters {
   /// Período: 'today' | '7d' | '30d' | '90d' | '1y' | 'custom'
   final String? dateRange;
 
-  /// Comparação com período anterior. **Não é mais editável pela UI** —
-  /// o dashboard mobile não exibe deltas/comparativos visualmente, então
-  /// ter esse filtro só confundia o usuário. Mantemos um default fixo
-  /// (`previous_period`) pra manter a chamada da API válida.
+  /// Comparação com período anterior: 'previous_period' | 'previous_year' |
+  /// 'none'. No painel pessoal ela não é editável (o painel não exibe
+  /// deltas) e fica no default fixo `previous_period`. Na visão executiva
+  /// (29/09/2026, dash-01) ela É um filtro, como no `HomeFilterBar` do web:
+  /// nasce em 'none' e, ligada, acende as variações da tela.
   final String? compareWith;
 
   /// Tipo de métrica. **Removido da UI** — os valores que o app mandava
@@ -101,16 +102,12 @@ class DashboardFilters {
     );
   }
 
-  /// O recorte é o padrão da visão executiva (mês corrente, sem corretor,
-  /// sem comparação, empresa atual)?
-  bool get isExecutiveDefault {
+  /// O período é o "Este mês" da visão executiva (do dia 1º até hoje)?
+  bool get isCurrentMonthPeriod {
     final d = executiveDefaults();
-    return dateRange == d.dateRange &&
+    return dateRange == 'custom' &&
         startDate == d.startDate &&
-        endDate == d.endDate &&
-        !isComparing &&
-        teamMember == null &&
-        companyIds.isEmpty;
+        endDate == d.endDate;
   }
 
   /// Filtros padrão: primeiro dia do mês até hoje.
@@ -180,6 +177,41 @@ const _kPeriods = <_PeriodOption>[
   ),
 ];
 
+/// "Este mês" não é um `dateRange` do back: é o personalizado do dia 1º até
+/// hoje. Só existe na visão executiva.
+const String _kMonthPeriod = 'month';
+
+/// Recortes de tempo da visão executiva — os mesmos atalhos do menu
+/// "Recorte de tempo" do `HomeFilterBar` do web (29/09/2026, dash-01): lá
+/// não existem 90 dias nem 1 ano, e existe "Este mês", que é o padrão.
+const _kExecutivePeriods = <_PeriodOption>[
+  _PeriodOption(
+    value: 'today',
+    label: 'Hoje',
+    icon: Icons.today_rounded,
+  ),
+  _PeriodOption(
+    value: '7d',
+    label: '7 dias',
+    icon: Icons.view_week_rounded,
+  ),
+  _PeriodOption(
+    value: '30d',
+    label: '30 dias',
+    icon: Icons.calendar_view_month_rounded,
+  ),
+  _PeriodOption(
+    value: _kMonthPeriod,
+    label: 'Este mês',
+    icon: Icons.calendar_month_rounded,
+  ),
+  _PeriodOption(
+    value: 'custom',
+    label: 'Personalizado',
+    icon: Icons.edit_calendar_rounded,
+  ),
+];
+
 // ────────────────────────────────────────────────────────────────────
 // DRAWER
 // ────────────────────────────────────────────────────────────────────
@@ -201,13 +233,17 @@ const _kPeriods = <_PeriodOption>[
 ///   de número, que era frágil e sem feedback).
 /// - **Header editorial**: eyebrow `FILTROS · DASHBOARD` + título grande
 ///   "Personalizar visão" + linha contextual com período ativo.
+/// - **Visão executiva** (29/09/2026, dash-01): com `executive`, a gaveta é
+///   o `HomeFilterBar` do web — período com "Este mês", empresa, corretor e
+///   comparação (que lá existe porque a tela mostra as variações).
 class DashboardFiltersDrawer extends StatefulWidget {
   final DashboardFilters initialFilters;
   final Function(DashboardFilters) onFiltersChanged;
 
   /// 29/09/2026 (dash-01): visão executiva (admin/master). Troca o limite de
   /// agendamentos (só do painel pessoal) pelos recortes do `HomeFilterBar`
-  /// do web: comparação, empresa (só com mais de uma) e corretor.
+  /// do web: período com "Este mês", empresa (só com mais de uma), corretor
+  /// e comparação.
   final bool executive;
 
   /// Empresas do usuário (`GET /companies`). O seletor só aparece com 2+.
@@ -234,11 +270,73 @@ class _DashboardFiltersDrawerState extends State<DashboardFiltersDrawer> {
   DateTime? _selectedStartDate;
   DateTime? _selectedEndDate;
 
+  /// Visão executiva: "Personalizado" foi tocado — mostra as datas mesmo
+  /// quando o intervalo ainda coincide com "Este mês" (o `customOpen` do
+  /// `HomeFilterBar` do web).
+  bool _customOpen = false;
+
   @override
   void initState() {
     super.initState();
     _filters = widget.initialFilters;
     _parseInitialDates();
+  }
+
+  List<_PeriodOption> get _periods =>
+      widget.executive ? _kExecutivePeriods : _kPeriods;
+
+  /// Ficha de período acesa. Na visão executiva o personalizado que cobre do
+  /// dia 1º até hoje é "Este mês"; 90 dias e 1 ano não existem lá.
+  String get _periodValue {
+    final v = _filters.dateRange ?? 'custom';
+    if (!widget.executive) return v;
+    if (v == 'custom') {
+      return _filters.isCurrentMonthPeriod && !_customOpen
+          ? _kMonthPeriod
+          : 'custom';
+    }
+    if (v == 'today' || v == '7d' || v == '30d') return v;
+    return 'custom';
+  }
+
+  void _onPeriodChanged(String value) {
+    setState(() {
+      if (!widget.executive) {
+        _filters = _filters.copyWith(dateRange: value);
+        if (value != 'custom') {
+          _filters = _filters.copyWith(clearDates: true);
+          _selectedStartDate = null;
+          _selectedEndDate = null;
+        }
+        return;
+      }
+      final month = DashboardFilters.executiveDefaults();
+      if (value == _kMonthPeriod) {
+        _customOpen = false;
+        _filters = _filters.copyWith(
+          dateRange: 'custom',
+          startDate: month.startDate,
+          endDate: month.endDate,
+        );
+      } else if (value == 'custom') {
+        // Abre as datas já preenchidas com o mês corrente (o web faz o
+        // mesmo): o personalizado nunca vai ao back sem início e fim.
+        _customOpen = true;
+        if (_filters.dateRange != 'custom') {
+          _filters = _filters.copyWith(
+            dateRange: 'custom',
+            startDate: month.startDate,
+            endDate: month.endDate,
+          );
+        }
+      } else {
+        _customOpen = false;
+        _filters = _filters.copyWith(dateRange: value, clearDates: true);
+      }
+      _selectedStartDate = null;
+      _selectedEndDate = null;
+      _parseInitialDates();
+    });
   }
 
   void _parseInitialDates() {
@@ -383,9 +481,12 @@ class _DashboardFiltersDrawerState extends State<DashboardFiltersDrawer> {
 
   void _resetFilters() {
     setState(() {
+      // Visão executiva: o "Limpar tudo" do web — "Este mês", toda a equipe,
+      // sem comparação e a empresa atual.
       _filters = widget.executive
           ? DashboardFilters.executiveDefaults()
           : DashboardFilters.defaultFilters();
+      _customOpen = false;
       _selectedStartDate = null;
       _selectedEndDate = null;
       _parseInitialDates();
@@ -430,11 +531,12 @@ class _DashboardFiltersDrawerState extends State<DashboardFiltersDrawer> {
   }
 
   String get _activePeriodLabel {
-    final v = _filters.dateRange ?? 'custom';
-    return _kPeriods
+    final v = _periodValue;
+    final periods = _periods;
+    return periods
         .firstWhere(
           (p) => p.value == v,
-          orElse: () => _kPeriods.last,
+          orElse: () => periods.last,
         )
         .label;
   }
@@ -483,22 +585,16 @@ class _DashboardFiltersDrawerState extends State<DashboardFiltersDrawer> {
               ),
               const SizedBox(height: 12),
               _PeriodChips(
-                value: _filters.dateRange ?? 'custom',
+                periods: _periods,
+                value: _periodValue,
                 accent: accent,
-                onChanged: (value) {
-                  setState(() {
-                    _filters = _filters.copyWith(dateRange: value);
-                    if (value != 'custom') {
-                      _filters = _filters.copyWith(clearDates: true);
-                      _selectedStartDate = null;
-                      _selectedEndDate = null;
-                    }
-                  });
-                },
+                onChanged: _onPeriodChanged,
               ),
 
               // ── Datas customizadas (se Personalizado) ──────
-              if (_filters.dateRange == 'custom') ...[
+              if (widget.executive
+                  ? _periodValue == 'custom'
+                  : _filters.dateRange == 'custom') ...[
                 const SizedBox(height: 16),
                 Row(
                   children: [
@@ -535,7 +631,60 @@ class _DashboardFiltersDrawerState extends State<DashboardFiltersDrawer> {
               const SizedBox(height: 28),
 
               if (widget.executive) ...[
-                // ── Comparação (visão executiva) ─────────────────
+                // Mesma ordem da frase "Mostrando …" do web: empresa,
+                // equipe, comparação.
+
+                // ── Empresa (só com mais de uma) ─────────────────
+                if (widget.companies.length > 1) ...[
+                  _SectionTitle(
+                    eyebrow: 'EMPRESA',
+                    title: 'Dados de qual empresa',
+                    accent: accent,
+                  ),
+                  const SizedBox(height: 12),
+                  _ChoiceWrap(
+                    accent: accent,
+                    value: _filters.companyIds.isEmpty
+                        ? ''
+                        : _filters.companyIds.first,
+                    options: [
+                      const DashboardScopeOption(id: '', name: 'Empresa atual'),
+                      ...widget.companies,
+                    ],
+                    onChanged: (v) => setState(() {
+                      _filters = _filters.copyWith(
+                        companyIds: v.isEmpty ? const <String>[] : [v],
+                      );
+                    }),
+                  ),
+                  const SizedBox(height: 28),
+                ],
+
+                // ── Corretor ─────────────────────────────────────
+                _SectionTitle(
+                  eyebrow: 'EQUIPE',
+                  title: 'Corretor',
+                  accent: accent,
+                ),
+                const SizedBox(height: 12),
+                _PickerField(
+                  icon: Icons.person_search_rounded,
+                  label: _memberLabel,
+                  active: _filters.teamMember != null,
+                  accent: accent,
+                  onTap: widget.members.isEmpty
+                      ? null
+                      : () => _pickMember(accent),
+                  onClear: _filters.teamMember == null
+                      ? null
+                      : () => setState(() {
+                            _filters =
+                                _filters.copyWith(clearTeamMember: true);
+                          }),
+                ),
+
+                // ── Comparação ───────────────────────────────────
+                const SizedBox(height: 28),
                 _SectionTitle(
                   eyebrow: 'COMPARAÇÃO',
                   title: 'Comparar com',
@@ -559,56 +708,6 @@ class _DashboardFiltersDrawerState extends State<DashboardFiltersDrawer> {
                   onChanged: (v) => setState(() {
                     _filters = _filters.copyWith(compareWith: v);
                   }),
-                ),
-
-                // ── Empresa (só com mais de uma) ─────────────────
-                if (widget.companies.length > 1) ...[
-                  const SizedBox(height: 28),
-                  _SectionTitle(
-                    eyebrow: 'EMPRESA',
-                    title: 'Dados de qual empresa',
-                    accent: accent,
-                  ),
-                  const SizedBox(height: 12),
-                  _ChoiceWrap(
-                    accent: accent,
-                    value: _filters.companyIds.isEmpty
-                        ? ''
-                        : _filters.companyIds.first,
-                    options: [
-                      const DashboardScopeOption(id: '', name: 'Empresa atual'),
-                      ...widget.companies,
-                    ],
-                    onChanged: (v) => setState(() {
-                      _filters = _filters.copyWith(
-                        companyIds: v.isEmpty ? const <String>[] : [v],
-                      );
-                    }),
-                  ),
-                ],
-
-                // ── Corretor ─────────────────────────────────────
-                const SizedBox(height: 28),
-                _SectionTitle(
-                  eyebrow: 'EQUIPE',
-                  title: 'Corretor',
-                  accent: accent,
-                ),
-                const SizedBox(height: 12),
-                _PickerField(
-                  icon: Icons.person_search_rounded,
-                  label: _memberLabel,
-                  active: _filters.teamMember != null,
-                  accent: accent,
-                  onTap: widget.members.isEmpty
-                      ? null
-                      : () => _pickMember(accent),
-                  onClear: _filters.teamMember == null
-                      ? null
-                      : () => setState(() {
-                            _filters =
-                                _filters.copyWith(clearTeamMember: true);
-                          }),
                 ),
               ] else ...[
                 // ── Limite de agendamentos ──────────────────────
@@ -869,11 +968,14 @@ class _SectionTitle extends StatelessWidget {
 /// tátil, mostra todas as opções sem precisar abrir nada.
 class _PeriodChips extends StatelessWidget {
   const _PeriodChips({
+    required this.periods,
     required this.value,
     required this.accent,
     required this.onChanged,
   });
 
+  /// Painel pessoal: `_kPeriods`; visão executiva: `_kExecutivePeriods`.
+  final List<_PeriodOption> periods;
   final String value;
   final Color accent;
   final ValueChanged<String> onChanged;
@@ -883,7 +985,7 @@ class _PeriodChips extends StatelessWidget {
     return Wrap(
       spacing: 8,
       runSpacing: 8,
-      children: _kPeriods.map((p) {
+      children: periods.map((p) {
         final selected = p.value == value;
         return _PeriodChip(
           option: p,

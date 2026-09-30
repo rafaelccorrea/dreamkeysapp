@@ -52,6 +52,25 @@ bool urlAssinadaVencida(
   return DateTime.now().toUtc().add(margem).isAfter(fim);
 }
 
+/// URL do nosso S3 SEM assinatura (29/09/2026)? O back assina no máximo 25
+/// mídias por resposta de GET /whatsapp/messages; da 26ª em diante a
+/// `mediaUrl` volta crua, e o bucket pode negar (403). A imagem percebe a
+/// falha e renova; o player e o leitor de documento abrem FORA da tela e não
+/// têm como avisar — por isso quem vai abrir renova antes.
+bool urlDoS3SemAssinatura(String url) {
+  final uri = Uri.tryParse(url.trim());
+  if (uri == null) return false;
+  final host = uri.host.toLowerCase();
+  final ehS3 = host.endsWith('.amazonaws.com') &&
+      (host.startsWith('s3.') ||
+          host.startsWith('s3-') ||
+          host.contains('.s3.') ||
+          host.contains('.s3-'));
+  if (!ehS3) return false;
+  return !uri.queryParameters.keys
+      .any((chave) => chave.toLowerCase() == 'x-amz-signature');
+}
+
 /// As duas URLs apontam para o MESMO arquivo (mesmo host e caminho, só a
 /// assinatura muda)?
 bool mesmoArquivoDeMidia(String a, String b) {

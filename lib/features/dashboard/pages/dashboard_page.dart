@@ -17,6 +17,8 @@ import '../../../../shared/widgets/skeleton_box.dart';
 import '../../notifications/widgets/notification_center.dart';
 import '../widgets/dashboard_filters_drawer.dart';
 import '../widgets/broker_dashboard_hub.dart';
+import '../services/dashboard_overview_service.dart';
+import '../widgets/company_overview_view.dart';
 import '../../../core/notifications/subtask_reminder_service.dart';
 import '../../../core/navigation/deep_link_service.dart';
 import '../../../core/push/app_push_service.dart';
@@ -58,10 +60,26 @@ class _DashboardPageState extends State<DashboardPage> {
   ErrorCause? _errorCause;
   DashboardFilters _filters = DashboardFilters.defaultFilters();
 
+  /// Papel de quem lê a Home (29/09/2026, dash-01). admin/master recebem a
+  /// visão executiva da EMPRESA (`CompanyOverviewDashboard`, fonte única
+  /// `GET /dashboard/overview`), como o `RoleBasedDashboard` do web; os
+  /// demais seguem neste painel pessoal (`GET /dashboard/user`). Antes o app
+  /// chamava `/dashboard/user` para todos e o dono lia os números DELE como
+  /// se fossem os da empresa. Nulo enquanto resolve.
+  String? _viewerRole;
+
+  /// Dono da conta (claim `owner` do JWT): o topo da visão executiva diz
+  /// "Visão completa do negócio" em vez de "Visão executiva do negócio",
+  /// como o `OwnerConditional` do web.
+  bool _viewerOwner = false;
+
+  bool get _isExecutive =>
+      DashboardOverviewService.isExecutiveRole(_viewerRole);
+
   @override
   void initState() {
     super.initState();
-    _loadDashboardData();
+    _resolveViewer();
     unawaited(SubtaskReminderService.instance.syncFromServer());
     // Home montada = usuário autenticado e bootstrap do splash concluído.
     // Libera deep links (warm) e consome o pendente do cold start (ex.:
@@ -82,6 +100,44 @@ class _DashboardPageState extends State<DashboardPage> {
 
   /// Já consultou a trava de assinatura nesta execução do app.
   static bool _travaDeAssinaturaConferida = false;
+
+  /// Decide qual Home montar (29/09/2026, dash-01).
+  ///
+  /// O papel já carregado no `ModuleAccessService` (boot pelo splash) vale
+  /// na hora, sem piscar o painel errado. Num login novo ele ainda não
+  /// existe (o serviço só inicializa no splash ou quando o drawer abre), e o
+  /// papel sai do JWT. O painel pessoal só é consultado para quem não é
+  /// admin/master: a visão executiva tem a própria fonte.
+  void _resolveViewer() {
+    final known = ModuleAccessService.instance.userRole?.trim().toLowerCase();
+    if (known != null && known.isNotEmpty) {
+      _viewerRole = known;
+      if (!_isExecutive) _loadDashboardData();
+    }
+    unawaited(_readViewerFromToken());
+  }
+
+  Future<void> _readViewerFromToken() async {
+    final viewer = await DashboardOverviewService.instance.readViewer();
+    if (!mounted) return;
+    final wasResolved = _viewerRole != null;
+    final wasExecutive = _isExecutive;
+    // O JWT prevalece quando diverge: é por ele que o back decide, e o papel
+    // do `ModuleAccessService` só é limpo no logout (sessão vencida seguida
+    // de outro login o deixaria defasado). Token ilegível: papel vazio =
+    // painel pessoal (o comportamento de antes), nunca esqueleto eterno.
+    final role = viewer.role ?? _viewerRole ?? '';
+    if (wasResolved && role == _viewerRole && viewer.owner == _viewerOwner) {
+      return;
+    }
+    setState(() {
+      _viewerOwner = viewer.owner;
+      _viewerRole = role;
+    });
+    if (!_isExecutive && (!wasResolved || wasExecutive)) {
+      _loadDashboardData();
+    }
+  }
 
   Future<void> _loadDashboardData() async {
     setState(() {
@@ -224,6 +280,12 @@ class _DashboardPageState extends State<DashboardPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 29/09/2026 (dash-01): admin/master leem a empresa, não o painel
+    // pessoal. Enquanto o papel resolve, `_isLoading` segura o esqueleto.
+    if (_isExecutive) {
+      return CompanyOverviewDashboard(isOwner: _viewerOwner);
+    }
+
     final theme = Theme.of(context);
 
     return AppScaffold(

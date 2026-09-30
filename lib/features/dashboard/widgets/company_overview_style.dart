@@ -149,9 +149,7 @@ String ovPeriodLabel(DashboardFilters f) {
 /// Palavra do recorte para o botão do topo ("Este mês", "Hoje"...).
 String ovPeriodWord(DashboardFilters f) {
   if (f.dateRange == 'custom') {
-    final d = DashboardFilters.executiveDefaults();
-    final isMonth = f.startDate == d.startDate && f.endDate == d.endDate;
-    return isMonth ? 'Este mês' : 'Período escolhido';
+    return f.isCurrentMonthPeriod ? 'Este mês' : 'Período escolhido';
   }
   return _kRangeLabels[f.dateRange ?? ''] ?? 'Período';
 }

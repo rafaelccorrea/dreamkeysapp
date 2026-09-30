@@ -123,6 +123,7 @@ import '../../features/whatsapp/pages/whatsapp_conversation_page.dart';
 import '../../features/whatsapp/pages/whatsapp_inbox_page.dart';
 import '../../features/sdr/pages/sdr_dashboard_page.dart';
 import '../../features/sdr/pages/sdr_settings_page.dart';
+import '../../features/sdr/roleta/pages/sdr_roulette_page.dart';
 import '../../features/integrations/pages/integrations_page.dart';
 import '../../features/integrations/pages/integration_details_page.dart';
 import '../../features/zezin/pages/zezin_ask_page.dart';
@@ -376,6 +377,8 @@ class AppRoutes {
   // SDR IA (módulo whatsapp_ai)
   static const String sdr = '/sdr';
   static const String sdrSettings = '/sdr/settings';
+  // Roleta de SDRs (web: "Disponibilidade dos SDRs" na barra do WhatsApp).
+  static const String sdrRoulette = '/sdr/roleta';
 
   // Central de Integrações
   static const String integrations = '/integrations';
@@ -1004,6 +1007,14 @@ class AppRoutes {
       return _buildRoute(const SdrDashboardPage(), settings);
     } else if (routeName == AppRoutes.sdrSettings) {
       return _buildRoute(const SdrSettingsPage(), settings);
+    } else if (routeName == AppRoutes.sdrRoulette) {
+      return _buildRoute(
+        const PermissionRoute(
+          permission: 'whatsapp:manage_config',
+          child: SdrRoulettePage(),
+        ),
+        settings,
+      );
     } else if (routeName == AppRoutes.integrations) {
       return _buildRoute(const IntegrationsPage(), settings);
     } else if (routeName != null && routeName.startsWith('/integrations/')) {

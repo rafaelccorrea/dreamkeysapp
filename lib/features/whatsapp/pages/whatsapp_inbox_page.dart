@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
@@ -13,6 +14,7 @@ import '../../../shared/utils/jwt_utils.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../../../shared/widgets/app_error_state.dart';
+import '../../sdr/roleta/pages/sdr_roulette_page.dart';
 import '../../notifications/services/notification_websocket_service.dart';
 import '../models/whatsapp_models.dart';
 import '../services/whatsapp_service.dart';
@@ -378,6 +380,17 @@ class _WhatsAppInboxPageState extends State<WhatsAppInboxPage> {
     return AppScaffold(
       title: 'WhatsApp',
       showBottomNavigation: false,
+      actions: [
+        // Roleta de SDRs — igual ao web: quem gerencia a configuração do
+        // WhatsApp abre a disponibilidade (pausa, folga, SDR de locação).
+        if (SdrRoulettePage.canOpen())
+          IconButton(
+            tooltip: 'Disponibilidade dos SDRs',
+            icon: const Icon(LucideIcons.users, size: 19),
+            onPressed: () =>
+                Navigator.of(context).pushNamed(AppRoutes.sdrRoulette),
+          ),
+      ],
       body: RefreshIndicator(
         color: _accentColor(context),
         onRefresh: _refreshAll,

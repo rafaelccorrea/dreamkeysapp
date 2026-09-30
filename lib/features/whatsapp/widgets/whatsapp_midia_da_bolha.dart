@@ -53,13 +53,19 @@ class WhatsAppAcoesDeMidia {
   }
 
   /// URL pronta para abrir: renova antes quando a assinatura venceu (ou vence
-  /// nos próximos 2 minutos). Sem renovação possível, devolve a atual.
+  /// nos próximos 2 minutos) e quando a URL do S3 veio sem assinatura (fora
+  /// do teto de 25 por resposta — 29/09/2026). Sem renovação possível,
+  /// devolve a atual.
   static Future<String?> urlValida(
     WhatsAppMessage m,
     WhatsAppRenovarMidia? renovar,
   ) async {
     final atual = (m.mediaUrl ?? '').trim();
-    if (atual.isNotEmpty && !urlAssinadaVencida(atual)) return atual;
+    if (atual.isNotEmpty &&
+        !urlAssinadaVencida(atual) &&
+        !urlDoS3SemAssinatura(atual)) {
+      return atual;
+    }
     if (renovar != null) {
       final nova = await renovar(m);
       if (nova != null && nova.trim().isNotEmpty) return nova.trim();

@@ -8,7 +8,6 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/notifications/app_toast.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/theme_helpers.dart';
-import '../../../shared/services/company_service.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/profile_service.dart';
 import '../../../shared/utils/avatar_url_resolver.dart';
@@ -114,15 +113,43 @@ class _CompanyOverviewDashboardState extends State<CompanyOverviewDashboard>
 
   // ─── Dados ─────────────────────────────────────────────────────────────────
 
-  Future<void> _load({bool silent = false}) async {
+  /// Busca o overview do recorte atual.
+  ///
+  /// 29/09/2026 (dash-01): mesmo ciclo do `useDashboard` do web — dado do
+  /// mesmo recorte com menos de 90 s vem do cache (voltar para a Home pelo
+  /// menu não refaz a consulta); `force` ("Atualizar", puxar para baixo,
+  /// "Tentar novamente") descarta o cache antes, como o `refresh` do web.
+  /// `silent` é o recarregamento em segundo plano: não esmaece a tela e, se
+  /// falhar, mantém o último dado com o carimbo "Último dado".
+  Future<void> _load({bool silent = false, bool force = false}) async {
     final seq = ++_requestSeq;
+    final service = DashboardOverviewService.instance;
     if (!silent) {
       setState(() {
         _loading = true;
         if (_data == null) _error = null;
       });
     }
-    final res = await DashboardOverviewService.instance.getOverview(_filters);
+    if (force) {
+      await service.invalidate(_filters);
+    } else {
+      final hit = await service.cachedEntry(_filters);
+      if (!mounted || seq != _requestSeq) return;
+      if (hit != null) {
+        setState(() {
+          _loading = false;
+          _data = hit.data;
+          _stale = false;
+          _error = null;
+          _errorStatus = 0;
+          _loadedAt = hit.at;
+          _curveIndex = null;
+        });
+        return;
+      }
+    }
+    if (!mounted || seq != _requestSeq) return;
+    final res = await service.getOverview(_filters);
     // Resposta de um recorte antigo (a pessoa trocou o filtro no meio) não
     // sobrescreve a do recorte atual.
     if (!mounted || seq != _requestSeq) return;
@@ -154,20 +181,13 @@ class _CompanyOverviewDashboardState extends State<CompanyOverviewDashboard>
     }
   }
 
-  Future<void> _refresh() => _load();
+  Future<void> _refresh() => _load(force: true);
 
+  /// Empresas do seletor "Empresa" — mesma lista (sem repetição, em ordem
+  /// alfabética) que o serviço monta a partir do `GET /companies`.
   Future<void> _loadCompanies() async {
-    final res = await CompanyService.instance.getCompanies();
-    if (!mounted || !res.success || res.data == null) return;
-    final list = res.data!
-        .where((c) => c.id.isNotEmpty)
-        .map(
-          (c) => DashboardScopeOption(
-            id: c.id,
-            name: c.name.trim().isEmpty ? 'Empresa' : c.name.trim(),
-          ),
-        )
-        .toList(growable: false);
+    final list = await DashboardOverviewService.instance.getCompanyOptions();
+    if (!mounted) return;
     setState(() => _companies = list);
   }
 
@@ -189,12 +209,9 @@ class _CompanyOverviewDashboardState extends State<CompanyOverviewDashboard>
           .map((u) => DashboardScopeOption(id: u.id, name: u.name))
           .toList(growable: false);
 
-  bool get _isDefaultPeriod {
-    final d = DashboardFilters.executiveDefaults();
-    return _filters.dateRange == d.dateRange &&
-        _filters.startDate == d.startDate &&
-        _filters.endDate == d.endDate;
-  }
+  /// "Este mês" é o período padrão: não conta como filtro ativo nem vira
+  /// ficha na fita (o `isDefaultPeriod` do web).
+  bool get _isDefaultPeriod => _filters.isCurrentMonthPeriod;
 
   int get _activeCount {
     var n = 0;
@@ -2742,36 +2759,61 @@ class _RankTile extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 5),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OverviewBar(
-                            fraction: row.relative,
-                            tone: OverviewTones.slate(context),
-                            height: 5,
+                    // A régua cede espaço, a legenda ("12 vendas") não
+                    // estoura: em tela de 320dp ou com fonte grande ela
+                    // leva no máximo 3/4 da linha e encolhe com reticências
+                    // (29/09/2026).
+                    LayoutBuilder(
+                      builder: (context, c) => Row(
+                        children: [
+                          Expanded(
+                            child: OverviewBar(
+                              fraction: row.relative,
+                              tone: OverviewTones.slate(context),
+                              height: 5,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          row.secondary,
-                          maxLines: 1,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: secondary,
-                            fontWeight: FontWeight.w700,
+                          const SizedBox(width: 8),
+                          ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: math.max(
+                                0.0,
+                                math.min(c.maxWidth * 0.75, c.maxWidth - 8),
+                              ),
+                            ),
+                            child: Text(
+                              row.secondary,
+                              maxLines: 1,
+                              softWrap: false,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: secondary,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: 10),
-              Text(
-                row.primary,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: ThemeHelpers.textColor(context),
-                  fontFeatures: const [FontFeature.tabularFigures()],
+              // Teto para o valor: o nome e a régua nunca ficam sem lugar.
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 104),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    row.primary,
+                    maxLines: 1,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: ThemeHelpers.textColor(context),
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
                 ),
               ),
               // Slot fixo: o "x" só aparece na linha filtrada, mas o espaço
