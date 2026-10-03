@@ -13,6 +13,7 @@ import '../../../../shared/services/auth_service.dart';
 import '../../../../shared/services/api_service.dart';
 import '../../../../shared/services/token_refresh_service.dart';
 import '../../../../shared/services/module_access_service.dart';
+import '../../../../shared/services/subscription_access_gate.dart';
 import '../../../../core/push/app_push_service.dart';
 import '../../chat/controllers/chat_unread_controller.dart';
 import '../../notifications/controllers/notification_controller.dart';
@@ -114,9 +115,26 @@ class _SplashPageState extends State<SplashPage> {
           ),
         );
 
+        // Assinatura e produto CRM (NEW-01/NEW-02): sessão restaurada também
+        // passa pela mesma decisão do login. Teto curto (watchdog do iOS);
+        // estourou ou caiu a rede → segue para a Home (o back continua
+        // barrando e o 403 de assinatura reabre esta checagem).
+        final gateDecision = await SubscriptionAccessGate.instance
+            .evaluate(
+              companyModules:
+                  ModuleAccessService.instance.selectedCompany?.availableModules,
+            )
+            .timeout(
+              const Duration(seconds: 4),
+              onTimeout: () => AccessGateDecision.allow,
+            );
+        final blockedRoute = SubscriptionAccessGate.routeFor(gateDecision);
+
         debugPrint('✅ [SPLASH] Bootstrap essencial pronto — indo pra home');
         if (mounted) {
-          Navigator.of(context).pushReplacementNamed(AppRoutes.home);
+          Navigator.of(context).pushReplacementNamed(
+            blockedRoute ?? AppRoutes.home,
+          );
         }
       } else {
         debugPrint(

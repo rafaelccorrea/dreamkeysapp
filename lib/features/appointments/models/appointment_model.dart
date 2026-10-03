@@ -203,6 +203,13 @@ enum AppointmentType {
 
   const AppointmentType(this.value, this.label);
 
+  /// Tipos que o back aceita (`AppointmentType` em `appointment.entity.ts`)
+  /// e que o web oferece. `signature` NÃO existe no enum do back — enviar
+  /// dá 400 —, então fica só para exibir dado legado, nunca para escolher.
+  static List<AppointmentType> get selectable => AppointmentType.values
+      .where((t) => t != AppointmentType.signature)
+      .toList(growable: false);
+
   static AppointmentType fromString(String? value) {
     if (value == null) return AppointmentType.visit;
     try {

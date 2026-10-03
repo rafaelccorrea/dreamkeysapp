@@ -35,6 +35,11 @@ class AppPermissions {
   static const String propertyManageApprovalSettings =
       'property:manage_approval_settings';
 
+  /// Ver os dados do proprietário nos imóveis restritos e abrir a tela
+  /// "Dados do proprietário" (admin/master veem pelo papel).
+  static const String propertyViewProtectedOwnerData =
+      'property:view_protected_owner_data';
+
   // ─── Check-in por localização ──────────────────────────────────────────
   /// Permite fazer / desfazer o próprio check-in e check-out.
   static const String checkInDo = 'check_in:do';

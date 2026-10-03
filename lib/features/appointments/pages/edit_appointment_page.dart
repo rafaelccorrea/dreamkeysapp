@@ -128,7 +128,10 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
       _descriptionController.text = a.description ?? '';
       _locationController.text = a.location ?? '';
       _notesController.text = a.notes ?? '';
-      _type = a.type;
+      // Legado 'signature' não existe no back (400 ao salvar): vira 'Outro'.
+      _type = a.type == AppointmentType.signature
+          ? AppointmentType.other
+          : a.type;
       _status = a.status;
       _visibility = a.visibility;
       _hadTeamVisibility = a.visibility == AppointmentVisibility.team;
@@ -198,8 +201,17 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
     return null;
   }
 
+  /// Título de 3 a 200 caracteres, como a web (agenda-02).
+  String? _tituloError() {
+    final t = _titleController.text.trim();
+    if (t.isEmpty) return 'Informe um título';
+    if (t.length < 3) return 'O título precisa de pelo menos 3 caracteres';
+    if (t.length > 200) return 'O título pode ter no máximo 200 caracteres';
+    return null;
+  }
+
   bool get _formValid {
-    if (_titleController.text.trim().isEmpty) return false;
+    if (_tituloError() != null) return false;
     if (_descriptionController.text.length > 300) return false;
     if (_notesController.text.length > 300) return false;
     if (_start == null || _end == null) return false;
@@ -228,9 +240,9 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
       locale: const Locale('pt', 'BR'),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
-          colorScheme: Theme.of(ctx)
-              .colorScheme
-              .copyWith(primary: _kApplyGreen),
+          colorScheme: Theme.of(
+            ctx,
+          ).colorScheme.copyWith(primary: _kApplyGreen),
         ),
         child: child!,
       ),
@@ -239,12 +251,24 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
     setState(() {
       if (isStart) {
         final duration = _end!.difference(_start!);
-        _start = DateTime(picked.year, picked.month, picked.day,
-            _start!.hour, _start!.minute);
-        _end = _start!.add(duration.isNegative ? const Duration(hours: 1) : duration);
+        _start = DateTime(
+          picked.year,
+          picked.month,
+          picked.day,
+          _start!.hour,
+          _start!.minute,
+        );
+        _end = _start!.add(
+          duration.isNegative ? const Duration(hours: 1) : duration,
+        );
       } else {
-        _end = DateTime(picked.year, picked.month, picked.day,
-            _end!.hour, _end!.minute);
+        _end = DateTime(
+          picked.year,
+          picked.month,
+          picked.day,
+          _end!.hour,
+          _end!.minute,
+        );
       }
     });
     _scheduleAvailabilityCheck();
@@ -259,9 +283,9 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
         data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
         child: Theme(
           data: Theme.of(ctx).copyWith(
-            colorScheme: Theme.of(ctx)
-                .colorScheme
-                .copyWith(primary: _kApplyGreen),
+            colorScheme: Theme.of(
+              ctx,
+            ).colorScheme.copyWith(primary: _kApplyGreen),
           ),
           child: child!,
         ),
@@ -271,12 +295,24 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
     setState(() {
       if (isStart) {
         final duration = _end!.difference(_start!);
-        _start = DateTime(_start!.year, _start!.month, _start!.day,
-            picked.hour, picked.minute);
-        _end = _start!.add(duration.isNegative ? const Duration(hours: 1) : duration);
+        _start = DateTime(
+          _start!.year,
+          _start!.month,
+          _start!.day,
+          picked.hour,
+          picked.minute,
+        );
+        _end = _start!.add(
+          duration.isNegative ? const Duration(hours: 1) : duration,
+        );
       } else {
-        _end = DateTime(_end!.year, _end!.month, _end!.day,
-            picked.hour, picked.minute);
+        _end = DateTime(
+          _end!.year,
+          _end!.month,
+          _end!.day,
+          picked.hour,
+          picked.minute,
+        );
       }
     });
     _scheduleAvailabilityCheck();
@@ -295,8 +331,13 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
         _end = DateTime(_start!.year, _start!.month, _start!.day, 23, 59);
       } else {
         final now = DateTime.now();
-        _start = DateTime(_start!.year, _start!.month, _start!.day,
-            now.hour + 1, 0);
+        _start = DateTime(
+          _start!.year,
+          _start!.month,
+          _start!.day,
+          now.hour + 1,
+          0,
+        );
         _end = _start!.add(const Duration(hours: 1));
       }
     });
@@ -337,8 +378,9 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
         tags: _selectedTags(),
         // Convidados só entram no PUT se o usuário mexeu na lista — evita
         // reconciliar (e cancelar) convites por engano quando nada mudou.
-        inviteUserIds:
-            _invitesTouched ? _invited.map((m) => m.id).toList() : null,
+        inviteUserIds: _invitesTouched
+            ? _invited.map((m) => m.id).toList()
+            : null,
       ),
     );
 
@@ -352,7 +394,8 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
           backgroundColor: AppColors.status.success,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12)),
+            borderRadius: BorderRadius.circular(12),
+          ),
           content: const Row(
             children: [
               Icon(Icons.check_circle_rounded, color: Colors.white),
@@ -369,7 +412,8 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
           backgroundColor: AppColors.status.error,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12)),
+            borderRadius: BorderRadius.circular(12),
+          ),
           content: Text(ctrl.error ?? 'Erro ao atualizar agendamento'),
         ),
       );
@@ -419,9 +463,8 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
               label: 'Título *',
               controller: _titleController,
               textInputAction: TextInputAction.next,
-              validator: (v) => (v == null || v.trim().isEmpty)
-                  ? 'Informe um título'
-                  : null,
+              maxLength: 200,
+              validator: (_) => _tituloError(),
             ),
             const SizedBox(height: 14),
             CustomTextField(
@@ -520,9 +563,8 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
           controller: _notesController,
           maxLines: 4,
           maxLength: 300,
-          validator: (v) => (v != null && v.length > 300)
-              ? 'Máximo de 300 caracteres'
-              : null,
+          validator: (v) =>
+              (v != null && v.length > 300) ? 'Máximo de 300 caracteres' : null,
         ),
       ),
       _section(
@@ -585,11 +627,7 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
   Widget _section({required Widget header, required Widget child}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        header,
-        const SizedBox(height: 12),
-        child,
-      ],
+      children: [header, const SizedBox(height: 12), child],
     );
   }
 
@@ -640,10 +678,7 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
             ],
           ),
         ),
-        if (trailing != null) ...[
-          const SizedBox(width: 8),
-          trailing,
-        ],
+        if (trailing != null) ...[const SizedBox(width: 8), trailing],
       ],
     );
   }
@@ -715,8 +750,9 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
                     letterSpacing: -0.4,
                     height: 1.15,
                     color: title.isEmpty
-                        ? ThemeHelpers.textSecondaryColor(context)
-                            .withValues(alpha: 0.6)
+                        ? ThemeHelpers.textSecondaryColor(
+                            context,
+                          ).withValues(alpha: 0.6)
                         : ThemeHelpers.textColor(context),
                   ),
                 ),
@@ -727,8 +763,9 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
                   children: [
                     _previewMeta(
                       Icons.event_rounded,
-                      AppointmentVisuals
-                          .formattedShortDate(_start ?? DateTime.now()),
+                      AppointmentVisuals.formattedShortDate(
+                        _start ?? DateTime.now(),
+                      ),
                     ),
                     _previewMeta(
                       Icons.schedule_rounded,
@@ -822,9 +859,7 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
               color: selected ? color : Colors.transparent,
               borderRadius: BorderRadius.circular(999),
               border: Border.all(
-                color: selected
-                    ? color
-                    : ThemeHelpers.borderColor(context),
+                color: selected ? color : ThemeHelpers.borderColor(context),
               ),
             ),
             child: Row(
@@ -844,8 +879,7 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
                     color: selected
                         ? Colors.white
                         : ThemeHelpers.textColor(context),
-                    fontWeight:
-                        selected ? FontWeight.w800 : FontWeight.w600,
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
                     fontSize: 12.5,
                   ),
                 ),
@@ -864,7 +898,7 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
     return Wrap(
       spacing: 10,
       runSpacing: 10,
-      children: AppointmentType.values.map((t) {
+      children: AppointmentType.selectable.map((t) {
         final selected = _type == t;
         final color = AppColors.primary.primary;
         return InkWell(
@@ -902,8 +936,7 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
                 Text(
                   t.label,
                   style: TextStyle(
-                    fontWeight:
-                        selected ? FontWeight.w800 : FontWeight.w600,
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
                     color: selected ? color : ThemeHelpers.textColor(context),
                   ),
                 ),
@@ -955,7 +988,11 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
               _durationChip(theme, '30 min', const Duration(minutes: 30)),
               _durationChip(theme, '45 min', const Duration(minutes: 45)),
               _durationChip(theme, '1 h', const Duration(hours: 1)),
-              _durationChip(theme, '1h 30', const Duration(hours: 1, minutes: 30)),
+              _durationChip(
+                theme,
+                '1h 30',
+                const Duration(hours: 1, minutes: 30),
+              ),
               _durationChip(theme, '2 h', const Duration(hours: 2)),
               _durationChip(theme, '4 h', const Duration(hours: 4)),
             ],
@@ -974,8 +1011,11 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
             ),
             child: Row(
               children: [
-                Icon(Icons.error_outline_rounded,
-                    color: AppColors.status.error, size: 18),
+                Icon(
+                  Icons.error_outline_rounded,
+                  color: AppColors.status.error,
+                  size: 18,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -997,7 +1037,8 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
   }
 
   Widget _durationChip(ThemeData theme, String label, Duration d) {
-    final selected = _start != null && _end != null && _end!.difference(_start!) == d;
+    final selected =
+        _start != null && _end != null && _end!.difference(_start!) == d;
     final primary = AppColors.primary.primary;
     return InkWell(
       onTap: () => _quickDuration(d),
@@ -1072,8 +1113,11 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
                 padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
                 child: Row(
                   children: [
-                    const Icon(Icons.event_rounded,
-                        size: 16, color: _kWhenAccent),
+                    const Icon(
+                      Icons.event_rounded,
+                      size: 16,
+                      color: _kWhenAccent,
+                    ),
                     const SizedBox(width: 6),
                     Flexible(
                       child: Text(
@@ -1104,8 +1148,11 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
                 padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
                 child: Row(
                   children: [
-                    const Icon(Icons.schedule_rounded,
-                        size: 16, color: _kWhenAccent),
+                    const Icon(
+                      Icons.schedule_rounded,
+                      size: 16,
+                      color: _kWhenAccent,
+                    ),
                     const SizedBox(width: 6),
                     Text(
                       AppointmentVisuals.formattedTime(date),
@@ -1119,7 +1166,7 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
               ),
             ),
             const SizedBox(width: 4),
-          ]
+          ],
         ],
       ),
     );
@@ -1137,10 +1184,12 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
     final children = <Widget>[];
     for (int i = 0; i < options.length; i++) {
       if (i > 0) {
-        children.add(Container(
-          height: 1,
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
-        ));
+        children.add(
+          Container(
+            height: 1,
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
+          ),
+        );
       }
       children.add(_visibilityRow(theme, options[i]));
     }
@@ -1206,8 +1255,11 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
                 ),
               ),
               child: selected
-                  ? const Icon(Icons.check_rounded,
-                      color: Colors.white, size: 14)
+                  ? const Icon(
+                      Icons.check_rounded,
+                      color: Colors.white,
+                      size: 14,
+                    )
                   : null,
             ),
           ],
@@ -1244,15 +1296,12 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
                 ),
               ],
               border: Border.all(
-                color: selected
-                    ? Colors.white
-                    : color.withValues(alpha: 0.0),
+                color: selected ? Colors.white : color.withValues(alpha: 0.0),
                 width: selected ? 3 : 0,
               ),
             ),
             child: selected
-                ? const Icon(Icons.check_rounded,
-                    color: Colors.white, size: 20)
+                ? const Icon(Icons.check_rounded, color: Colors.white, size: 20)
                 : null,
           ),
         );
@@ -1348,16 +1397,17 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
                       : const Icon(Icons.save_rounded, size: 18),
                   label: FittedBox(
                     fit: BoxFit.scaleDown,
-                    child:
-                        Text(_saving ? 'Salvando…' : 'Salvar alterações'),
+                    child: Text(_saving ? 'Salvando…' : 'Salvar alterações'),
                   ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _kApplyGreen,
                     foregroundColor: Colors.white,
-                    disabledBackgroundColor:
-                        _kApplyGreen.withValues(alpha: 0.35),
-                    disabledForegroundColor:
-                        Colors.white.withValues(alpha: 0.85),
+                    disabledBackgroundColor: _kApplyGreen.withValues(
+                      alpha: 0.35,
+                    ),
+                    disabledForegroundColor: Colors.white.withValues(
+                      alpha: 0.85,
+                    ),
                   ),
                   onPressed: _formValid && !_saving ? _save : null,
                 ),
@@ -1381,8 +1431,10 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
       _availability = null;
       _availabilityCheckFailed = false;
     });
-    _availabilityDebounce =
-        Timer(const Duration(milliseconds: 350), _runAvailabilityCheck);
+    _availabilityDebounce = Timer(
+      const Duration(milliseconds: 350),
+      _runAvailabilityCheck,
+    );
   }
 
   Future<void> _runAvailabilityCheck() async {
@@ -1439,8 +1491,8 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
   /// Âmbar com tinta legível nos dois temas (o tom claro some no light).
   Color _amberInk(BuildContext context) =>
       Theme.of(context).brightness == Brightness.dark
-          ? _kScheduleAmber
-          : const Color(0xFFA16207);
+      ? _kScheduleAmber
+      : const Color(0xFFA16207);
 
   Color _issueInk(BuildContext context, String code) =>
       code == 'overlap' ? _kOverlapRed : _amberInk(context);
@@ -1541,8 +1593,9 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
         ),
       );
     }
-    final hasOverlap = unavailable
-        .any((r) => r.issues.any((issue) => issue.code == 'overlap'));
+    final hasOverlap = unavailable.any(
+      (r) => r.issues.any((issue) => issue.code == 'overlap'),
+    );
     final frame = hasOverlap ? _kOverlapRed : _kScheduleAmber;
     return Container(
       margin: const EdgeInsets.only(top: 12),
@@ -1728,8 +1781,7 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
           borderRadius: BorderRadius.circular(999),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 160),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: selected
                   ? t.tone.withValues(alpha: 0.14)
@@ -1763,9 +1815,7 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: _kGuestsAccent.withValues(alpha: 0.45),
-          ),
+          border: Border.all(color: _kGuestsAccent.withValues(alpha: 0.45)),
         ),
         child: const Row(
           mainAxisSize: MainAxisSize.min,
@@ -1869,8 +1919,9 @@ class _EditAppointmentPageState extends State<EditAppointmentPage> {
     final cached = _membersCache;
     if (cached != null) return cached;
     try {
-      final res = await ApiService.instance
-          .get<dynamic>('/users/company-members/simple');
+      final res = await ApiService.instance.get<dynamic>(
+        '/users/company-members/simple',
+      );
       if (!res.success) return null;
       final raw = res.data;
       final List<dynamic> list;
@@ -2002,9 +2053,7 @@ class _InviteMembersSheetState extends State<_InviteMembersSheet> {
       for (final id in _selected)
         if (byId.containsKey(id)) byId[id]!,
     ];
-    picked.sort(
-      (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-    );
+    picked.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     Navigator.pop(context, picked);
   }
 
@@ -2015,9 +2064,7 @@ class _InviteMembersSheetState extends State<_InviteMembersSheet> {
     final members = _members ?? const <_MemberOption>[];
     final filtered = _query.isEmpty
         ? members
-        : members
-            .where((m) => m.name.toLowerCase().contains(_query))
-            .toList();
+        : members.where((m) => m.name.toLowerCase().contains(_query)).toList();
 
     return Padding(
       padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
@@ -2037,8 +2084,9 @@ class _InviteMembersSheetState extends State<_InviteMembersSheet> {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: ThemeHelpers.textSecondaryColor(context)
-                      .withValues(alpha: 0.30),
+                  color: ThemeHelpers.textSecondaryColor(
+                    context,
+                  ).withValues(alpha: 0.30),
                   borderRadius: BorderRadius.circular(999),
                 ),
               ),
@@ -2140,10 +2188,12 @@ class _InviteMembersSheetState extends State<_InviteMembersSheet> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _kApplyGreen,
                       foregroundColor: Colors.white,
-                      disabledBackgroundColor:
-                          _kApplyGreen.withValues(alpha: 0.35),
-                      disabledForegroundColor:
-                          Colors.white.withValues(alpha: 0.85),
+                      disabledBackgroundColor: _kApplyGreen.withValues(
+                        alpha: 0.35,
+                      ),
+                      disabledForegroundColor: Colors.white.withValues(
+                        alpha: 0.85,
+                      ),
                       padding: const EdgeInsets.symmetric(vertical: 13),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
@@ -2220,8 +2270,9 @@ class _InviteMembersSheetState extends State<_InviteMembersSheet> {
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: _kGuestsAccent
-                        .withValues(alpha: selected ? 0.18 : 0.10),
+                    color: _kGuestsAccent.withValues(
+                      alpha: selected ? 0.18 : 0.10,
+                    ),
                   ),
                   child: Text(
                     m.initial,
@@ -2240,8 +2291,7 @@ class _InviteMembersSheetState extends State<_InviteMembersSheet> {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 13.5,
-                      fontWeight:
-                          selected ? FontWeight.w800 : FontWeight.w600,
+                      fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
                       color: ThemeHelpers.textColor(context),
                     ),
                   ),
@@ -2313,8 +2363,7 @@ class _DaySlotsSheetState extends State<_DaySlotsSheet> {
   }
 
   /// Agrupa por período do dia preservando a ordem da API.
-  List<(String, List<AvailabilitySlot>)> _groups(
-      List<AvailabilitySlot> slots) {
+  List<(String, List<AvailabilitySlot>)> _groups(List<AvailabilitySlot> slots) {
     final morning = <AvailabilitySlot>[];
     final afternoon = <AvailabilitySlot>[];
     final evening = <AvailabilitySlot>[];
@@ -2340,8 +2389,7 @@ class _DaySlotsSheetState extends State<_DaySlotsSheet> {
     final theme = Theme.of(context);
     final media = MediaQuery.of(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final duration =
-        _result?.durationMinutes ?? widget.durationMinutes;
+    final duration = _result?.durationMinutes ?? widget.durationMinutes;
 
     return Container(
       constraints: BoxConstraints(maxHeight: media.size.height * 0.85),
@@ -2426,16 +2474,10 @@ class _DaySlotsSheetState extends State<_DaySlotsSheet> {
                 icon: const Icon(Icons.schedule_rounded, size: 16),
                 label: const Text(
                   'Escolher outro horário…',
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
                 ),
-                style: TextButton.styleFrom(
-                  foregroundColor: secondary,
-                ),
-                onPressed: () =>
-                    Navigator.pop(context, _kManualTimeChoice),
+                style: TextButton.styleFrom(foregroundColor: secondary),
+                onPressed: () => Navigator.pop(context, _kManualTimeChoice),
               ),
             ),
           ],
@@ -2501,8 +2543,7 @@ class _DaySlotsSheetState extends State<_DaySlotsSheet> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children:
-                groups[g].$2.map((s) => _slotChip(context, s)).toList(),
+            children: groups[g].$2.map((s) => _slotChip(context, s)).toList(),
           ),
         ],
       ],
@@ -2593,8 +2634,8 @@ class _DaySlotsSheetState extends State<_DaySlotsSheet> {
     }
     final busy = s.blockedFor.isEmpty
         ? ((s.reason == null || s.reason!.isEmpty)
-            ? 'horário indisponível'
-            : s.reason!)
+              ? 'horário indisponível'
+              : s.reason!)
         : s.blockedFor.join(', ');
     return Tooltip(
       message: 'Ocupado: $busy',
@@ -2603,8 +2644,9 @@ class _DaySlotsSheetState extends State<_DaySlotsSheet> {
         padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(10),
-          color: ThemeHelpers.textSecondaryColor(context)
-              .withValues(alpha: 0.07),
+          color: ThemeHelpers.textSecondaryColor(
+            context,
+          ).withValues(alpha: 0.07),
           border: Border.all(
             color: ThemeHelpers.borderColor(context).withValues(alpha: 0.6),
           ),
@@ -2616,8 +2658,9 @@ class _DaySlotsSheetState extends State<_DaySlotsSheet> {
             fontWeight: FontWeight.w600,
             decoration: TextDecoration.lineThrough,
             fontFeatures: const [FontFeature.tabularFigures()],
-            color: ThemeHelpers.textSecondaryColor(context)
-                .withValues(alpha: 0.60),
+            color: ThemeHelpers.textSecondaryColor(
+              context,
+            ).withValues(alpha: 0.60),
           ),
         ),
       ),
@@ -2658,8 +2701,7 @@ class _DaySlotsSheetState extends State<_DaySlotsSheet> {
               height: 11,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(4),
-                border:
-                    Border.all(color: ThemeHelpers.borderColor(context)),
+                border: Border.all(color: ThemeHelpers.borderColor(context)),
               ),
             ),
             'Disponível',

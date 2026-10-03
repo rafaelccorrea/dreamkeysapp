@@ -5,6 +5,7 @@ import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/property_service.dart';
+import '../services/property_owner_check_service.dart';
 import 'approval_actions_sheet.dart';
 
 /// Âmbar de alerta (mesmo tom do `MdWarning` do modal do web), por token.
@@ -53,13 +54,54 @@ Future<bool> showPropertyDuplicateSheet({
   return result == true;
 }
 
+/// Folha "Este proprietário já possui imóveis" — variante `owner` do
+/// `PropertyDuplicateWarningModal` do web, aberta ao sair da etapa do
+/// Proprietário no cadastro (`runOwnerExistingGate`). Cada imóvel traz o
+/// selo do que coincidiu (CPF/CNPJ ou Telefone).
+///
+/// Devolve `true` só quando a pessoa escolhe "Continuar cadastro".
+Future<bool> showPropertyOwnerExistingSheet({
+  required BuildContext context,
+  required String ownerName,
+  required List<PropertyOwnerMatch> matches,
+}) async {
+  final result = await showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: ThemeHelpers.cardBackgroundColor(context),
+    constraints: BoxConstraints(
+      maxHeight: MediaQuery.sizeOf(context).height * 0.88,
+    ),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+    ),
+    builder: (_) => _PropertyDuplicateSheet(
+      duplicates: [for (final m in matches) m.property],
+      submitPhase: false,
+      ownerName: ownerName.trim().isEmpty ? 'este proprietário' : ownerName.trim(),
+      matchLabels: {
+        for (final m in matches)
+          if (m.matchLabel != null) m.property.id: m.matchLabel!,
+      },
+    ),
+  );
+  return result == true;
+}
+
 class _PropertyDuplicateSheet extends StatelessWidget {
   final List<PropertyDuplicateCandidate> duplicates;
   final bool submitPhase;
 
+  /// Preenchido = variante "proprietário já cadastrado".
+  final String? ownerName;
+  final Map<String, String> matchLabels;
+
   const _PropertyDuplicateSheet({
     required this.duplicates,
     required this.submitPhase,
+    this.ownerName,
+    this.matchLabels = const {},
   });
 
   @override
@@ -68,20 +110,35 @@ class _PropertyDuplicateSheet extends StatelessWidget {
     final tone = _duplicateTone(context);
     final secondary = ThemeHelpers.textSecondaryColor(context);
     final n = duplicates.length;
+    final isOwner = ownerName != null;
 
     // Título curto (cabe em 2 linhas em 320dp com texto a 130%); a contagem
     // abre o corpo, em destaque — responde de cara "quantos já existem".
-    final title =
-        n == 0 ? 'Possível imóvel duplicado' : 'Endereço já cadastrado';
-    final countLine = n == 0
-        ? null
-        : n == 1
-            ? '1 imóvel coincide com este endereço.'
-            : '$n imóveis coincidem com este endereço.';
-    final guidance = submitPhase
-        ? 'Confira antes de gravar. Se for mesmo outro imóvel, cadastre como '
-            'duplicado.'
-        : 'Abra para conferir. Se for outro imóvel, siga com o cadastro.';
+    final title = isOwner
+        ? 'Este proprietário já possui imóveis'
+        : n == 0
+            ? 'Possível imóvel duplicado'
+            : 'Endereço já cadastrado';
+    final countLine = isOwner
+        ? (n == 1
+            ? '1 imóvel cadastrado para $ownerName.'
+            : '$n imóveis cadastrados para $ownerName.')
+        : n == 0
+            ? null
+            : n == 1
+                ? '1 imóvel coincide com este endereço.'
+                : '$n imóveis coincidem com este endereço.';
+    final guidance = isOwner
+        ? 'Verifique se não é o mesmo imóvel que você está cadastrando.'
+        : submitPhase
+            ? 'Confira antes de gravar. Se for mesmo outro imóvel, cadastre como '
+                'duplicado.'
+            : 'Abra para conferir. Se for outro imóvel, siga com o cadastro.';
+    final criterion = isOwner
+        ? 'Coincide o CPF/CNPJ ou o telefone informado para o proprietário.'
+        : 'Coincidem os dados decisivos: em condomínio, o mesmo '
+            'condomínio e unidade/lote/quadra; em imóvel de rua, o '
+            'mesmo endereço completo e complemento.';
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -91,7 +148,8 @@ class _PropertyDuplicateSheet extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 2, 10, 0),
           child: ApprovalSheetHeader(
-            eyebrow: 'Duplicidade de endereço',
+            eyebrow:
+                isOwner ? 'Proprietário já cadastrado' : 'Duplicidade de endereço',
             title: title,
             tone: tone,
             icon: LucideIcons.alertTriangle,
@@ -135,9 +193,7 @@ class _PropertyDuplicateSheet extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Coincidem os dados decisivos: em condomínio, o mesmo '
-                      'condomínio e unidade/lote/quadra; em imóvel de rua, o '
-                      'mesmo endereço completo e complemento.',
+                      criterion,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: secondary,
                         height: 1.4,
@@ -167,7 +223,11 @@ class _PropertyDuplicateSheet extends StatelessWidget {
                     color:
                         ThemeHelpers.borderColor(context).withValues(alpha: 0.45),
                   ),
-                  _CandidateRow(candidate: duplicates[i], tone: tone),
+                  _CandidateRow(
+                    candidate: duplicates[i],
+                    tone: tone,
+                    matchLabel: matchLabels[duplicates[i].id],
+                  ),
                 ],
             ],
           ),
@@ -199,7 +259,14 @@ class _CandidateRow extends StatelessWidget {
   final PropertyDuplicateCandidate candidate;
   final Color tone;
 
-  const _CandidateRow({required this.candidate, required this.tone});
+  /// Selo do que coincidiu na variante proprietário ("CPF/CNPJ"/"Telefone").
+  final String? matchLabel;
+
+  const _CandidateRow({
+    required this.candidate,
+    required this.tone,
+    this.matchLabel,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -229,17 +296,46 @@ class _CandidateRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (c.code != null) ...[
-                  Text(
-                    'Código #${c.code}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: tone,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.3,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
+                if (c.code != null || matchLabel != null) ...[
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (c.code != null)
+                        Text(
+                          'Código #${c.code}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: tone,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.3,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      if (matchLabel != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(999),
+                            color: tone.withValues(alpha: 0.12),
+                            border:
+                                Border.all(color: tone.withValues(alpha: 0.40)),
+                          ),
+                          child: Text(
+                            matchLabel!,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: tone,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 3),
                 ],

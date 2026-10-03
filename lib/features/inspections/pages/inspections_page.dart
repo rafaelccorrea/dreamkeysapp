@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../shared/services/module_access_service.dart';
 import '../../../shared/utils/error_cause.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
@@ -25,6 +26,7 @@ class _InspectionsPageState extends State<InspectionsPage> {
   List<Inspection> _inspections = [];
   int _currentPage = 1;
   int _totalPages = 1;
+
   /// Diagnóstico da falha (API ou exceção) — guarda o código HTTP junto da
   /// mensagem, senão "sem permissão" e "servidor fora" viram o mesmo texto.
   ErrorCause? _errorCause;
@@ -71,7 +73,8 @@ class _InspectionsPageState extends State<InspectionsPage> {
     });
 
     try {
-      final filters = _filters?.copyWith(
+      final filters =
+          _filters?.copyWith(
             title: _searchQuery.trim().isEmpty ? null : _searchQuery.trim(),
             page: _currentPage,
             limit: 20,
@@ -82,7 +85,9 @@ class _InspectionsPageState extends State<InspectionsPage> {
             limit: 20,
           );
 
-      final response = await _inspectionService.listInspections(filters: filters);
+      final response = await _inspectionService.listInspections(
+        filters: filters,
+      );
 
       if (mounted) {
         if (response.success && response.data != null) {
@@ -146,43 +151,45 @@ class _InspectionsPageState extends State<InspectionsPage> {
     return AppScaffold(
       title: 'Vistorias',
       actions: [
-          IconButton(
-            icon: Stack(
-              children: [
-                const Icon(Icons.filter_list),
-                if (_filters != null && _hasActiveFilters())
-                  Positioned(
-                    right: 0,
-                    top: 0,
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                      ),
+        IconButton(
+          icon: Stack(
+            children: [
+              const Icon(Icons.filter_list),
+              if (_filters != null && _hasActiveFilters())
+                Positioned(
+                  right: 0,
+                  top: 0,
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
                     ),
                   ),
-              ],
-            ),
-            onPressed: () {
-              showModalBottomSheet(
-                context: context,
-                isScrollControlled: true,
-                backgroundColor: Colors.transparent,
-                builder: (context) => InspectionFiltersDrawer(
-                  initialFilters: _filters,
-                  onFiltersChanged: (filters) {
-                    setState(() {
-                      _filters = filters;
-                    });
-                    _loadInspections(refresh: true);
-                  },
                 ),
-              );
-            },
-            tooltip: 'Filtros',
+            ],
           ),
+          onPressed: () {
+            showModalBottomSheet(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              builder: (context) => InspectionFiltersDrawer(
+                initialFilters: _filters,
+                onFiltersChanged: (filters) {
+                  setState(() {
+                    _filters = filters;
+                  });
+                  _loadInspections(refresh: true);
+                },
+              ),
+            );
+          },
+          tooltip: 'Filtros',
+        ),
+        // vistorias-01: criar exige `inspection:create` (web: VistoriaPage).
+        if (_canCreate)
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: () {
@@ -190,82 +197,86 @@ class _InspectionsPageState extends State<InspectionsPage> {
             },
             tooltip: 'Nova Vistoria',
           ),
-        ],
+      ],
       body: Column(
         children: [
-            // Barra de busca
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Buscar vistorias...',
-                  prefixIcon: const Icon(Icons.search),
-                  suffixIcon: _searchController.text.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.clear),
-                          onPressed: () {
-                            _searchController.clear();
-                            _handleSearch('');
-                          },
-                        )
-                      : null,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+          // Barra de busca
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Buscar vistorias...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _searchController.clear();
+                          _handleSearch('');
+                        },
+                      )
+                    : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                onChanged: (value) {
-                  // Debounce será implementado se necessário
-                  _handleSearch(value);
-                },
               ),
+              onChanged: (value) {
+                // Debounce será implementado se necessário
+                _handleSearch(value);
+              },
             ),
-            // Conteúdo principal
-            Expanded(
-              child: _isLoading && _inspections.isEmpty
-                  ? _buildSkeleton(context, theme)
-                  : _errorCause != null && _inspections.isEmpty
-                      ? _buildErrorState(context, theme)
-                      : _inspections.isEmpty
-                          ? _buildEmptyState(context, theme)
-                          : RefreshIndicator(
-                              onRefresh: () => _loadInspections(refresh: true),
-                              child: CustomScrollView(
-                                controller: _scrollController,
-                                slivers: [
-                                  SliverPadding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 8,
+          ),
+          // Conteúdo principal
+          Expanded(
+            child: _isLoading && _inspections.isEmpty
+                ? _buildSkeleton(context, theme)
+                : _errorCause != null && _inspections.isEmpty
+                ? _buildErrorState(context, theme)
+                : _inspections.isEmpty
+                ? _buildEmptyState(context, theme)
+                : RefreshIndicator(
+                    onRefresh: () => _loadInspections(refresh: true),
+                    child: CustomScrollView(
+                      controller: _scrollController,
+                      slivers: [
+                        SliverPadding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          sliver: SliverList(
+                            delegate: SliverChildBuilderDelegate(
+                              (context, index) {
+                                if (index >= _inspections.length) {
+                                  return const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(16),
+                                      child: CircularProgressIndicator(),
                                     ),
-                                    sliver: SliverList(
-                                      delegate: SliverChildBuilderDelegate(
-                                        (context, index) {
-                                          if (index >= _inspections.length) {
-                                            return const Center(
-                                              child: Padding(
-                                                padding: EdgeInsets.all(16),
-                                                child: CircularProgressIndicator(),
-                                              ),
-                                            );
-                                          }
-                                          return InspectionCard(
-                                            inspection: _inspections[index],
-                                          );
-                                        },
-                                        childCount: _inspections.length +
-                                            (_isLoadingMore ? 1 : 0),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                                  );
+                                }
+                                return InspectionCard(
+                                  inspection: _inspections[index],
+                                );
+                              },
+                              childCount:
+                                  _inspections.length +
+                                  (_isLoadingMore ? 1 : 0),
                             ),
-            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+          ),
         ],
       ),
     );
   }
+
+  bool get _canCreate =>
+      ModuleAccessService.instance.hasPermission('inspection:create');
 
   bool _hasActiveFilters() {
     if (_filters == null) return false;
@@ -330,14 +341,16 @@ class _InspectionsPageState extends State<InspectionsPage> {
               ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () {
-                Navigator.of(context).pushNamed(AppRoutes.inspectionCreate);
-              },
-              icon: const Icon(Icons.add),
-              label: const Text('Nova Vistoria'),
-            ),
+            if (_canCreate) ...[
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pushNamed(AppRoutes.inspectionCreate);
+                },
+                icon: const Icon(Icons.add),
+                label: const Text('Nova Vistoria'),
+              ),
+            ],
           ],
         ),
       ),

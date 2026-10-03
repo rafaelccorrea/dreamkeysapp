@@ -94,6 +94,110 @@ class ClientSpreadsheet {
     );
   }
 
+  /// Monta um `.xlsx` com várias abas (mesmas regras de célula do
+  /// [buildXlsx]). Usado pelo relatório de captações, que o web exporta em
+  /// quatro abas.
+  static Uint8List buildXlsxSheets(
+    List<({String name, List<List<Object?>> rows, List<double>? widths})>
+        sheets,
+  ) {
+    final files = <String, String>{};
+    final sheetEntries = StringBuffer();
+    final rels = StringBuffer();
+    final overrides = StringBuffer();
+    final usedNames = <String>{};
+    for (var i = 0; i < sheets.length; i++) {
+      final n = i + 1;
+      final sheet = sheets[i];
+      var name = sheet.name.replaceAll(RegExp(r'[\\/?*\[\]:]'), ' ').trim();
+      if (name.isEmpty) name = 'Aba $n';
+      if (name.length > 31) name = name.substring(0, 31);
+      while (!usedNames.add(name.toLowerCase())) {
+        name = '${name.length > 28 ? name.substring(0, 28) : name} $n';
+      }
+      files['xl/worksheets/sheet$n.xml'] =
+          _worksheetXml(sheet.rows, sheet.widths);
+      sheetEntries.write(
+        '<sheet name="${_escapeXml(name)}" sheetId="$n" r:id="rId$n"/>',
+      );
+      rels.write(
+        '<Relationship Id="rId$n" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet$n.xml"/>',
+      );
+      overrides.write(
+        '<Override PartName="/xl/worksheets/sheet$n.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>',
+      );
+    }
+    files['[Content_Types].xml'] =
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '$overrides'
+        '</Types>';
+    files['_rels/.rels'] =
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+        '</Relationships>';
+    files['xl/workbook.xml'] =
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<sheets>$sheetEntries</sheets>'
+        '</workbook>';
+    files['xl/_rels/workbook.xml.rels'] =
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '$rels'
+        '</Relationships>';
+    return _storeZip(
+      files.map((name, content) => MapEntry(name, utf8.encode(content))),
+    );
+  }
+
+  static String _worksheetXml(
+    List<List<Object?>> rows,
+    List<double>? columnWidths,
+  ) {
+    final sheet = StringBuffer()
+      ..write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
+      ..write(
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+      );
+    if (columnWidths != null && columnWidths.isNotEmpty) {
+      sheet.write('<cols>');
+      for (var i = 0; i < columnWidths.length; i++) {
+        sheet.write(
+          '<col min="${i + 1}" max="${i + 1}" width="${columnWidths[i]}" customWidth="1"/>',
+        );
+      }
+      sheet.write('</cols>');
+    }
+    sheet.write('<sheetData>');
+    for (var r = 0; r < rows.length; r++) {
+      sheet.write('<row r="${r + 1}">');
+      final row = rows[r];
+      for (var c = 0; c < row.length; c++) {
+        final value = row[c];
+        final ref = '${_columnName(c)}${r + 1}';
+        if (value == null || (value is String && value.isEmpty)) continue;
+        if (value is num && value.isFinite) {
+          sheet.write('<c r="$ref"><v>$value</v></c>');
+        } else {
+          sheet.write(
+            '<c r="$ref" t="inlineStr"><is><t xml:space="preserve">'
+            '${_escapeXml(value.toString())}</t></is></c>',
+          );
+        }
+      }
+      sheet.write('</row>');
+    }
+    sheet.write('</sheetData></worksheet>');
+    return sheet.toString();
+  }
+
   /// CSV separado por vírgula, com aspas quando a célula pede (mesma regra
   /// do `generateClientTemplate` do web).
   static Uint8List buildCsv(List<List<Object?>> rows) {

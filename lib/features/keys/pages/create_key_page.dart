@@ -5,6 +5,7 @@ import '../../../shared/widgets/custom_button.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../shared/services/api_service.dart';
+import '../../../shared/services/module_access_service.dart';
 import '../../documents/widgets/entity_selector.dart';
 import '../models/key_model.dart' as key_models;
 import '../services/key_service.dart';
@@ -12,7 +13,7 @@ import '../services/key_service.dart';
 /// Página de criação/edição de chave
 class CreateKeyPage extends StatefulWidget {
   final String? keyId;
-  
+
   const CreateKeyPage({super.key, this.keyId});
 
   @override
@@ -37,10 +38,56 @@ class _CreateKeyPageState extends State<CreateKeyPage> {
   bool _isLoading = false;
   bool _hasProperties = true;
 
+  /// Edição: a chave existente ainda está sendo buscada (ou falhou).
+  bool _carregandoChave = false;
+  String? _erroAoCarregar;
+
   @override
   void initState() {
     super.initState();
-    _checkProperties();
+    final canSubmit = ModuleAccessService.instance.hasPermission(
+      widget.keyId != null ? 'key:update' : 'key:create',
+    );
+    if (!canSubmit) return;
+    if (widget.keyId != null) {
+      // Editar abria o formulário VAZIO e salvar sobrescrevia a chave com
+      // campos em branco (03/10/2026): agora carrega a chave antes.
+      _carregarChave();
+    } else {
+      _checkProperties();
+    }
+  }
+
+  Future<void> _carregarChave() async {
+    setState(() {
+      _carregandoChave = true;
+      _erroAoCarregar = null;
+    });
+    final response = await _keyService.getKeyById(widget.keyId!);
+    if (!mounted) return;
+    final chave = response.data;
+    if (!response.success || chave == null) {
+      setState(() {
+        _carregandoChave = false;
+        _erroAoCarregar =
+            response.message ?? 'Não foi possível carregar a chave.';
+      });
+      return;
+    }
+    setState(() {
+      _nameController.text = chave.name;
+      _descriptionController.text = chave.description ?? '';
+      _locationController.text = chave.location ?? '';
+      _notesController.text = chave.notes ?? '';
+      _selectedType = chave.type;
+      _selectedStatus = chave.status;
+      _selectedPropertyId = chave.propertyId;
+      final imovel = chave.property;
+      _selectedPropertyName = imovel == null
+          ? null
+          : (imovel.title.isNotEmpty ? imovel.title : imovel.address);
+      _carregandoChave = false;
+    });
   }
 
   @override
@@ -66,8 +113,8 @@ class _CreateKeyPageState extends State<CreateKeyPage> {
               _hasProperties = (response.data as List).isNotEmpty;
             } else if (response.data is Map<String, dynamic>) {
               final data = response.data as Map<String, dynamic>;
-              final properties = data['properties'] as List? ?? 
-                                data['data'] as List? ?? [];
+              final properties =
+                  data['properties'] as List? ?? data['data'] as List? ?? [];
               _hasProperties = properties.isNotEmpty;
             } else {
               _hasProperties = false;
@@ -195,7 +242,9 @@ class _CreateKeyPageState extends State<CreateKeyPage> {
               ? null
               : _descriptionController.text.trim(),
           type: _selectedType.value,
-          status: _selectedStatus.value,
+          // chaves-02: chave nasce sempre disponível (web: CreateKeyPage
+          // envia `status: 'available'`). "Em uso" só via retirada.
+          status: key_models.KeyStatus.available.value,
           location: _locationController.text.trim().isEmpty
               ? null
               : _locationController.text.trim(),
@@ -249,11 +298,53 @@ class _CreateKeyPageState extends State<CreateKeyPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    if (!_hasProperties) {
+    // chaves-01: criar exige `key:create`; editar, `key:update` (back:
+    // keys.controller; web: PermissionRoute/PermissionButton).
+    final requiredPermission = widget.keyId != null
+        ? 'key:update'
+        : 'key:create';
+    if (!ModuleAccessService.instance.hasPermission(requiredPermission)) {
       return AppScaffold(
-        title: 'Criar Chave',
-        body: const Center(
-          child: CircularProgressIndicator(),
+        title: widget.keyId != null ? 'Editar Chave' : 'Criar Chave',
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              widget.keyId != null
+                  ? 'Você não tem permissão para editar chaves.'
+                  : 'Você não tem permissão para criar chaves.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (!_hasProperties || _carregandoChave) {
+      return AppScaffold(
+        title: widget.keyId != null ? 'Editar Chave' : 'Criar Chave',
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_erroAoCarregar != null) {
+      return AppScaffold(
+        title: 'Editar Chave',
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(_erroAoCarregar!, textAlign: TextAlign.center),
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: _carregarChave,
+                  child: const Text('Tentar de novo'),
+                ),
+              ],
+            ),
+          ),
         ),
       );
     }
@@ -280,7 +371,7 @@ class _CreateKeyPageState extends State<CreateKeyPage> {
                 },
               ),
               const SizedBox(height: 20),
-              
+
               // Propriedade
               Text(
                 'Propriedade *',
@@ -289,17 +380,28 @@ class _CreateKeyPageState extends State<CreateKeyPage> {
                 ),
               ),
               const SizedBox(height: 8),
-              EntitySelector(
-                type: 'property',
-                selectedId: _selectedPropertyId,
-                selectedName: _selectedPropertyName,
-                onSelected: (id, name) {
-                  setState(() {
-                    _selectedPropertyId = id;
-                    _selectedPropertyName = name;
-                  });
-                },
-              ),
+              // Na edição o imóvel é só consulta: o back não troca o imóvel
+              // de uma chave (UpdateKeyDto sem propertyId), como na web.
+              if (widget.keyId != null)
+                InputDecorator(
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    helperText: 'O imóvel de uma chave não pode ser trocado.',
+                  ),
+                  child: Text(_selectedPropertyName ?? 'Imóvel vinculado'),
+                )
+              else
+                EntitySelector(
+                  type: 'property',
+                  selectedId: _selectedPropertyId,
+                  selectedName: _selectedPropertyName,
+                  onSelected: (id, name) {
+                    setState(() {
+                      _selectedPropertyId = id;
+                      _selectedPropertyName = name;
+                    });
+                  },
+                ),
               if (_selectedPropertyId == null)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
@@ -311,7 +413,7 @@ class _CreateKeyPageState extends State<CreateKeyPage> {
                   ),
                 ),
               const SizedBox(height: 20),
-              
+
               // Tipo
               Text(
                 'Tipo *',
@@ -337,33 +439,35 @@ class _CreateKeyPageState extends State<CreateKeyPage> {
                 }).toList(),
               ),
               const SizedBox(height: 20),
-              
-              // Status
-              Text(
-                'Status *',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w600,
+
+              // Status — só na edição (chaves-02).
+              if (widget.keyId != null) ...[
+                Text(
+                  'Status *',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: key_models.KeyStatus.values.map((status) {
-                  final isSelected = _selectedStatus == status;
-                  return ChoiceChip(
-                    label: Text(status.label),
-                    selected: isSelected,
-                    onSelected: (selected) {
-                      setState(() {
-                        _selectedStatus = status;
-                      });
-                    },
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 20),
-              
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: key_models.KeyStatus.values.map((status) {
+                    final isSelected = _selectedStatus == status;
+                    return ChoiceChip(
+                      label: Text(status.label),
+                      selected: isSelected,
+                      onSelected: (selected) {
+                        setState(() {
+                          _selectedStatus = status;
+                        });
+                      },
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 20),
+              ],
+
               // Localização
               CustomTextField(
                 controller: _locationController,
@@ -371,7 +475,7 @@ class _CreateKeyPageState extends State<CreateKeyPage> {
                 hint: 'Ex: Escritório - Gaveta 1',
               ),
               const SizedBox(height: 20),
-              
+
               // Descrição
               CustomTextField(
                 controller: _descriptionController,
@@ -380,7 +484,7 @@ class _CreateKeyPageState extends State<CreateKeyPage> {
                 maxLines: 3,
               ),
               const SizedBox(height: 20),
-              
+
               // Observações
               CustomTextField(
                 controller: _notesController,
@@ -389,20 +493,26 @@ class _CreateKeyPageState extends State<CreateKeyPage> {
                 maxLines: 3,
               ),
               const SizedBox(height: 32),
-              
+
               // Botões
               Column(
                 children: [
-                    SizedBox(
-                      width: double.infinity,
-                      child: CustomButton(
-                        text: _isLoading
-                            ? (widget.keyId != null ? 'Salvando...' : 'Criando...')
-                            : (widget.keyId != null ? 'Salvar Alterações' : 'Criar Chave'),
-                        onPressed: _isLoading ? null : _submitForm,
-                        icon: _isLoading ? null : (widget.keyId != null ? Icons.save : Icons.add),
-                      ),
+                  SizedBox(
+                    width: double.infinity,
+                    child: CustomButton(
+                      text: _isLoading
+                          ? (widget.keyId != null
+                                ? 'Salvando...'
+                                : 'Criando...')
+                          : (widget.keyId != null
+                                ? 'Salvar Alterações'
+                                : 'Criar Chave'),
+                      onPressed: _isLoading ? null : _submitForm,
+                      icon: _isLoading
+                          ? null
+                          : (widget.keyId != null ? Icons.save : Icons.add),
                     ),
+                  ),
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
@@ -429,4 +539,3 @@ class _CreateKeyPageState extends State<CreateKeyPage> {
     );
   }
 }
-

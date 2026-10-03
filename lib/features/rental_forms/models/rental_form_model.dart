@@ -27,6 +27,10 @@ class RentalFormPermissions {
 
   /// Qualquer visão libera a entrada no drawer (paridade com o gating web).
   static const List<String> menu = [view, viewTeam, viewAll];
+
+  /// Lista e editor (`/fichas-locacao`, `/fichas-locacao/:id`): o controller
+  /// do back exige a família RENTAL_* (`rental:view`) — transv-06.
+  static const String listView = 'rental:view';
 }
 
 /// Status da ficha (coluna `status`).

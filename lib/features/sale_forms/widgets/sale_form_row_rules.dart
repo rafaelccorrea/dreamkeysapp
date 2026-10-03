@@ -54,6 +54,11 @@ class SaleFormRowRules {
   bool get showSignatures =>
       _canUpdate && !_deleted && !_finalized && !_canceled;
 
+  /// Por que a folha de assinaturas não abre (`null` = abre). Mesma regra de
+  /// [showSignatures], com o texto para o card do detalhe.
+  String? get signaturesBlockReason =>
+      saleFormSignaturesBlockReason(form, canUpdate: _canUpdate);
+
   String get signaturesLabel => hasActiveSignatures
       ? 'Revisar assinaturas (${form.assinaturasAssinadas}/${form.assinaturasTotal})'
       : 'Enviar para assinatura';
@@ -127,6 +132,27 @@ class SaleFormRowRules {
     }
     return null;
   }
+}
+
+/// Web (`SaleFormsPage.tsx`, menu da linha): o modal de assinaturas só abre
+/// com `sale_form:update` e ficha não excluída, não finalizada e não
+/// cancelada. O back recusa gerar links em ficha cancelada/excluída
+/// (03/10/2026). `null` = pode abrir.
+String? saleFormSignaturesBlockReason(SaleForm f, {required bool canUpdate}) {
+  if (f.deletedAt != null) {
+    return 'Ficha excluída: as assinaturas não podem mais ser enviadas.';
+  }
+  if (f.status == SaleFormStatus.canceled) {
+    return 'Ficha cancelada: as assinaturas não podem mais ser enviadas.';
+  }
+  if (f.status == SaleFormStatus.finalized) {
+    return 'Ficha finalizada: todos já assinaram. Baixe o PDF com '
+        'assinaturas no menu da ficha.';
+  }
+  if (!canUpdate) {
+    return 'Você não tem permissão para enviar esta ficha para assinatura.';
+  }
+  return null;
 }
 
 /// Ações do menu da ficha, na ordem do menu web.

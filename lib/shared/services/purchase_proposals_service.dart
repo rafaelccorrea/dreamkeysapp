@@ -5,7 +5,55 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../../core/constants/api_constants.dart';
+import '../utils/ficha_anexo_content_type.dart';
 import 'api_service.dart';
+
+/// Criação da proposta deve ser repetida? Só em 409 com `errorCode:
+/// DUPLICATE_ENTRY` no corpo (web: `purchaseProposalsApi.ts:278-281`).
+bool proposalCreateShouldRetry(bool success, int statusCode, dynamic error) {
+  if (success || statusCode != 409) return false;
+  final body = error is Map
+      ? error
+      : (error is String
+          ? (() {
+              try {
+                final d = jsonDecode(error);
+                return d is Map ? d : null;
+              } catch (_) {
+                return null;
+              }
+            })()
+          : null);
+  return body?['errorCode']?.toString() == 'DUPLICATE_ENTRY';
+}
+
+/// Disponibilidade do reenvio pelo WhatsApp da empresa
+/// (`GET …/assinaturas/whatsapp-envio` → `getWhatsAppResendEligibility`).
+class ProposalWhatsappEnvio {
+  const ProposalWhatsappEnvio({
+    required this.autoSendEnabled,
+    required this.canResend,
+    this.sessionKind,
+  });
+
+  final bool autoSendEnabled;
+  final bool canResend;
+  final String? sessionKind;
+
+  static bool _b(dynamic v) =>
+      v == true || v == 1 || v?.toString().toLowerCase() == 'true';
+
+  factory ProposalWhatsappEnvio.fromJson(Map<String, dynamic> j) {
+    final r =
+        j['data'] is Map ? Map<String, dynamic>.from(j['data'] as Map) : j;
+    final kind = r['sessionKind']?.toString().trim();
+    return ProposalWhatsappEnvio(
+      autoSendEnabled: _b(r['autoSendEnabled']),
+      canResend: _b(r['canResend']),
+      sessionKind: kind == null || kind.isEmpty ? null : kind,
+    );
+  }
+}
 
 /// Status retornado pelo backend para uma proposta.
 enum ProposalStatus { processing, finalized, canceled }
@@ -532,21 +580,25 @@ class ProposalSignature {
     this.rejectionReason,
   });
 
+  /// Rótulos do web (`ProposalSignaturesModalPrivate.tsx:474-483`): signed →
+  /// Assinado, rejected → Rejeitado, viewed → Visualizado, approved →
+  /// Aprovado, resto → Pendente. `cancelled` → "Cancelado" (o web cai em
+  /// "Pendente", o que engana: a assinatura cancelada não será assinada).
   String get statusLabel {
-    switch (status.toLowerCase()) {
+    switch (status.trim().toLowerCase()) {
       case 'signed':
-        return 'Assinada';
+        return 'Assinado';
       case 'rejected':
-        return 'Rejeitada';
+        return 'Rejeitado';
+      case 'viewed':
+        return 'Visualizado';
+      case 'approved':
+        return 'Aprovado';
       case 'cancelled':
       case 'canceled':
-        return 'Cancelada';
-      case 'pending':
-        return 'Aguardando assinatura';
-      case 'viewed':
-        return 'Visualizada';
+        return 'Cancelado';
       default:
-        return status;
+        return 'Pendente';
     }
   }
 
@@ -1011,13 +1063,24 @@ class PurchaseProposalsService {
 
   // ─── CRUD ───────────────────────────────────────────────────────────────
 
+  /// Cria a proposta. Igual ao web (`purchaseProposalsApi.ts:269-288`): se o
+  /// back responder 409 com `errorCode: DUPLICATE_ENTRY` (corrida no número
+  /// sequencial da proposta), espera 400 ms e tenta UMA vez mais.
   Future<ApiResponse<PurchaseProposal>> create(
       CreateProposalPayload payload) async {
     try {
-      final res = await _api.post<Map<String, dynamic>>(
+      final body = payload.toJson();
+      var res = await _api.post<Map<String, dynamic>>(
         ApiConstants.purchaseProposals,
-        body: payload.toJson(),
+        body: body,
       );
+      if (proposalCreateShouldRetry(res.success, res.statusCode, res.error)) {
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+        res = await _api.post<Map<String, dynamic>>(
+          ApiConstants.purchaseProposals,
+          body: body,
+        );
+      }
       if (!res.success || res.data == null) {
         return ApiResponse.error(
           message: res.message ?? 'Erro ao criar proposta',
@@ -1164,11 +1227,16 @@ class PurchaseProposalsService {
   /// Unidades de venda configuradas — `useSaleUnits({ activeOnly: true })`
   /// (`GET /sistema/sale-units-config?activeOnly=true`). O select do web
   /// usa o **nome** como valor (venda e captação).
-  Future<ApiResponse<List<ProposalOption>>> listSaleUnits() async {
+  ///
+  /// [activeOnly] `false` = todas as unidades (a lista do web conta assim o
+  /// "N unidades de venda" do topo: `useSaleUnits({ activeOnly: false })`).
+  Future<ApiResponse<List<ProposalOption>>> listSaleUnits({
+    bool activeOnly = true,
+  }) async {
     try {
       final res = await _api.get<dynamic>(
         _kSaleUnitsConfig,
-        queryParameters: const {'activeOnly': 'true'},
+        queryParameters: {'activeOnly': activeOnly ? 'true' : 'false'},
       );
       if (!res.success) {
         return ApiResponse.error(
@@ -1483,6 +1551,22 @@ class PurchaseProposalsService {
     }
   }
 
+  /// `GET …/assinaturas/whatsapp-envio` — o reenvio pelo WhatsApp da
+  /// empresa só aparece quando `canResend` (envio automático ligado + sessão
+  /// conectada). Falha → `null` (a opção fica escondida).
+  Future<ProposalWhatsappEnvio?> getWhatsappEnvio(String proposalId) async {
+    try {
+      final res = await _api.get<Map<String, dynamic>>(
+        '${ApiConstants.purchaseProposalAssinaturas(proposalId)}/whatsapp-envio',
+      );
+      if (!res.success || res.data == null) return null;
+      return ProposalWhatsappEnvio.fromJson(res.data!);
+    } catch (e) {
+      debugPrint('❌ [PROPOSALS] whatsappEnvio: $e');
+      return null;
+    }
+  }
+
   Future<ApiResponse<Map<String, dynamic>>> reenviarTodosWhatsapp(
       String proposalId) async {
     try {
@@ -1601,11 +1685,14 @@ class PurchaseProposalsService {
       request.headers.addAll(headers);
 
       final fileLength = await file.length();
+      final fileName = file.path.split('/').last.split('\\').last;
       request.files.add(http.MultipartFile(
         'file',
         http.ByteStream(file.openRead()),
         fileLength,
-        filename: file.path.split('/').last.split('\\').last,
+        filename: fileName,
+        // Sem isso vai `application/octet-stream` e o back recusa.
+        contentType: fichaAnexoContentType(fileName),
       ));
 
       request.fields['etapa'] = '$etapa';

@@ -19,11 +19,11 @@ class InspectionService {
   }) async {
     try {
       debugPrint('🔍 [INSPECTION_SERVICE] Buscando vistorias...');
-      
+
       final queryParams = filters?.toQueryParams() ?? <String, String>{};
-      
+
       debugPrint('🔍 [INSPECTION_SERVICE] Filtros: $queryParams');
-      
+
       final response = await _apiService.get<dynamic>(
         ApiConstants.inspections,
         queryParameters: queryParams.isEmpty ? null : queryParams,
@@ -36,7 +36,7 @@ class InspectionService {
       if (response.success && response.data != null) {
         try {
           InspectionListResponse listResponse;
-          
+
           // Verificar se a resposta é uma lista direta ou um objeto com paginação
           if (response.data is List) {
             debugPrint('🔍 [INSPECTION_SERVICE] Resposta é uma lista direta');
@@ -52,7 +52,9 @@ class InspectionService {
               totalPages: 1,
             );
           } else if (response.data is Map<String, dynamic>) {
-            debugPrint('🔍 [INSPECTION_SERVICE] Resposta é um objeto com estrutura');
+            debugPrint(
+              '🔍 [INSPECTION_SERVICE] Resposta é um objeto com estrutura',
+            );
             listResponse = InspectionListResponse.fromJson(
               response.data as Map<String, dynamic>,
             );
@@ -60,14 +62,18 @@ class InspectionService {
             throw Exception('Formato de resposta não reconhecido');
           }
 
-          debugPrint('✅ [INSPECTION_SERVICE] ${listResponse.inspections.length} vistorias carregadas');
-          
+          debugPrint(
+            '✅ [INSPECTION_SERVICE] ${listResponse.inspections.length} vistorias carregadas',
+          );
+
           return ApiResponse.success(
             data: listResponse,
             statusCode: response.statusCode,
           );
         } catch (e, stackTrace) {
-          debugPrint('❌ [INSPECTION_SERVICE] Erro ao parsear lista de vistorias: $e');
+          debugPrint(
+            '❌ [INSPECTION_SERVICE] Erro ao parsear lista de vistorias: $e',
+          );
           debugPrint('📚 [INSPECTION_SERVICE] StackTrace: $stackTrace');
           return ApiResponse.error(
             message: 'Erro ao processar dados das vistorias: ${e.toString()}',
@@ -95,7 +101,7 @@ class InspectionService {
   Future<ApiResponse<Inspection>> getInspectionById(String id) async {
     try {
       debugPrint('🔍 [INSPECTION_SERVICE] Buscando vistoria: $id');
-      
+
       final response = await _apiService.get<Map<String, dynamic>>(
         ApiConstants.inspectionById(id),
       );
@@ -103,8 +109,10 @@ class InspectionService {
       if (response.success && response.data != null) {
         try {
           final inspection = Inspection.fromJson(response.data!);
-          debugPrint('✅ [INSPECTION_SERVICE] Vistoria carregada: ${inspection.title}');
-          
+          debugPrint(
+            '✅ [INSPECTION_SERVICE] Vistoria carregada: ${inspection.title}',
+          );
+
           return ApiResponse.success(
             data: inspection,
             statusCode: response.statusCode,
@@ -135,10 +143,12 @@ class InspectionService {
   }
 
   /// Cria uma nova vistoria
-  Future<ApiResponse<Inspection>> createInspection(CreateInspectionDto data) async {
+  Future<ApiResponse<Inspection>> createInspection(
+    CreateInspectionDto data,
+  ) async {
     try {
       debugPrint('➕ [INSPECTION_SERVICE] Criando vistoria: ${data.title}');
-      
+
       final response = await _apiService.post<Map<String, dynamic>>(
         ApiConstants.inspections,
         body: data.toJson(),
@@ -147,14 +157,18 @@ class InspectionService {
       if (response.success && response.data != null) {
         try {
           final inspection = Inspection.fromJson(response.data!);
-          debugPrint('✅ [INSPECTION_SERVICE] Vistoria criada: ${inspection.id}');
-          
+          debugPrint(
+            '✅ [INSPECTION_SERVICE] Vistoria criada: ${inspection.id}',
+          );
+
           return ApiResponse.success(
             data: inspection,
             statusCode: response.statusCode,
           );
         } catch (e, stackTrace) {
-          debugPrint('❌ [INSPECTION_SERVICE] Erro ao parsear vistoria criada: $e');
+          debugPrint(
+            '❌ [INSPECTION_SERVICE] Erro ao parsear vistoria criada: $e',
+          );
           debugPrint('📚 [INSPECTION_SERVICE] StackTrace: $stackTrace');
           return ApiResponse.error(
             message: 'Erro ao processar resposta: ${e.toString()}',
@@ -185,7 +199,7 @@ class InspectionService {
   ) async {
     try {
       debugPrint('✏️ [INSPECTION_SERVICE] Atualizando vistoria: $id');
-      
+
       final response = await _apiService.put<Map<String, dynamic>>(
         ApiConstants.inspectionUpdate(id),
         body: data.toJson(),
@@ -194,14 +208,18 @@ class InspectionService {
       if (response.success && response.data != null) {
         try {
           final inspection = Inspection.fromJson(response.data!);
-          debugPrint('✅ [INSPECTION_SERVICE] Vistoria atualizada: ${inspection.title}');
-          
+          debugPrint(
+            '✅ [INSPECTION_SERVICE] Vistoria atualizada: ${inspection.title}',
+          );
+
           return ApiResponse.success(
             data: inspection,
             statusCode: response.statusCode,
           );
         } catch (e, stackTrace) {
-          debugPrint('❌ [INSPECTION_SERVICE] Erro ao parsear vistoria atualizada: $e');
+          debugPrint(
+            '❌ [INSPECTION_SERVICE] Erro ao parsear vistoria atualizada: $e',
+          );
           debugPrint('📚 [INSPECTION_SERVICE] StackTrace: $stackTrace');
           return ApiResponse.error(
             message: 'Erro ao processar resposta: ${e.toString()}',
@@ -229,17 +247,14 @@ class InspectionService {
   Future<ApiResponse<void>> deleteInspection(String id) async {
     try {
       debugPrint('🗑️ [INSPECTION_SERVICE] Excluindo vistoria: $id');
-      
+
       final response = await _apiService.delete<void>(
         ApiConstants.inspectionDelete(id),
       );
 
       if (response.success) {
         debugPrint('✅ [INSPECTION_SERVICE] Vistoria excluída com sucesso');
-        return ApiResponse.success(
-          data: null,
-          statusCode: response.statusCode,
-        );
+        return ApiResponse.success(data: null, statusCode: response.statusCode);
       }
 
       return ApiResponse.error(
@@ -262,8 +277,10 @@ class InspectionService {
     String propertyId,
   ) async {
     try {
-      debugPrint('🏠 [INSPECTION_SERVICE] Buscando vistorias da propriedade: $propertyId');
-      
+      debugPrint(
+        '🏠 [INSPECTION_SERVICE] Buscando vistorias da propriedade: $propertyId',
+      );
+
       final response = await _apiService.get<dynamic>(
         ApiConstants.inspectionByProperty(propertyId),
       );
@@ -271,7 +288,7 @@ class InspectionService {
       if (response.success && response.data != null) {
         try {
           List<Inspection> inspections = [];
-          
+
           if (response.data is List) {
             final dataList = response.data as List<dynamic>;
             inspections = dataList
@@ -279,7 +296,9 @@ class InspectionService {
                   try {
                     return Inspection.fromJson(e as Map<String, dynamic>);
                   } catch (e) {
-                    debugPrint('❌ [INSPECTION_SERVICE] Erro ao parsear vistoria: $e');
+                    debugPrint(
+                      '❌ [INSPECTION_SERVICE] Erro ao parsear vistoria: $e',
+                    );
                     return null;
                   }
                 })
@@ -301,9 +320,11 @@ class InspectionService {
                   .toList();
             }
           }
-          
-          debugPrint('✅ [INSPECTION_SERVICE] ${inspections.length} vistorias encontradas');
-          
+
+          debugPrint(
+            '✅ [INSPECTION_SERVICE] ${inspections.length} vistorias encontradas',
+          );
+
           return ApiResponse.success(
             data: inspections,
             statusCode: response.statusCode,
@@ -324,7 +345,9 @@ class InspectionService {
         data: response.error,
       );
     } catch (e, stackTrace) {
-      debugPrint('❌ [INSPECTION_SERVICE] Erro ao buscar vistorias da propriedade: $e');
+      debugPrint(
+        '❌ [INSPECTION_SERVICE] Erro ao buscar vistorias da propriedade: $e',
+      );
       debugPrint('📚 [INSPECTION_SERVICE] StackTrace: $stackTrace');
       return ApiResponse.error(
         message: 'Erro de conexão: ${e.toString()}',
@@ -338,8 +361,10 @@ class InspectionService {
     String inspectorId,
   ) async {
     try {
-      debugPrint('👤 [INSPECTION_SERVICE] Buscando vistorias do vistoriador: $inspectorId');
-      
+      debugPrint(
+        '👤 [INSPECTION_SERVICE] Buscando vistorias do vistoriador: $inspectorId',
+      );
+
       final response = await _apiService.get<dynamic>(
         ApiConstants.inspectionByInspector(inspectorId),
       );
@@ -347,7 +372,7 @@ class InspectionService {
       if (response.success && response.data != null) {
         try {
           List<Inspection> inspections = [];
-          
+
           if (response.data is List) {
             final dataList = response.data as List<dynamic>;
             inspections = dataList
@@ -355,16 +380,20 @@ class InspectionService {
                   try {
                     return Inspection.fromJson(e as Map<String, dynamic>);
                   } catch (e) {
-                    debugPrint('❌ [INSPECTION_SERVICE] Erro ao parsear vistoria: $e');
+                    debugPrint(
+                      '❌ [INSPECTION_SERVICE] Erro ao parsear vistoria: $e',
+                    );
                     return null;
                   }
                 })
                 .whereType<Inspection>()
                 .toList();
           }
-          
-          debugPrint('✅ [INSPECTION_SERVICE] ${inspections.length} vistorias encontradas');
-          
+
+          debugPrint(
+            '✅ [INSPECTION_SERVICE] ${inspections.length} vistorias encontradas',
+          );
+
           return ApiResponse.success(
             data: inspections,
             statusCode: response.statusCode,
@@ -385,7 +414,9 @@ class InspectionService {
         data: response.error,
       );
     } catch (e, stackTrace) {
-      debugPrint('❌ [INSPECTION_SERVICE] Erro ao buscar vistorias do vistoriador: $e');
+      debugPrint(
+        '❌ [INSPECTION_SERVICE] Erro ao buscar vistorias do vistoriador: $e',
+      );
       debugPrint('📚 [INSPECTION_SERVICE] StackTrace: $stackTrace');
       return ApiResponse.error(
         message: 'Erro de conexão: ${e.toString()}',
@@ -397,8 +428,10 @@ class InspectionService {
   /// Faz upload de foto para uma vistoria
   Future<ApiResponse<Inspection>> uploadPhoto(String id, File file) async {
     try {
-      debugPrint('📸 [INSPECTION_SERVICE] Fazendo upload de foto para vistoria: $id');
-      
+      debugPrint(
+        '📸 [INSPECTION_SERVICE] Fazendo upload de foto para vistoria: $id',
+      );
+
       final endpoint = ApiConstants.inspectionUploadPhoto(id);
       final uri = Uri.parse('${ApiConstants.baseApiUrl}$endpoint');
       final request = http.MultipartRequest('POST', uri);
@@ -410,7 +443,7 @@ class InspectionService {
         excludeContentType: true,
       );
       request.headers.addAll(headers);
-      
+
       // Adicionar arquivo
       final fileStream = http.ByteStream(file.openRead());
       final fileLength = await file.length();
@@ -423,7 +456,7 @@ class InspectionService {
       request.files.add(multipartFile);
 
       debugPrint('📤 [INSPECTION_SERVICE] Enviando arquivo: ${file.path}');
-      
+
       final streamedResponse = await request.send().timeout(
         const Duration(seconds: 60),
       );
@@ -470,10 +503,13 @@ class InspectionService {
   }
 
   /// Remove uma foto de uma vistoria
-  Future<ApiResponse<Inspection>> removePhoto(String id, String photoUrl) async {
+  Future<ApiResponse<Inspection>> removePhoto(
+    String id,
+    String photoUrl,
+  ) async {
     try {
       debugPrint('🗑️ [INSPECTION_SERVICE] Removendo foto da vistoria: $id');
-      
+
       final response = await _apiService.delete<Map<String, dynamic>>(
         ApiConstants.inspectionDeletePhoto(id, photoUrl),
       );
@@ -482,7 +518,7 @@ class InspectionService {
         try {
           final inspection = Inspection.fromJson(response.data!);
           debugPrint('✅ [INSPECTION_SERVICE] Foto removida com sucesso');
-          
+
           return ApiResponse.success(
             data: inspection,
             statusCode: response.statusCode,
@@ -518,7 +554,7 @@ class InspectionService {
   ) async {
     try {
       debugPrint('💰 [INSPECTION_SERVICE] Solicitando aprovação financeira');
-      
+
       final response = await _apiService.post<Map<String, dynamic>>(
         ApiConstants.inspectionApprovals,
         body: data.toJson(),
@@ -548,10 +584,12 @@ class InspectionService {
   }
 
   /// Lista histórico de uma vistoria
-  Future<ApiResponse<List<InspectionHistoryEntry>>> getHistory(String id) async {
+  Future<ApiResponse<List<InspectionHistoryEntry>>> getHistory(
+    String id,
+  ) async {
     try {
       debugPrint('📜 [INSPECTION_SERVICE] Buscando histórico da vistoria: $id');
-      
+
       final response = await _apiService.get<dynamic>(
         ApiConstants.inspectionHistory(id),
       );
@@ -559,24 +597,30 @@ class InspectionService {
       if (response.success && response.data != null) {
         try {
           List<InspectionHistoryEntry> history = [];
-          
+
           if (response.data is List) {
             final dataList = response.data as List<dynamic>;
             history = dataList
                 .map((e) {
                   try {
-                    return InspectionHistoryEntry.fromJson(e as Map<String, dynamic>);
+                    return InspectionHistoryEntry.fromJson(
+                      e as Map<String, dynamic>,
+                    );
                   } catch (e) {
-                    debugPrint('❌ [INSPECTION_SERVICE] Erro ao parsear entrada do histórico: $e');
+                    debugPrint(
+                      '❌ [INSPECTION_SERVICE] Erro ao parsear entrada do histórico: $e',
+                    );
                     return null;
                   }
                 })
                 .whereType<InspectionHistoryEntry>()
                 .toList();
           }
-          
-          debugPrint('✅ [INSPECTION_SERVICE] ${history.length} entradas do histórico carregadas');
-          
+
+          debugPrint(
+            '✅ [INSPECTION_SERVICE] ${history.length} entradas do histórico carregadas',
+          );
+
           return ApiResponse.success(
             data: history,
             statusCode: response.statusCode,
@@ -612,8 +656,10 @@ class InspectionService {
     CreateInspectionHistoryDto data,
   ) async {
     try {
-      debugPrint('➕ [INSPECTION_SERVICE] Adicionando entrada ao histórico da vistoria: $id');
-      
+      debugPrint(
+        '➕ [INSPECTION_SERVICE] Adicionando entrada ao histórico da vistoria: $id',
+      );
+
       final response = await _apiService.post<Map<String, dynamic>>(
         ApiConstants.inspectionHistory(id),
         body: data.toJson(),
@@ -623,13 +669,15 @@ class InspectionService {
         try {
           final entry = InspectionHistoryEntry.fromJson(response.data!);
           debugPrint('✅ [INSPECTION_SERVICE] Entrada adicionada ao histórico');
-          
+
           return ApiResponse.success(
             data: entry,
             statusCode: response.statusCode,
           );
         } catch (e, stackTrace) {
-          debugPrint('❌ [INSPECTION_SERVICE] Erro ao parsear entrada do histórico: $e');
+          debugPrint(
+            '❌ [INSPECTION_SERVICE] Erro ao parsear entrada do histórico: $e',
+          );
           debugPrint('📚 [INSPECTION_SERVICE] StackTrace: $stackTrace');
           return ApiResponse.error(
             message: 'Erro ao processar resposta: ${e.toString()}',
@@ -644,7 +692,9 @@ class InspectionService {
         data: response.error,
       );
     } catch (e, stackTrace) {
-      debugPrint('❌ [INSPECTION_SERVICE] Erro ao adicionar entrada ao histórico: $e');
+      debugPrint(
+        '❌ [INSPECTION_SERVICE] Erro ao adicionar entrada ao histórico: $e',
+      );
       debugPrint('📚 [INSPECTION_SERVICE] StackTrace: $stackTrace');
       return ApiResponse.error(
         message: 'Erro de conexão: ${e.toString()}',
@@ -654,20 +704,24 @@ class InspectionService {
   }
 
   /// Remove entrada do histórico
-  Future<ApiResponse<void>> removeHistoryEntry(String id, String historyId) async {
+  Future<ApiResponse<void>> removeHistoryEntry(
+    String id,
+    String historyId,
+  ) async {
     try {
-      debugPrint('🗑️ [INSPECTION_SERVICE] Removendo entrada do histórico: $historyId');
-      
+      debugPrint(
+        '🗑️ [INSPECTION_SERVICE] Removendo entrada do histórico: $historyId',
+      );
+
       final response = await _apiService.delete<void>(
         ApiConstants.inspectionHistoryEntry(id, historyId),
       );
 
       if (response.success) {
-        debugPrint('✅ [INSPECTION_SERVICE] Entrada removida do histórico com sucesso');
-        return ApiResponse.success(
-          data: null,
-          statusCode: response.statusCode,
+        debugPrint(
+          '✅ [INSPECTION_SERVICE] Entrada removida do histórico com sucesso',
         );
+        return ApiResponse.success(data: null, statusCode: response.statusCode);
       }
 
       return ApiResponse.error(
@@ -676,7 +730,9 @@ class InspectionService {
         data: response.error,
       );
     } catch (e, stackTrace) {
-      debugPrint('❌ [INSPECTION_SERVICE] Erro ao remover entrada do histórico: $e');
+      debugPrint(
+        '❌ [INSPECTION_SERVICE] Erro ao remover entrada do histórico: $e',
+      );
       debugPrint('📚 [INSPECTION_SERVICE] StackTrace: $stackTrace');
       return ApiResponse.error(
         message: 'Erro de conexão: ${e.toString()}',
@@ -685,4 +741,3 @@ class InspectionService {
     }
   }
 }
-

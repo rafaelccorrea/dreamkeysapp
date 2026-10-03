@@ -6,6 +6,7 @@ import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/purchase_proposals_service.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../../sale_forms/widgets/sale_form_tones.dart';
+import '../utils/proposal_edit_rules.dart';
 import 'proposal_actions_sheet.dart';
 import 'proposal_row_actions.dart';
 
@@ -26,6 +27,7 @@ class ProposalCard extends StatelessWidget {
     super.key,
     required this.proposal,
     required this.accent,
+    this.atalho,
     this.onTap,
     this.onContinue,
     this.onShowHistorico,
@@ -36,7 +38,10 @@ class ProposalCard extends StatelessWidget {
   final Color accent;
   final VoidCallback? onTap;
 
-  /// Ação da etapa (enviar para assinar / assinaturas / continuar).
+  /// Atalho da linha ([proposalAtalhoDaLinha], mesmas condições do web).
+  final ProposalAtalho? atalho;
+
+  /// Ação do [atalho] (enviar para assinar / assinaturas / continuar).
   final VoidCallback? onContinue;
 
   /// Proposta finalizada: a faixa leva ao histórico das assinaturas.
@@ -109,13 +114,26 @@ class ProposalCard extends StatelessWidget {
     final mostraEtapas = p.status != ProposalStatus.canceled;
     final finalizada = p.status == ProposalStatus.finalized;
     _AcaoDaEtapa? acao;
-    if (rules.canSignatures && onContinue != null) {
-      final maxEtapa = p.maxEtapaLiberadaParaEnvio ?? p.etapa.number;
-      acao = maxEtapa < 2
-          ? _AcaoDaEtapa('Enviar para assinar', 'Enviar', onContinue!)
-          : (maxEtapa == 2 && p.etapa2EnviadaParaAssinatura)
-          ? _AcaoDaEtapa('Ver assinaturas', 'Assinaturas', onContinue!)
-          : _AcaoDaEtapa('Continuar', 'Continuar', onContinue!);
+    final at = atalho;
+    if (at != null && onContinue != null) {
+      // Rótulos do botão da linha do web.
+      acao = switch (at.tipo) {
+        ProposalAtalhoTipo.enviar => _AcaoDaEtapa(
+          'Enviar para assinatura',
+          'Enviar',
+          onContinue!,
+        ),
+        ProposalAtalhoTipo.assinaturasProprietario => _AcaoDaEtapa(
+          'Assinaturas (Proprietário)',
+          'Assinaturas',
+          onContinue!,
+        ),
+        ProposalAtalhoTipo.continuar => _AcaoDaEtapa(
+          'Continuar',
+          'Continuar',
+          onContinue!,
+        ),
+      };
     } else if (finalizada && !excluida && onShowHistorico != null) {
       acao = _AcaoDaEtapa('Ver histórico', 'Histórico', onShowHistorico!);
     }
@@ -258,7 +276,6 @@ class ProposalCard extends StatelessWidget {
                       excluida: excluida,
                       tom: tom,
                       acao: acao,
-                      travada: acao == null && rules.travadaPorPermissao,
                     ),
                   ],
                 ],
@@ -287,7 +304,7 @@ class _AcaoDaEtapa {
 /// As 3 etapas da assinatura numa linha (Comprador → Proprietário →
 /// Corretor): três traços + "Etapa 2 de 3 · Proprietário" e a ação ali mesmo
 /// (enviar, ver assinaturas, continuar), sem abrir a ficha. Conta que não
-/// edita propostas vê o cadeado — tocar diz o porquê.
+/// edita propostas não vê a ação (como no web).
 class _EtapasDaAssinatura extends StatelessWidget {
   const _EtapasDaAssinatura({
     required this.etapa,
@@ -295,7 +312,6 @@ class _EtapasDaAssinatura extends StatelessWidget {
     required this.excluida,
     required this.tom,
     required this.acao,
-    required this.travada,
   });
 
   final int etapa; // 1..3
@@ -303,7 +319,6 @@ class _EtapasDaAssinatura extends StatelessWidget {
   final bool excluida;
   final SaleFormTom tom;
   final _AcaoDaEtapa? acao;
-  final bool travada;
 
   static const _nomes = ['Comprador', 'Proprietário', 'Corretor'];
 
@@ -388,46 +403,6 @@ class _EtapasDaAssinatura extends StatelessWidget {
                           color: brand,
                         ),
                       ],
-                    ),
-                  ),
-                )
-              else if (travada)
-                Tooltip(
-                  message: 'Envio para assinatura travado',
-                  child: InkWell(
-                    onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Envio para assinatura travado: sua conta não '
-                          'edita propostas.',
-                        ),
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    ),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 4,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(LucideIcons.lock, size: 13, color: muted),
-                          if (!curto) ...[
-                            const SizedBox(width: 4),
-                            Text(
-                              'Travado',
-                              maxLines: 1,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w800,
-                                color: muted,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
                     ),
                   ),
                 ),

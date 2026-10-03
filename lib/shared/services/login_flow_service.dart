@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'auth_service.dart';
 import 'initialization_service.dart';
-import 'subscription_service.dart';
+import 'subscription_access_gate.dart';
 import 'company_service.dart';
 import '../../core/routes/app_routes.dart';
 import '../../core/session/session_bootstrap.dart';
@@ -242,46 +242,18 @@ class LoginFlowService {
       // Verificar tipo de usuário
       final isOwnerUser = user.owner == true;
       final isMasterOrAdmin = user.role == 'master' || user.role == 'admin';
-      final shouldCheckSubscriptionFirst = isMasterOrAdmin && isOwnerUser;
 
       debugPrint('🔍 [LOGIN_FLOW] Tipo de usuário - Owner: $isOwnerUser, Role: ${user.role}');
 
-      // FLUXO ESPECIAL: MASTER/ADMIN com owner=true
-      if (shouldCheckSubscriptionFirst) {
-        debugPrint('👑 [LOGIN_FLOW] Fluxo especial: Owner MASTER/ADMIN');
+      // Conta nova na sessão: nenhuma decisão de bloqueio da conta anterior
+      // pode valer aqui.
+      SubscriptionAccessGate.instance.clear();
 
-        // ETAPA 1: Verificar assinatura
-        final subscriptionService = SubscriptionService.instance;
-        final accessResponse = await subscriptionService.checkSubscriptionAccess();
-
-        if (!accessResponse.success || accessResponse.data == null) {
-          debugPrint('❌ [LOGIN_FLOW] Erro ao verificar assinatura');
-          return LoginFlowResult.error(
-            message: 'Erro ao verificar acesso à assinatura',
-          );
-        }
-
-        final accessInfo = accessResponse.data!;
-        debugPrint('📋 [LOGIN_FLOW] Status da assinatura: ${accessInfo.status}');
-
-        // Estado não confirmado pelo servidor (queda/timeout) nunca bloqueia:
-        // o app segue e reavalia depois.
-        if (!accessInfo.hasAccess && accessInfo.isAuthoritative) {
-          if (accessInfo.status == 'none') {
-            return LoginFlowResult.redirect(
-              route: AppRoutes.settings,
-              message: 'Nenhuma assinatura encontrada — configure no painel web',
-            );
-          } else {
-            return LoginFlowResult.redirect(
-              route: AppRoutes.settings,
-              message: 'Assinatura expirada ou suspensa',
-            );
-          }
-        }
-
-        debugPrint('✅ [LOGIN_FLOW] Assinatura válida, continuando...');
-      }
+      // A assinatura NÃO é mais checada só para o titular e antes da empresa
+      // (NEW-01, 03/10/2026): antes, titular bloqueado ia para Preferências
+      // sem aviso nenhum e o colaborador nem era checado (403 na Home e em
+      // Imóveis). Agora o `SubscriptionAccessGate` decide para todos, depois
+      // de a empresa resolver (o check-access usa o `X-Company-ID`).
 
       // ETAPA 2: Carregar companies
       //
@@ -308,6 +280,25 @@ class LoginFlowService {
       // novo a `/companies` quando a Home pedir sessão pronta.
       if (selectedCompanyId != null && selectedCompanyId.isNotEmpty) {
         SessionBootstrap.instance.markReady();
+      }
+
+      // Assinatura (NEW-01) e produto CRM (NEW-02). Titular bloqueado vê o
+      // aviso de assinatura com acesso mínimo; colaborador vê "Sistema
+      // indisponível"; empresa só-Financeiro abre direto no Meu Financeiro (`financeOnly`,
+      // 03/10/2026); sem CRM e sem Financeiro vê "Plano sem CRM". Falha de
+      // rede nunca bloqueia (decisão `allow`).
+      final gateDecision = await SubscriptionAccessGate.instance.evaluate(
+        role: user.role,
+        owner: isOwnerUser,
+        companyModules: selection.company?.availableModules,
+      );
+      final blockedRoute = SubscriptionAccessGate.routeFor(gateDecision);
+      if (blockedRoute != null) {
+        debugPrint('🛂 [LOGIN_FLOW] Acesso bloqueado: $gateDecision');
+        return LoginFlowResult.success(
+          route: blockedRoute,
+          message: 'Acesso bloqueado',
+        );
       }
 
       // Se é master/admin e tem empresas, redirecionar direto para dashboard

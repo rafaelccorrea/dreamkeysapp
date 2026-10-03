@@ -162,6 +162,9 @@ class AppDeepLink {
     'dashboard',
     'editar',
     'edit',
+    'assinaturas-pendentes',
+    'assinaturas',
+    'detalhes',
   };
 
   static String? _fromActionUrl(String url) {
@@ -299,18 +302,67 @@ class AppDeepLink {
           return AppRoutes.proposalEdit(segments[1]);
         }
         return AppRoutes.proposals;
+      case 'fichas':
+        // /fichas/dashboard: no web é `Navigate` para o dashboard de VENDA
+        // (`fichas.routes.tsx:38-41`) — não há painel consolidado lá nem aqui.
+        if (segments.length >= 2 && segments[1] == 'dashboard') {
+          return AppRoutes.saleFormsDashboard;
+        }
+        return null;
       case 'fichas-proposta':
-        // /fichas-proposta?highlightProposal={id} — lista de propostas.
+        // /fichas-proposta?highlightProposal={id} → a PRÓPRIA proposta, como o
+        // web (`notificationNavigation.ts:269`: vira `/fichas-proposta/:id/
+        // editar`); /fichas-proposta/:id/editar idem. A rota de edição é
+        // guardada por `proposal:update` (P-C1), como no web.
+        final highlight = query?['highlightProposal']?.trim() ?? '';
+        if (highlight.isNotEmpty) return AppRoutes.proposalEdit(highlight);
+        if (segments.length >= 3 &&
+            segments[1].isNotEmpty &&
+            segments[2] == 'editar') {
+          return AppRoutes.proposalEdit(segments[1]);
+        }
+        // V-L12 (03/10/2026): dashboard e "nova" têm destino próprio.
+        if (segments.length >= 2 && segments[1] == 'dashboard') {
+          return AppRoutes.proposalsDashboard;
+        }
+        if (segments.length >= 2 && segments[1] == 'nova') {
+          return AppRoutes.proposalNew;
+        }
         return AppRoutes.proposals;
       case 'fichas-venda':
         // /fichas-venda/detalhes/{id} — assinou/recusou/finalizada (25/09/2026)
         // /fichas-venda/{id}          — atalho curto, mesmo destino
-        // /fichas-venda/nova?propostaId={id}, /fichas-venda/dashboard… → lista.
-        // Antes TUDO caía na lista e o usuário tinha que achar a ficha na mão.
+        // /fichas-venda/{id}/editar   — edição (sale_form:update)
+        // /fichas-venda/nova?propostaId={id} — nova ficha da proposta
+        //   (notificação "proposta finalizada"); sem propostaId → lista
+        //   (criar do zero começa pela escolha de tipo, na lista).
+        // /fichas-venda/dashboard     — painel de venda.
         if (segments.length >= 3 &&
             segments[1] == 'detalhes' &&
             segments[2].isNotEmpty) {
           return AppRoutes.saleFormDetails(segments[2]);
+        }
+        if (segments.length >= 2 && segments[1] == 'dashboard') {
+          return AppRoutes.saleFormsDashboard;
+        }
+        if (segments.length >= 2 && segments[1] == 'nova') {
+          final proposalId = query?['propostaId']?.trim() ?? '';
+          if (proposalId.isNotEmpty) {
+            return AppRoutes.saleFormNewFromProposal(proposalId);
+          }
+          return AppRoutes.saleForms;
+        }
+        if (segments.length >= 3 &&
+            segments[2] == 'editar' &&
+            segments[1].isNotEmpty &&
+            !_saleFormReservedSegments.contains(segments[1])) {
+          return AppRoutes.saleFormEdit(segments[1]);
+        }
+        // transv-23 (03/10/2026): `/fichas-venda/assinaturas-pendentes` virava
+        // "id" e abria o detalhe de uma ficha inexistente. Agora tem destino
+        // próprio (e entrou na lista de segmentos reservados).
+        if (segments.length >= 2 && segments[1] == 'assinaturas-pendentes') {
+          return AppRoutes.saleFormsPendingSignatures;
         }
         if (segments.length == 2 &&
             segments[1].isNotEmpty &&
@@ -364,6 +416,15 @@ class AppDeepLink {
           return '/integrations/${segments[1]}';
         }
         return AppRoutes.integrations;
+
+      // ── Financeiro (03/10/2026, fase 2) ─────────────────────────────
+      // Mesmos paths do web; `FinanceRoutes.pageFor` decide a tela (o que
+      // só existe no web abre um aviso claro, nunca "página não encontrada").
+      case 'financeiro':
+        final q = (query == null || query.isEmpty)
+            ? ''
+            : '?${Uri(queryParameters: query).query}';
+        return '/${segments.join('/')}$q';
 
       // ── Sem tela no app → fallback do chamador ──────────────────────
       // /notifications (tela legada — o app usa o painel/sheet),

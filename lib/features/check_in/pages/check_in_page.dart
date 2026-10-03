@@ -5,16 +5,15 @@ import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import '../../../core/constants/app_permissions.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/api_service.dart';
 import '../../../shared/services/check_in_service.dart';
-import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/live_activity_service.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import '../utils/check_in_access.dart';
 
 /// Tela principal de check-in — versão "editorial", sem caixas centrais.
 /// O conteúdo respira nas margens, usa toda a horizontal e troca o
@@ -329,12 +328,14 @@ class _CheckInPageState extends State<CheckInPage> {
             onPressed: () =>
                 Navigator.of(context).pushNamed(AppRoutes.checkInManage),
           ),
-        IconButton(
-          tooltip: 'Histórico',
-          icon: const Icon(LucideIcons.history),
-          onPressed: () =>
-              Navigator.of(context).pushNamed(AppRoutes.checkInList),
-        ),
+        // checkin-04: histórico exige `check_in:view` (403 sem ela).
+        if (CheckInAccess.canViewHistory)
+          IconButton(
+            tooltip: 'Histórico',
+            icon: const Icon(LucideIcons.history),
+            onPressed: () =>
+                Navigator.of(context).pushNamed(AppRoutes.checkInList),
+          ),
       ],
       body: _bootLoading
           ? _buildSkeleton(context)
@@ -394,12 +395,14 @@ class _CheckInPageState extends State<CheckInPage> {
                       const SizedBox(height: 10),
                       _SettingsRow(settings: _settings!),
                     ],
-                    const SizedBox(height: 26),
-                    _HistoryLink(
-                      onTap: () => Navigator.of(
-                        context,
-                      ).pushNamed(AppRoutes.checkInList),
-                    ),
+                    if (CheckInAccess.canViewHistory) ...[
+                      const SizedBox(height: 26),
+                      _HistoryLink(
+                        onTap: () => Navigator.of(
+                          context,
+                        ).pushNamed(AppRoutes.checkInList),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -408,12 +411,9 @@ class _CheckInPageState extends State<CheckInPage> {
   }
 
   /// Pode agir sobre o check-in de outras pessoas — abre a tela de gestão.
-  bool get _canManage {
-    final access = ModuleAccessService.instance;
-    final role = access.userRole?.toLowerCase().trim() ?? '';
-    if (role == 'master' || role == 'admin' || role == 'manager') return true;
-    return access.hasPermission(AppPermissions.checkInManageSettings);
-  }
+  /// checkin-05: gestor (`manager`) não tem bypass no back — só
+  /// admin/master ou `check_in:manage_settings`, como no web.
+  bool get _canManage => CheckInAccess.canManage;
 
   /// O botão de check-in está travado — bloqueio semanal, fora da janela ou
   /// check-in desligado na empresa. Quem já está presente nunca fica travado

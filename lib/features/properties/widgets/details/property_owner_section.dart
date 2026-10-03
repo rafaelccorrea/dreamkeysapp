@@ -6,6 +6,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../../../../shared/services/property_service.dart';
 import '../../../../shared/utils/broker_contact_actions.dart';
+import '../../utils/property_owner_address.dart';
 import 'property_details_kit.dart';
 
 /// Corpo da seção "Proprietário" da ficha do imóvel — vai dentro do molde
@@ -91,7 +92,9 @@ List<_OwnerRow> _rowsOf(PropertyOwner? owner) {
   final email = owner.email?.trim() ?? '';
   final phone = owner.phone?.trim() ?? '';
   final document = owner.document?.trim() ?? '';
-  final address = owner.address?.trim() ?? '';
+  // Partes estruturadas (CEP, rua, nº…) quando o cadastro tem; senão o
+  // texto legado `address`. Só chega aqui quem pode ver os dados.
+  final address = ownerAddressDisplay(owner);
 
   if (name.isNotEmpty) {
     rows.add(_OwnerRow(

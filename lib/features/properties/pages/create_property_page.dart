@@ -29,6 +29,15 @@ import '../services/property_local_draft_storage.dart';
 import '../widgets/property_creation_setup_modal.dart';
 import '../widgets/finalidade_picker.dart';
 import '../widgets/property_duplicate_sheet.dart';
+import '../widgets/property_captors_section.dart';
+import '../widgets/property_owner_gate.dart';
+import '../utils/property_captor_slots.dart';
+import '../utils/property_form_extras.dart';
+import '../utils/property_extra_fields.dart';
+import '../utils/property_fallback_title.dart';
+import '../utils/property_owner_address.dart';
+import '../widgets/property_extra_fields_form.dart';
+import '../utils/property_save_feedback.dart';
 import '../utils/property_status_visual.dart';
 import '../utils/property_type_visual.dart';
 import '../../../shared/utils/property_finalidade.dart';
@@ -175,6 +184,39 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   String? _offerBelowMinSaleAction;
   String? _offerBelowMinRentAction;
 
+  /// Permuta (`acceptsExchange` + `exchangeMaxValue`, conferidos nos DTOs de
+  /// criação e edição do back). `null` = ainda não respondeu (imóvel antigo);
+  /// o web exige a resposta no cadastro e na edição.
+  bool? _acceptsExchange;
+  final _exchangeMaxValueController = TextEditingController();
+
+  /// Como a permuta veio do servidor — na edição só vai no PATCH se mudar
+  /// (não abre solicitação de alteração à toa).
+  bool? _loadedAcceptsExchange;
+  double? _loadedExchangeMaxValue;
+
+  // Catálogo da empresa (`GET /property-catalog`): cômodos extras com
+  // quantidade (`extraRooms`) e infraestrutura nas características.
+  List<PropertyCatalogItem> _catalog = const [];
+  List<PropertyExtraRoom> _extraRooms = const [];
+  List<PropertyExtraRoom>? _loadedExtraRooms;
+
+  // imoveis-13: "Ficha adicional" + salas + linha premium e o endereço
+  // estruturado do proprietário (paridade com o wizard do web). Na edição,
+  // o snapshot carregado decide o que vai no PATCH (só o que mudou).
+  final PropertyExtraFieldsController _extraFicha =
+      PropertyExtraFieldsController();
+  PropertyExtraFieldValues? _loadedExtraFicha;
+  final PropertyOwnerAddressController _ownerAddressParts =
+      PropertyOwnerAddressController();
+  PropertyOwnerAddressValues? _loadedOwnerAddressParts;
+
+  double? get _exchangeMaxValue {
+    final t = _exchangeMaxValueController.text.trim();
+    if (t.isEmpty) return null;
+    return Masks.unmaskMoney(t) / 100.0;
+  }
+
   // Etapa 5: Galeria
   final List<File> _selectedImages = [];
   final List<GalleryImage> _uploadedImages = [];
@@ -242,6 +284,12 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   String? _selectedCondominiumId;
   String? _selectedEmpreendimentoId;
 
+  /// Equipe obrigatória — o web exige `teamId` sempre (`teamValid` no
+  /// `validateSection(0)`, cadastro e edição). Sem nenhuma equipe disponível
+  /// e sem a regra da empresa, não há o que escolher e o app não trava.
+  bool get _teamRequired =>
+      _formRequiredKeys.contains('teamId') || _formTeams.isNotEmpty;
+
   /// Modo de origem do endereço — paridade web (`PropertyCreationSetupPayload`).
   PropertyCreationAddressMode _addressMode =
       PropertyCreationAddressMode.standalone;
@@ -286,6 +334,11 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
 
   String? _loadedCapturedById;
 
+  /// Captadores por papel + responsáveis (imoveis-10) e portão do
+  /// proprietário já cadastrado (imoveis-29) — lógica fora da página.
+  final PropertyCaptorsController _captors = PropertyCaptorsController();
+  final PropertyOwnerGate _ownerGate = PropertyOwnerGate();
+
   final PropertyLocalDraftStorage _draftStorage =
       PropertyLocalDraftStorage.instance;
   /// ID do rascunho local em edição (novo ou reaberto da lista).
@@ -299,6 +352,9 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _approvalSettingsLoadFuture = _loadApprovalSettings();
     _formSettingsLoadFuture = _loadFormSettings();
     _loadCurrentUserId();
+    // Responsável começa como o usuário logado só na criação (como o web).
+    _captors.loadUsers(defaultResponsibleToMe: widget.propertyId == null);
+    _captors.addListener(_onFieldChanged);
     if (widget.propertyId != null) {
       _loadProperty();
     } else if (widget.localDraftId != null &&
@@ -342,6 +398,22 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _rentPriceController.addListener(_onFieldChanged);
     _minSalePriceController.addListener(_onFieldChanged);
     _minRentPriceController.addListener(_onFieldChanged);
+    _exchangeMaxValueController.addListener(_onFieldChanged);
+    _extraFicha.addListener(_onFieldChanged);
+    _ownerAddressParts.addListener(_onFieldChanged);
+    _loadPropertyCatalog();
+  }
+
+  /// Catálogo de cômodos/infraestrutura da empresa. Sem ele o formulário
+  /// segue só com os campos padrão (mesma prudência do web).
+  Future<void> _loadPropertyCatalog() async {
+    try {
+      final res = await _propertyService.getPropertyCatalog();
+      if (!mounted || !res.success || res.data == null) return;
+      setState(() => _catalog = res.data!);
+    } catch (e) {
+      debugPrint('Erro ao carregar catálogo de imóvel: $e');
+    }
   }
 
   Future<void> _loadCurrentUserId() async {
@@ -604,6 +676,11 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       _iptuController.text = '';
       _minSalePriceController.text = '';
       _minRentPriceController.text = '';
+      _exchangeMaxValueController.text = '';
+      _acceptsExchange = null;
+      _extraRooms = const [];
+      _extraFicha.clear();
+      _ownerAddressParts.clear();
       _ownerNameController.text = '';
       _ownerEmailController.text = '';
       _ownerPhoneController.text = '';
@@ -813,13 +890,10 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     }
   }
 
-  double? _parseBrazilianAreaToNumber(String raw) {
-    final t = raw.trim();
-    if (t.isEmpty) return null;
-    final noThousands = t.replaceAll('.', '');
-    final normalized = noThousands.replaceAll(',', '.');
-    return double.tryParse(normalized);
-  }
+  /// O campo de área do app aceita só dígitos e ponto decimal ("120.50",
+  /// e a edição preenche com `120.5`). Tirar o ponto como milhar fazia
+  /// 120.5 virar 1205 m² no PATCH; vírgula continua aceita (1.200,50).
+  double? _parseBrazilianAreaToNumber(String raw) => parseDecimalInput(raw);
 
   int _totalSelectableImageCount() {
     if (widget.propertyId != null) {
@@ -856,6 +930,8 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   @override
   void dispose() {
     // Remover listeners
+    _captors.removeListener(_onFieldChanged);
+    _captors.dispose();
     _titleController.removeListener(_onFieldChanged);
     _descriptionController.removeListener(_onFieldChanged);
     _streetController.removeListener(_onFieldChanged);
@@ -879,7 +955,13 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     _rentPriceController.removeListener(_onFieldChanged);
     _minSalePriceController.removeListener(_onFieldChanged);
     _minRentPriceController.removeListener(_onFieldChanged);
+    _exchangeMaxValueController.removeListener(_onFieldChanged);
+    _extraFicha.removeListener(_onFieldChanged);
+    _ownerAddressParts.removeListener(_onFieldChanged);
 
+    _exchangeMaxValueController.dispose();
+    _extraFicha.dispose();
+    _ownerAddressParts.dispose();
     _pageController.dispose();
     _titleController.dispose();
     _descriptionController.dispose();
@@ -998,6 +1080,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             : PropertyCreationAddressMode.standalone;
     _loadedCapturedById =
         property.capturedById ?? property.capturedBy?.id;
+    _captors.hydrateFromProperty(property);
 
     _totalAreaController.text = property.totalArea > 0
         ? property.totalArea.toString()
@@ -1049,6 +1132,24 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         : '';
     _offerBelowMinSaleAction = property.offerBelowMinSaleAction;
     _offerBelowMinRentAction = property.offerBelowMinRentAction;
+
+    // Permuta e cômodos extras (o PATCH só os manda quando mudam).
+    _acceptsExchange = property.acceptsExchange;
+    _loadedAcceptsExchange = property.acceptsExchange;
+    _loadedExchangeMaxValue = property.exchangeMaxValue;
+    _exchangeMaxValueController.text = (property.exchangeMaxValue ?? 0) > 0
+        ? Masks.money((property.exchangeMaxValue! * 100).toStringAsFixed(0))
+        : '';
+    _extraRooms = List<PropertyExtraRoom>.from(property.extraRooms ?? const []);
+    _loadedExtraRooms = List<PropertyExtraRoom>.from(_extraRooms);
+
+    // Ficha adicional, salas e linha premium (imoveis-13).
+    _loadedExtraFicha = PropertyExtraFieldValues.fromProperty(property);
+    _extraFicha.load(_loadedExtraFicha!);
+    // Endereço estruturado do proprietário.
+    _loadedOwnerAddressParts =
+        PropertyOwnerAddressValues.fromOwner(property.owner);
+    _ownerAddressParts.load(_loadedOwnerAddressParts!);
 
     // Proprietário
     if (property.owner != null) {
@@ -1260,11 +1361,12 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   }
 
   Future<void> _generateDescription() async {
-    if (_totalAreaController.text.trim().isEmpty ||
-        _cityController.text.trim().isEmpty) {
+    // Web (`handleRetryAiTitleGeneration`): só tipo e cidade são exigidos —
+    // a área total é opcional no cadastro e no DTO da IA.
+    if (_cityController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Preencha pelo menos: tipo, cidade e área total'),
+          content: Text('Preencha tipo e cidade para a IA gerar o título.'),
         ),
       );
       return;
@@ -1281,7 +1383,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         neighborhood: _neighborhoodController.text.trim().isEmpty
             ? null
             : _neighborhoodController.text.trim(),
-        totalArea: double.tryParse(_totalAreaController.text) ?? 0.0,
+        totalArea: _parseBrazilianAreaToNumber(_totalAreaController.text),
         builtArea: _builtAreaController.text.trim().isEmpty
             ? null
             : double.tryParse(_builtAreaController.text),
@@ -1362,6 +1464,27 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           );
           return false;
         }
+        // Captadores por papel (imoveis-10): `evaluateCaptorSlots` do web.
+        final captorEval = _captors.evaluate(_finalidade);
+        if (!captorEval.valid) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(captorValidationMessage(captorEval)),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+          return false;
+        }
+        // Equipe obrigatória como no web (imoveis-11).
+        if (_teamRequired && (_selectedTeamId ?? '').trim().isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Selecione a equipe responsável pelo imóvel.'),
+              backgroundColor: AppColors.status.error,
+            ),
+          );
+          return false;
+        }
         // Título e descrição só são obrigatórios se a IA estiver desativada
         if (!_autoGenerateOnReview) {
           if (_titleController.text.trim().isEmpty) {
@@ -1375,31 +1498,13 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             );
             return false;
           }
-          if (_titleController.text.trim().length < 3) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: const Text('Título deve ter pelo menos 3 caracteres'),
-                backgroundColor: AppColors.status.error,
-              ),
-            );
-            return false;
-          }
+          // imoveis-09: sem mínimo de caracteres — o back (`@IsNotEmpty`,
+          // `@MaxLength`) e o web só exigem campo preenchido.
           if (_descriptionController.text.trim().isEmpty) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: const Text(
                   'Por favor, preencha a descrição ou ative a geração automática com IA',
-                ),
-                backgroundColor: AppColors.status.error,
-              ),
-            );
-            return false;
-          }
-          if (_descriptionController.text.trim().length < 10) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: const Text(
-                  'Descrição deve ter pelo menos 10 caracteres',
                 ),
                 backgroundColor: AppColors.status.error,
               ),
@@ -1429,32 +1534,28 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         } else {
           // Geração com IA na revisão: valida apenas trechos já preenchidos
           final t = _titleController.text.trim();
-          if (t.isNotEmpty) {
-            if (t.length < 3 || t.length > 255) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: const Text(
-                    'Título deve ter entre 3 e 255 caracteres',
-                  ),
-                  backgroundColor: AppColors.status.error,
+          if (t.length > 255) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text(
+                  'Título não pode ultrapassar 255 caracteres',
                 ),
-              );
-              return false;
-            }
+                backgroundColor: AppColors.status.error,
+              ),
+            );
+            return false;
           }
           final d = _descriptionController.text.trim();
-          if (d.isNotEmpty) {
-            if (d.length < 10 || d.length > 5000) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: const Text(
-                      'Descrição deve ter entre 10 e 5000 caracteres',
-                  ),
-                  backgroundColor: AppColors.status.error,
+          if (d.length > 5000) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text(
+                    'Descrição não pode ultrapassar 5000 caracteres',
                 ),
-              );
-              return false;
-            }
+                backgroundColor: AppColors.status.error,
+              ),
+            );
+            return false;
           }
         }
         return true;
@@ -1496,49 +1597,43 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           );
           return false;
         }
-        if (_cityController.text.trim().length < 2 ||
-            _cityController.text.trim().length > 100) {
+        // imoveis-09: só os tetos do back (`@MaxLength(100)` em cidade e
+        // bairro, `@MaxLength(2)` na UF) — sem mínimo nem regex próprios.
+        if (_cityController.text.trim().length > 100) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: const Text(
-                'Cidade deve ter entre 2 e 100 caracteres',
+                'Cidade deve ter no máximo 100 caracteres',
               ),
               backgroundColor: AppColors.status.error,
             ),
           );
           return false;
         }
-        if (_neighborhoodController.text.trim().length < 2 ||
-            _neighborhoodController.text.trim().length > 100) {
+        if (_neighborhoodController.text.trim().length > 100) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: const Text(
-                'Bairro deve ter entre 2 e 100 caracteres',
+                'Bairro deve ter no máximo 100 caracteres',
               ),
               backgroundColor: AppColors.status.error,
             ),
           );
           return false;
         }
-        if (_stateController.text.trim().isEmpty ||
-            _stateController.text.trim().length != 2) {
+        if (_stateController.text.trim().isEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: const Text(
-                'Por favor, preencha o estado (UF) com 2 letras',
-              ),
+              content: const Text('Por favor, preencha o estado (UF)'),
               backgroundColor: AppColors.status.error,
             ),
           );
           return false;
         }
-        final stateForUf = _stateController.text.trim().toUpperCase();
-        if (!RegExp(r'^[A-Z]{2}$').hasMatch(stateForUf)) {
+        if (_stateController.text.trim().length > 2) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: const Text(
-                'UF inválido: use 2 letras (ex.: SP, RJ)',
-              ),
+              content: const Text('A UF tem no máximo 2 letras (ex.: SP, RJ)'),
               backgroundColor: AppColors.status.error,
             ),
           );
@@ -1595,39 +1690,18 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           );
           return false;
         }
-        if (_bedroomsController.text.trim().isNotEmpty) {
-          final bedrooms = int.tryParse(_bedroomsController.text);
-          if (bedrooms == null || bedrooms < 0 || bedrooms >= 50) {
+        // imoveis-09: quartos/banheiros/vagas sem teto próprio — o back só
+        // exige número ≥ 0 (os campos já aceitam só dígitos).
+        for (final entry in <String, TextEditingController>{
+          'Quartos': _bedroomsController,
+          'Banheiros': _bathroomsController,
+          'Vagas': _parkingSpacesController,
+        }.entries) {
+          final txt = entry.value.text.trim();
+          if (txt.isNotEmpty && (int.tryParse(txt) ?? -1) < 0) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content:
-                    const Text('Quartos: informe um número entre 0 e 49'),
-                backgroundColor: AppColors.status.error,
-              ),
-            );
-            return false;
-          }
-        }
-        if (_bathroomsController.text.trim().isNotEmpty) {
-          final bathrooms = int.tryParse(_bathroomsController.text);
-          if (bathrooms == null || bathrooms < 0 || bathrooms >= 20) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: const Text(
-                    'Banheiros: informe um número entre 0 e 19'),
-                backgroundColor: AppColors.status.error,
-              ),
-            );
-            return false;
-          }
-        }
-        if (_parkingSpacesController.text.trim().isNotEmpty) {
-          final parking = int.tryParse(_parkingSpacesController.text);
-          if (parking == null || parking < 0 || parking >= 20) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: const Text(
-                    'Vagas: informe um número entre 0 e 19'),
+                content: Text('${entry.key}: informe um número válido'),
                 backgroundColor: AppColors.status.error,
               ),
             );
@@ -1670,6 +1744,20 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             ),
           );
           return false;
+          }
+          // Permuta obrigatória como no web (`getExchangeValidationError`).
+          final exchangeError = exchangeValidationError(
+            acceptsExchange: _acceptsExchange,
+            exchangeMaxValue: _exchangeMaxValue,
+          );
+          if (exchangeError != null) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(exchangeError),
+                backgroundColor: AppColors.status.error,
+              ),
+            );
+            return false;
           }
         }
         return true;
@@ -1730,24 +1818,14 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           );
           return false;
         }
-        if (phoneDigits.length < 10) {
+        // imoveis-09: sem mínimo de dígitos para telefone/documento — o web
+        // e o back (`@MaxLength(20)` no telefone) só exigem o telefone.
+        if (phoneDigits.length > 20) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: const Text(
-                'Telefone do proprietário: informe pelo menos 10 dígitos',
+                'Telefone do proprietário: no máximo 20 dígitos',
               ),
-              backgroundColor: AppColors.status.error,
-            ),
-          );
-          return false;
-        }
-        final docDig =
-            _ownerDocumentController.text.replaceAll(RegExp(r'\D'), '');
-        if (docDig.isNotEmpty && docDig.length < 11) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text(
-                  'Se informado, CPF/CNPJ deve ter ao menos 11 dígitos'),
               backgroundColor: AppColors.status.error,
             ),
           );
@@ -1768,31 +1846,11 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           );
           return false;
         }
-        if (_titleController.text.trim().length < 3) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Título deve ter pelo menos 3 caracteres'),
-              backgroundColor: AppColors.status.error,
-            ),
-          );
-          return false;
-        }
         if (_descriptionController.text.trim().isEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: const Text(
                 'Por favor, preencha a descrição ou gere com IA',
-              ),
-              backgroundColor: AppColors.status.error,
-            ),
-          );
-          return false;
-        }
-        if (_descriptionController.text.trim().length < 10) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text(
-                'Descrição deve ter pelo menos 10 caracteres',
               ),
               backgroundColor: AppColors.status.error,
             ),
@@ -1891,6 +1949,17 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       if (!mounted || !podeSeguir) return;
     }
 
+    // Cadastro novo: proprietário já tem imóveis? (imoveis-29, owner-check).
+    if (widget.propertyId == null && _currentStep == 5) {
+      final podeSeguir = await _ownerGate.run(
+        context,
+        ownerName: _ownerNameController.text,
+        ownerPhone: _ownerPhoneController.text,
+        ownerDocument: _ownerDocumentController.text,
+      );
+      if (!mounted || !podeSeguir) return;
+    }
+
     if (_currentStep < _totalSteps - 1) {
       final nextStep = _currentStep + 1;
       _pageController.nextPage(
@@ -1910,11 +1979,59 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     }
   }
 
+  /// Título montado com os dados do cadastro (web `buildLocalTitleFromForm`).
+  String _fallbackTitleFromForm() {
+    final linked = (_addressLinkedEntityName ?? '').trim();
+    return buildFallbackPropertyTitle(
+      type: _typeValueForForm,
+      city: _cityController.text,
+      neighborhood: _neighborhoodController.text,
+      condominiumName:
+          _addressMode == PropertyCreationAddressMode.condominium ? linked : null,
+      empreendimentoName:
+          _addressMode == PropertyCreationAddressMode.empreendimento
+              ? linked
+              : null,
+      bedrooms: int.tryParse(_bedroomsController.text.trim()),
+      parkingSpaces: int.tryParse(_parkingSpacesController.text.trim()),
+      totalArea: _parseBrazilianAreaToNumber(_totalAreaController.text),
+      features: List<String>.from(_selectedFeatures),
+    );
+  }
+
+  /// Web `fallbackTitleAfterAiMiss`: a IA não entregou título (falha, sem
+  /// resposta ou faltou dado) — monta um com o que já foi preenchido para o
+  /// cadastro não travar na revisão. Só na criação e só com título vazio.
+  /// Devolve o título vigente ('' quando não deu para montar).
+  String _fallbackTitleAfterAiMiss({bool missingData = false}) {
+    final atual = _titleController.text.trim();
+    if (atual.isNotEmpty || widget.propertyId != null) return atual;
+    final t = _fallbackTitleFromForm();
+    if (t.isEmpty) return '';
+    if (mounted) {
+      setState(() => _titleController.text = t);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            missingData
+                ? kFallbackTitleMissingDataMessage
+                : kFallbackTitleAiMissMessage,
+          ),
+        ),
+      );
+    } else {
+      _titleController.text = t;
+    }
+    return t;
+  }
+
   Future<void> _autoGenerateDescriptionOnReview() async {
-    // Valida campos mínimos
-    if (_totalAreaController.text.trim().isEmpty ||
-        _cityController.text.trim().isEmpty) {
-      return; // Não gera se não tiver dados mínimos
+    // Web: a IA só precisa de tipo e cidade (a área total é opcional). Sem
+    // cidade, o título local cobre o que der.
+    if (_cityController.text.trim().isEmpty) {
+      _fallbackTitleAfterAiMiss(missingData: true);
+      return;
     }
 
     setState(() {
@@ -1929,7 +2046,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         neighborhood: _neighborhoodController.text.trim().isEmpty
             ? null
             : _neighborhoodController.text.trim(),
-        totalArea: double.tryParse(_totalAreaController.text) ?? 0.0,
+        totalArea: _parseBrazilianAreaToNumber(_totalAreaController.text),
         builtArea: _builtAreaController.text.trim().isEmpty
             ? null
             : double.tryParse(_builtAreaController.text),
@@ -1971,10 +2088,16 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             }
             _generatedVariants.add(response.data!);
           });
+          // IA respondeu sem título (formato inesperado): não pode travar.
+          _fallbackTitleAfterAiMiss();
+        } else {
+          // Timeout, 429, rede: o cadastro segue com o título local.
+          _fallbackTitleAfterAiMiss();
         }
       }
     } catch (e) {
       debugPrint('Erro ao gerar descrição automaticamente: $e');
+      if (mounted) _fallbackTitleAfterAiMiss();
     } finally {
       if (mounted) {
         setState(() {
@@ -2010,6 +2133,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       'selectedTeamId': _selectedTeamId,
       'selectedCondominiumId': _selectedCondominiumId,
       'selectedEmpreendimentoId': _selectedEmpreendimentoId,
+      ..._captors.toDraftJson(),
       'finalidade': _finalidade?.value,
       'salePrice': _salePriceController.text,
       'rentPrice': _rentPriceController.text,
@@ -2024,10 +2148,17 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       'ownerPhone': _ownerPhoneController.text,
       'ownerDocument': _ownerDocumentController.text,
       'ownerAddress': _ownerAddressController.text,
+      PropertyOwnerAddressValues.draftKey: _ownerAddressParts.values.toDraft(),
+      PropertyExtraFieldValues.draftKey: _extraFicha.values.toDraft(),
       'type': _selectedType.value,
       'selectedFeatures': List<String>.from(_selectedFeatures),
       'selectedClientIds': List<String>.from(_selectedClientIds),
       'acceptsNegotiation': _acceptsNegotiation,
+      'acceptsExchange': _acceptsExchange,
+      'exchangeMaxValue': _exchangeMaxValueController.text,
+      'extraRooms': [
+        for (final r in _extraRooms) {'name': r.name, 'quantity': r.quantity},
+      ],
       'publishToSite': _publishToSite,
       'listingStatusIsDraft': _listingStatusIsDraft,
       'isFeatured': _isFeatured,
@@ -2074,6 +2205,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     setIfPresent(_parkingSpacesController, 'parkingSpaces');
     setIfPresent(_suitesController, 'suites');
     setIfPresent(_salePriceController, 'salePrice');
+    _captors.restoreDraft(raw);
     // Rascunho gravado antes da finalidade existir volta DEDUZINDO dos
     // preços — reentra como inferido, pedindo confirmação, em vez de
     // assumir em silêncio uma finalidade que ninguém escolheu.
@@ -2100,6 +2232,13 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     setIfPresent(_ownerPhoneController, 'ownerPhone');
     setIfPresent(_ownerDocumentController, 'ownerDocument');
     setIfPresent(_ownerAddressController, 'ownerAddress');
+    final ownerParts = PropertyOwnerAddressValues.fromDraft(
+      raw[PropertyOwnerAddressValues.draftKey],
+    );
+    if (ownerParts != null) _ownerAddressParts.load(ownerParts);
+    final extraFicha =
+        PropertyExtraFieldValues.fromDraft(raw[PropertyExtraFieldValues.draftKey]);
+    if (extraFicha != null) _extraFicha.load(extraFicha);
 
     final tp = PropertyType.fromString(raw['type']?.toString());
     if (tp != null) _selectedType = tp;
@@ -2117,6 +2256,10 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
     }
 
     _acceptsNegotiation = raw['acceptsNegotiation'] == true;
+    final ex = raw['acceptsExchange'];
+    _acceptsExchange = ex is bool ? ex : null;
+    setIfPresent(_exchangeMaxValueController, 'exchangeMaxValue');
+    _extraRooms = PropertyExtraRoom.listFrom(raw['extraRooms']) ?? const [];
     _publishToSite = raw['publishToSite'] == true;
     _listingStatusIsDraft = raw['listingStatusIsDraft'] != false;
     _isFeatured = raw['isFeatured'] == true;
@@ -2630,12 +2773,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           message: 'Informe o título do anúncio.',
         );
       }
-      if (t.length < 3) {
-        return const _StepValidationFailure(
-          step: 0,
-          message: 'O título deve ter pelo menos 3 caracteres.',
-        );
-      }
       if (t.length > 255) {
         return const _StepValidationFailure(
           step: 0,
@@ -2649,12 +2786,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           message: 'Informe a descrição do imóvel.',
         );
       }
-      if (d.length < 10) {
-        return const _StepValidationFailure(
-          step: 0,
-          message: 'A descrição deve ter pelo menos 10 caracteres.',
-        );
-      }
       if (d.length > 5000) {
         return const _StepValidationFailure(
           step: 0,
@@ -2662,12 +2793,21 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         );
       }
     }
-    if (_formRequiredKeys.contains('teamId') &&
-        (_selectedTeamId ?? '').trim().isEmpty) {
+    if (_teamRequired && (_selectedTeamId ?? '').trim().isEmpty) {
       return const _StepValidationFailure(
         step: 0,
         message: 'Selecione a equipe responsável pelo imóvel.',
       );
+    }
+    // Captadores por papel (imoveis-10) — rascunho pode ficar sem.
+    if (!saveAsDraft && _finalidade != null) {
+      final captorEval = _captors.evaluate(_finalidade);
+      if (!captorEval.valid) {
+        return _StepValidationFailure(
+          step: 0,
+          message: captorValidationMessage(captorEval),
+        );
+      }
     }
 
     // ============================ Step 1 ============================
@@ -2692,12 +2832,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         message: 'Informe a rua / logradouro.',
       );
     }
-    if (street.length < 2) {
-      return const _StepValidationFailure(
-        step: 1,
-        message: 'A rua deve ter pelo menos 2 caracteres.',
-      );
-    }
     if (_numberController.text.trim().isEmpty) {
       return const _StepValidationFailure(
         step: 1,
@@ -2716,12 +2850,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       return const _StepValidationFailure(
         step: 1,
         message: 'Informe o bairro.',
-      );
-    }
-    if (neighborhood.length < 2) {
-      return const _StepValidationFailure(
-        step: 1,
-        message: 'O bairro deve ter pelo menos 2 caracteres.',
       );
     }
     if (neighborhood.length > 100) {
@@ -2744,12 +2872,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         message: 'Informe a cidade.',
       );
     }
-    if (city.length < 2) {
-      return const _StepValidationFailure(
-        step: 1,
-        message: 'A cidade deve ter pelo menos 2 caracteres.',
-      );
-    }
     if (city.length > 100) {
       return const _StepValidationFailure(
         step: 1,
@@ -2763,10 +2885,11 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         message: 'Informe a UF (estado).',
       );
     }
-    if (state.length != 2 || !RegExp(r'^[A-Z]{2}$').hasMatch(state)) {
+    // imoveis-09: o back só limita a 2 caracteres (`@MaxLength(2)`).
+    if (state.length > 2) {
       return const _StepValidationFailure(
         step: 1,
-        message: 'A UF deve ter 2 letras maiúsculas (ex.: SP, RJ).',
+        message: 'A UF tem no máximo 2 letras (ex.: SP, RJ).',
       );
     }
     // Vínculo a condomínio/empreendimento só é obrigatório quando o usuário
@@ -2835,6 +2958,11 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             'Selecione pelo menos uma característica (configuração da empresa).',
       );
     }
+    // Ficha adicional: só os limites do DTO (o back recusaria com 400).
+    final extraFichaError = _extraFicha.values.validationError();
+    if (extraFichaError != null) {
+      return _StepValidationFailure(step: 2, message: extraFichaError);
+    }
 
     // ============================ Step 3 ============================
     // A finalidade manda: locação cobra aluguel, venda cobra venda, ambos
@@ -2895,12 +3023,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           message: 'Preço de aluguel deve ser positivo.',
         );
       }
-      if (p >= 1000000) {
-        return const _StepValidationFailure(
-          step: 3,
-          message: 'Preço de aluguel deve ser menor que R\$ 999.999,99.',
-        );
-      }
+      // imoveis-09: sem teto próprio para o aluguel (o back não limita).
     }
     final feeText = _condominiumFeeController.text.trim();
     if (feeText.isNotEmpty) {
@@ -2964,6 +3087,17 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                 'O preço mínimo de aluguel deve ser menor que o valor anunciado.',
           );
         }
+      }
+    }
+    // Permuta (imoveis-12): o web exige Sim/Não (e o valor, com Sim) no
+    // cadastro e na edição. Rascunho fica isento, como os preços.
+    if (_resolvedApiStatus(saveAsDraft) != 'draft') {
+      final exchangeError = exchangeValidationError(
+        acceptsExchange: _acceptsExchange,
+        exchangeMaxValue: _exchangeMaxValue,
+      );
+      if (exchangeError != null) {
+        return _StepValidationFailure(step: 3, message: exchangeError);
       }
     }
 
@@ -3103,6 +3237,14 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
   }
 
   Future<void> _saveProperty({bool saveAsDraft = false}) async {
+    // Última rede de segurança do web (`handleCreateProperty`): título vazio
+    // na criação (a IA falhou) vira o título montado com os dados.
+    if (widget.propertyId == null &&
+        !saveAsDraft &&
+        !_isGeneratingDescription &&
+        _titleController.text.trim().isEmpty) {
+      _fallbackTitleAfterAiMiss();
+    }
     final firstError =
         _findFirstStepValidationError(saveAsDraft: saveAsDraft);
     if (firstError != null) {
@@ -3213,6 +3355,8 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           : (ownerDocDigits.length > 18
               ? ownerDocDigits.substring(0, 18)
               : ownerDocDigits);
+      final ownerAddressText = _ownerAddressParts.values
+          .composeLegacy(_ownerAddressController.text);
 
       final suitesParsed = int.tryParse(_suitesController.text.trim());
       final sectorTrim = _sectorController.text.trim();
@@ -3295,30 +3439,81 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                 .contains(_offerBelowMinRentAction))
           'offerBelowMinRentAction': _offerBelowMinRentAction,
         'ownerName': _ownerNameController.text.trim(),
-        'ownerEmail': _ownerEmailController.text.trim(),
+        // imoveis-F4 (paridade `buildCreatePropertyApiPayload.ts`): vazio não
+        // vai na criação; na edição vai `null` para APAGAR (o '' o DTO
+        // transforma em undefined e o e-mail antigo ficava).
+        if (_ownerEmailController.text.trim().isNotEmpty)
+          'ownerEmail': _ownerEmailController.text.trim()
+        else if (isEditing)
+          'ownerEmail': null,
         'ownerPhone': ownerPhoneDigits.isNotEmpty
             ? ownerPhoneDigits
             : _ownerPhoneController.text.trim(),
         ...(ownerDocApi != null ? {'ownerDocument': ownerDocApi} : {}),
-        if (_ownerAddressController.text.trim().isNotEmpty)
-          'ownerAddress': _ownerAddressController.text.trim(),
+        // Texto legado montado das partes do endereço (igual ao web); sem
+        // partes, fica o texto antigo do cadastro.
+        if (ownerAddressText.isNotEmpty) 'ownerAddress': ownerAddressText,
         // Campos extras alinhados a `buildCreatePropertyApiPayload.ts`
         'isFeatured': _isFeatured,
-        // O app não edita estes marcadores. Na EDIÇÃO eles não vão no PATCH:
-        // mandar false apagava Exclusividade, Placa, Alto padrão e garantias
-        // de locação marcados no web. Na criação o padrão é false, como no web.
-        if (!isEditing) ...{
-          'isHighStandard': false,
-          'hasPlaque': false,
-          'hasExclusivity': false,
-          'isPrivate': false,
-          'bail': false,
-          'suretyBond': false,
-          'bondApplication': false,
-          'credpagoGuarantee': false,
-          'guarantor': false,
-        },
       };
+
+      // imoveis-13: ficha adicional (marcadores, ano, andar, lote, garantias,
+      // repasse, SEO…), salas e linha premium. Criação: forma do web; edição:
+      // só o que mudou — o PATCH não apaga o que foi marcado no web.
+      data.addAll(
+        isEditing
+            ? _extraFicha.values.editApiFields(
+                _loadedExtraFicha ?? const PropertyExtraFieldValues(),
+                publishToSite: _publishToSite,
+              )
+            : _extraFicha.values.createApiFields(publishToSite: _publishToSite),
+      );
+      // Endereço estruturado do proprietário (ownerZipCode, ownerStreet…).
+      data.addAll(
+        isEditing
+            ? _ownerAddressParts.values.editApiFields(
+                _loadedOwnerAddressParts ?? const PropertyOwnerAddressValues(),
+              )
+            : _ownerAddressParts.values.createApiFields(),
+      );
+      // Título/descrição de rascunho sem texto (web `handleCreateProperty`):
+      // o back exige os dois; o título sai dos dados do cadastro.
+      if (!isEditing && saveAsDraft) {
+        if ((data['title'] as String).isEmpty) {
+          final t = _fallbackTitleFromForm();
+          data['title'] = t.isNotEmpty ? t : kDraftTitlePlaceholder;
+        }
+        if ((data['description'] as String).isEmpty) {
+          data['description'] = kDraftDescriptionPlaceholder;
+        }
+      }
+
+      // Permuta (imoveis-12) — `acceptsExchange`/`exchangeMaxValue` existem
+      // no Create/UpdatePropertyDto. Na edição só vai quando mudou.
+      final exchange = exchangeApiFields(
+        acceptsExchange: _acceptsExchange,
+        exchangeMaxValue: _exchangeMaxValue,
+      );
+      final exchangeChanged = _acceptsExchange != _loadedAcceptsExchange ||
+          (_acceptsExchange == true &&
+              (_exchangeMaxValue ?? 0) != (_loadedExchangeMaxValue ?? 0));
+      if (!isEditing || exchangeChanged) data.addAll(exchange);
+
+      // Cômodos extras do catálogo (`extraRooms`, no DTO). Na criação vão se
+      // houver; na edição só quando mudaram.
+      if (isEditing) {
+        final loaded = _loadedExtraRooms ?? const <PropertyExtraRoom>[];
+        if (!sameExtraRooms(loaded, _extraRooms)) {
+          data['extraRooms'] = [
+            for (final r in _extraRooms)
+              {'name': r.name, 'quantity': r.quantity},
+          ];
+        }
+      } else if (_extraRooms.isNotEmpty) {
+        data['extraRooms'] = [
+          for (final r in _extraRooms) {'name': r.name, 'quantity': r.quantity},
+        ];
+      }
 
       if (!omitStatusPatch) {
         data['status'] = resolvedStatus;
@@ -3328,37 +3523,19 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       }
 
       if (!isEditing) {
-        final uid = userId!;
-        data['capturedById'] = uid;
-        data['capturedByIds'] = [uid];
-        data['responsibleUserIds'] = [uid];
+        // Slots venda/locação + responsáveis (imoveis-10), como o
+        // `buildCreatePropertyApiPayload.ts` do web.
+        data.addAll(_captors.createPayload(userId!));
       } else {
-        final cap = _loadedCapturedById;
-        if (cap != null && cap.isNotEmpty) {
-          // Captadores NÃO vão no PATCH de edição: `capturedByIds` faz o back
-          // regravar a lista inteira (replacePropertyCaptors) — sumia quem foi
-          // incluído como captador pelo web — e troca de captador é campo
-          // protegido, abrindo pedido de alteração que ninguém pediu. Só a
-          // reclassificação de papel (captorAssignments sem capturedByIds) é
-          // aplicada direto pelo back, mantendo os mesmos captadores.
-          // TROCAR a finalidade exige papel de captador compatível: o
-          // backend recusa 'ambos' sem captador de locação
-          // (assertCaptorsMatchFinalidade). O papel JÁ GRAVADO vence o
-          // fallback da finalidade em buildCaptorRows, então sem mandar o
-          // assignment o corretor levava um 400 sobre captador que ele não
-          // tem onde consertar — não existe UI de papel no app.
-          //
-          // Só o captador PRINCIPAL entra no array: buildCaptorRows resolve
-          // por usuário, então quem não vier aqui mantém o papel que já
-          // tinha (não apaga a divisão de papéis feita no CRM web).
-          final f = _finalidade;
-          if (f != null && f != _finalidadeCarregada) {
-            data['captorAssignments'] = [
-              if (f.anunciaVenda) {'userId': cap, 'role': 'venda'},
-              if (f.anunciaLocacao) {'userId': cap, 'role': 'locacao'},
-            ];
-          }
-        }
+        // Edição: captação e responsáveis SÓ quando mudaram (imoveis-04 —
+        // `capturedByIds` regrava a lista inteira e troca de captador é
+        // campo protegido). Mesmas pessoas com papel novo, ou finalidade
+        // trocada, vai só `captorAssignments` (reclassificação). A resposta
+        // (`pendingChangeRequest`) é tratada em `PropertySaveFeedback`.
+        final f = _finalidade;
+        data.addAll(_captors.editPatch(
+          finalidadeChanged: f != null && f != _finalidadeCarregada,
+        ));
       }
 
       final tid = _selectedTeamId?.trim();
@@ -3406,7 +3583,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
       // A checagem local olha o imóvel como ele fica depois do PATCH: o que
       // não vai no corpo da edição (tipo cru desconhecido, captadores) segue
       // gravado no back e não pode reprovar como "campo vazio".
-      final loadedCap = _loadedCapturedById ?? '';
+      final loadedCap = _captors.primaryCaptorId ?? _loadedCapturedById ?? '';
       final cfgView = <String, dynamic>{
         ...data,
         if (!data.containsKey('type')) 'type': _typeValueForForm,
@@ -3522,18 +3699,36 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                   _requireApprovalToPublishOnSite;
           final queuedForApprovals =
               !isEditing && !saveAsDraft && needsApprovalQueue;
+          // Edição: o PATCH pode ter mandado parte para aprovação
+          // (`pendingChangeRequest`) ou reenviado o imóvel recusado para a
+          // fila (`resubmittedForApproval`) — nesses casos NÃO é "atualizada
+          // com sucesso" (paridade web, imoveis-14).
+          final editFeedback = isEditing && !saveAsDraft
+              ? PropertySaveFeedback.afterEdit(response.data)
+              : null;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
+              behavior: editFeedback?.isLong == true
+                  ? SnackBarBehavior.floating
+                  : null,
+              duration: editFeedback?.isLong == true
+                  ? const Duration(seconds: 12)
+                  : const Duration(seconds: 4),
               content: Text(
-                saveAsDraft
-                    ? 'Rascunho salvo!'
-                    : (widget.propertyId != null
-                          ? 'Propriedade atualizada com sucesso!'
-                          : (queuedForApprovals
-                              ? 'Imóvel enviado para a fila de aprovação.'
-                              : 'Propriedade criada com sucesso!')),
+                editFeedback?.message ??
+                    (saveAsDraft
+                        ? 'Rascunho salvo!'
+                        : (widget.propertyId != null
+                            ? 'Propriedade atualizada com sucesso!'
+                            : (queuedForApprovals
+                                ? 'Imóvel enviado para a fila de aprovação.'
+                                : 'Propriedade criada com sucesso!'))),
               ),
-              backgroundColor: AppColors.status.success,
+              backgroundColor: switch (editFeedback?.tone) {
+                PropertySaveFeedbackTone.warning => AppColors.status.warning,
+                PropertySaveFeedbackTone.info => AppColors.status.info,
+                _ => AppColors.status.success,
+              },
             ),
           );
           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -4840,26 +5035,15 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                   label: _autoGenerateOnReview ? 'Título' : 'Título *',
                   hint: 'Ex: Casa com 3 quartos em condomínio fechado',
                   maxLength: 255,
+                  // imoveis-09: sem mínimo de caracteres (back/web só exigem
+                  // preenchido; o teto 255 é o `@MaxLength` do DTO).
                   validator: (value) {
-                    if (!_autoGenerateOnReview) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'Título é obrigatório ou ative a geração automática com IA';
-                      }
-                      if (value.trim().length < 3) {
-                        return 'Título deve ter pelo menos 3 caracteres';
-                      }
-                      if (value.trim().length > 255) {
-                        return 'Título deve ter no máximo 255 caracteres';
-                      }
-                    } else {
-                      if (value != null && value.trim().isNotEmpty) {
-                        if (value.trim().length < 3) {
-                          return 'Título deve ter pelo menos 3 caracteres';
-                        }
-                        if (value.trim().length > 255) {
-                          return 'Título deve ter no máximo 255 caracteres';
-                        }
-                      }
+                    final v = value?.trim() ?? '';
+                    if (!_autoGenerateOnReview && v.isEmpty) {
+                      return 'Título é obrigatório ou ative a geração automática com IA';
+                    }
+                    if (v.length > 255) {
+                      return 'Título deve ter no máximo 255 caracteres';
                     }
                     return null;
                   },
@@ -4872,25 +5056,12 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                   maxLines: 6,
                   maxLength: 5000,
                   validator: (value) {
-                    if (!_autoGenerateOnReview) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'Descrição é obrigatória ou ative a geração automática com IA';
-                      }
-                      if (value.trim().length < 10) {
-                        return 'Descrição deve ter pelo menos 10 caracteres';
-                      }
-                      if (value.trim().length > 5000) {
-                        return 'Descrição deve ter no máximo 5000 caracteres';
-                      }
-                    } else {
-                      if (value != null && value.trim().isNotEmpty) {
-                        if (value.trim().length < 10) {
-                          return 'Descrição deve ter pelo menos 10 caracteres';
-                        }
-                        if (value.trim().length > 5000) {
-                          return 'Descrição deve ter no máximo 5000 caracteres';
-                        }
-                      }
+                    final v = value?.trim() ?? '';
+                    if (!_autoGenerateOnReview && v.isEmpty) {
+                      return 'Descrição é obrigatória ou ative a geração automática com IA';
+                    }
+                    if (v.length > 5000) {
+                      return 'Descrição deve ter no máximo 5000 caracteres';
                     }
                     return null;
                   },
@@ -4939,17 +5110,15 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                 ? _buildTypeSummaryRow(theme)
                 : _buildTypeChoiceGroups(theme),
           ),
-          if (_formRequiredKeys.contains('teamId') || _formTeams.isNotEmpty) ...[
+          if (_teamRequired) ...[
             SizedBox(height: _wizGapBetweenSections),
             _wizardSection(
               theme,
               icon: Icons.groups_2_rounded,
-              title: _formRequiredKeys.contains('teamId')
-                  ? 'Equipe *'
-                  : 'Equipe',
+              title: 'Equipe *',
               subtitle:
                   'Opções vindas do CRM (`/properties/form-settings`), mesma regra do cadastro web.',
-              child: _formRequiredKeys.contains('teamId') && _formTeams.isEmpty
+              child: _formTeams.isEmpty
                   ? Text(
                       'Nenhuma equipe disponível para sua conta. Ajuste as '
                       'configurações de cadastro no CRM.',
@@ -4958,19 +5127,22 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                       ),
                     )
                   : DropdownButtonFormField<String?>(
-                      initialValue: _selectedTeamId,
+                      // Equipe gravada fora da lista do usuário não pode ser
+                      // o valor do dropdown (assert do Flutter): mostra vazio
+                      // e o id segue gravado até a pessoa escolher outra.
+                      initialValue:
+                          _formTeams.any((t) => t.id == _selectedTeamId)
+                              ? _selectedTeamId
+                              : null,
                       decoration: _wizardDropdownDecoration(
                         'Selecionar equipe',
                         icon: Icons.groups_2_rounded,
                       ),
                       icon: const Icon(Icons.expand_more_rounded, size: 18),
                       isExpanded: true,
+                      // Sem "Não vincular": o web exige equipe no cadastro e
+                      // na edição (`teamValid`, imoveis-11).
                       items: [
-                        if (!_formRequiredKeys.contains('teamId'))
-                          const DropdownMenuItem<String?>(
-                            value: null,
-                            child: Text('— Não vincular —'),
-                          ),
                         ..._formTeams.map(
                           (t) => DropdownMenuItem<String?>(
                             value: t.id,
@@ -4984,14 +5156,23 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                       onChanged: _formTeams.isEmpty
                           ? null
                           : (v) => _setStateAndPersist(() => _selectedTeamId = v),
-                      validator: _formRequiredKeys.contains('teamId')
-                          ? (v) => (v == null || v.isEmpty)
-                              ? 'Selecione uma equipe'
-                              : null
+                      validator: (v) => (v == null || v.isEmpty)
+                          ? 'Selecione uma equipe'
                           : null,
                     ),
             ),
           ],
+          SizedBox(height: _wizGapBetweenSections),
+          _wizardSection(
+            theme,
+            icon: Icons.handshake_rounded,
+            title: 'Captação e responsáveis *',
+            subtitle: 'Quem captou o imóvel e quem responde pelo cadastro.',
+            child: PropertyCaptorsSection(
+              controller: _captors,
+              finalidade: _finalidade,
+            ),
+          ),
           SizedBox(height: _wizGapBetweenSections),
           _wizardSection(
             theme,
@@ -5142,9 +5323,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                           if (value == null || value.trim().isEmpty) {
                             return 'Rua é obrigatória';
                           }
-                          if (value.trim().length < 2) {
-                            return 'Rua deve ter pelo menos 2 caracteres';
-                          }
                           return null;
                         },
                       ),
@@ -5203,9 +5381,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                     if (value == null || value.trim().isEmpty) {
                       return 'Bairro é obrigatório';
                     }
-                    if (value.trim().length < 2) {
-                      return 'Bairro deve ter pelo menos 2 caracteres';
-                    }
                     if (value.trim().length > 100) {
                       return 'Bairro deve ter no máximo 100 caracteres';
                     }
@@ -5250,9 +5425,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                       if (value == null || value.trim().isEmpty) {
                         return 'Cidade é obrigatória';
                       }
-                      if (value.trim().length < 2) {
-                        return 'Cidade deve ter pelo menos 2 caracteres';
-                      }
                       if (value.trim().length > 100) {
                         return 'Cidade deve ter no máximo 100 caracteres';
                       }
@@ -5273,13 +5445,9 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                       if (value == null || value.trim().isEmpty) {
                         return 'Estado é obrigatório';
                       }
+                      // imoveis-09: só o teto do back (`@MaxLength(2)`, já
+                      // garantido pelo `maxLength` do campo).
                       final state = value.trim().toUpperCase();
-                      if (state.length != 2) {
-                        return 'Digite 2 letras';
-                      }
-                      if (!RegExp(r'^[A-Z]{2}$').hasMatch(state)) {
-                        return 'Apenas letras maiúsculas';
-                      }
                       if (state != value) {
                         _stateController.value = TextEditingValue(
                           text: state,
@@ -5573,7 +5741,20 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
-                      child: _buildFormField(
+                      // Comercial conta SALAS (`rooms`), não quartos —
+                      // `contaSalas` do web; o número não cai em `bedrooms`.
+                      child: propertyTypeCountsRooms(_typeValueForForm)
+                          ? _buildFormField(
+                              theme,
+                              controller: _extraFicha.rooms,
+                              label: 'Salas',
+                              hint: '0',
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                              ],
+                            )
+                          : _buildFormField(
                         theme,
                         controller: _bedroomsController,
                         label: 'Quartos',
@@ -5587,9 +5768,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                             final bedrooms = int.tryParse(value);
                             if (bedrooms != null && bedrooms < 0) {
                               return 'Valor inválido';
-                            }
-                            if (bedrooms != null && bedrooms >= 50) {
-                              return 'Menor que 50';
                             }
                           }
                           return null;
@@ -5612,9 +5790,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                             final bathrooms = int.tryParse(value);
                             if (bathrooms != null && bathrooms < 0) {
                               return 'Valor inválido';
-                            }
-                            if (bathrooms != null && bathrooms >= 20) {
-                              return 'Menor que 20';
                             }
                           }
                           return null;
@@ -5648,7 +5823,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                           if (value != null && value.trim().isNotEmpty) {
                             final s = int.tryParse(value);
                             if (s != null && s < 0) return 'Valor inválido';
-                            if (s != null && s >= 50) return 'Menor que 50';
                           }
                           return null;
                         },
@@ -5671,9 +5845,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                             if (parking != null && parking < 0) {
                               return 'Valor inválido';
                             }
-                            if (parking != null && parking >= 20) {
-                              return 'Menor que 20';
-                            }
                           }
                           return null;
                         },
@@ -5684,6 +5855,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
               ],
             ),
           ),
+          ..._buildExtraRoomsSection(theme),
           SizedBox(height: _wizGapBetweenSections),
           _wizardSection(
             theme,
@@ -5691,10 +5863,12 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             title: 'Destaques e comodidades',
             subtitle:
                 'Toque para marcar — ajudam filtros internos e a descrição com IA.',
+            // Fixas + infraestrutura do catálogo da empresa, sem repetir
+            // nome (`mergeFeatureOptions` do web).
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: [
+              children: mergeFeatureOptions([
                   'Ar condicionado',
                   'Aquecimento',
                   'Elevador',
@@ -5737,7 +5911,7 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                   'Em construção',
                   'Novo',
                   'Usado',
-                ]
+                ], _catalog.where((i) => i.isInfrastructure).toList())
                     .map((feature) {
                       final isSelected = _selectedFeatures.contains(feature);
                       return FilterChip(
@@ -5756,6 +5930,19 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                       );
                     })
                     .toList(),
+            ),
+          ),
+          SizedBox(height: _wizGapBetweenSections),
+          // imoveis-13: "Ficha adicional (importação / detalhes)" do web.
+          _wizardSection(
+            theme,
+            icon: Icons.post_add_rounded,
+            title: 'Ficha adicional',
+            subtitle:
+                'Ano, andar, lote, garantias de locação, repasse e SEO — tudo opcional.',
+            child: PropertyExtraFichaFields(
+              controller: _extraFicha,
+              accent: _stepAccent(2),
             ),
           ),
         ],
@@ -5941,9 +6128,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
         }
         final price = Masks.unmaskMoney(text) / 100.0;
         if (price <= 0) return 'Preço de aluguel deve ser positivo';
-        if (price >= 1000000) {
-          return 'Preço de aluguel deve ser menor que R\$ 999.999,99';
-        }
         return null;
       },
     );
@@ -6302,6 +6486,213 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
               ],
             ),
           ),
+          SizedBox(height: _wizGapBetweenSections),
+          _buildExchangeSection(theme),
+        ],
+      ),
+    );
+  }
+
+  /// "Cômodos extras" — cômodos do catálogo da empresa com quantidade
+  /// (`extraRooms`, paridade `PropertyExtraRoomsFields` do web). Mantém os já
+  /// gravados que saíram do catálogo. Sem catálogo nem cômodos, não aparece.
+  List<Widget> _buildExtraRoomsSection(ThemeData theme) {
+    final names = extraRoomNames(
+      _catalog.where((i) => i.isRoom).toList(),
+      _extraRooms,
+    );
+    if (names.isEmpty) return const [];
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+
+    Widget stepButton(IconData icon, VoidCallback? onTap) => SizedBox(
+          width: 36,
+          height: 36,
+          child: IconButton(
+            padding: EdgeInsets.zero,
+            iconSize: 18,
+            onPressed: onTap,
+            icon: Icon(icon),
+            style: IconButton.styleFrom(
+              side: BorderSide(color: ThemeHelpers.borderColor(context)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
+        );
+
+    return [
+      SizedBox(height: _wizGapBetweenSections),
+      _wizardSection(
+        theme,
+        icon: Icons.meeting_room_rounded,
+        title: 'Cômodos extras',
+        subtitle: 'Cômodos cadastrados pela sua empresa. Deixe em zero o que '
+            'o imóvel não tem.',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var i = 0; i < names.length; i++) ...[
+              if (i > 0)
+                Divider(
+                  height: 1,
+                  color: ThemeHelpers.borderColor(context)
+                      .withValues(alpha: 0.5),
+                ),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        names[i],
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: ThemeHelpers.textColor(context),
+                        ),
+                      ),
+                    ),
+                    stepButton(
+                      Icons.remove_rounded,
+                      extraRoomQuantity(_extraRooms, names[i]) <= 0
+                          ? null
+                          : () => _setStateAndPersist(() {
+                                _extraRooms = setExtraRoomQuantity(
+                                  _extraRooms,
+                                  names[i],
+                                  extraRoomQuantity(_extraRooms, names[i]) - 1,
+                                );
+                              }),
+                    ),
+                    SizedBox(
+                      width: 40,
+                      child: Text(
+                        '${extraRoomQuantity(_extraRooms, names[i])}',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          color: extraRoomQuantity(_extraRooms, names[i]) > 0
+                              ? ThemeHelpers.textColor(context)
+                              : secondary,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                    stepButton(
+                      Icons.add_rounded,
+                      extraRoomQuantity(_extraRooms, names[i]) >= 99
+                          ? null
+                          : () => _setStateAndPersist(() {
+                                _extraRooms = setExtraRoomQuantity(
+                                  _extraRooms,
+                                  names[i],
+                                  extraRoomQuantity(_extraRooms, names[i]) + 1,
+                                );
+                              }),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    ];
+  }
+
+  /// "Aceita permuta?" — obrigatório como no web (`propertyExchange.ts`):
+  /// Sim/Não e, com Sim, o valor máximo aceito em permuta.
+  Widget _buildExchangeSection(ThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
+    final accent = AppColors.primary.primary;
+
+    Widget choice(bool value, String label, IconData icon) {
+      final selected = _acceptsExchange == value;
+      return Expanded(
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => _setStateAndPersist(() {
+              _acceptsExchange = value;
+              if (!value) _exchangeMaxValueController.text = '';
+            }),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                color: selected
+                    ? accent.withValues(alpha: isDark ? 0.2 : 0.1)
+                    : Colors.transparent,
+                border: Border.all(
+                  color: selected
+                      ? accent.withValues(alpha: 0.6)
+                      : ThemeHelpers.borderColor(context),
+                  width: selected ? 1.4 : 1,
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    icon,
+                    size: 17,
+                    color: selected
+                        ? accent
+                        : ThemeHelpers.textSecondaryColor(context),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: selected ? accent : ThemeHelpers.textColor(context),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return _wizardSection(
+      theme,
+      icon: Icons.swap_horiz_rounded,
+      title: 'Aceita permuta? *',
+      subtitle: _acceptsExchange == null && widget.propertyId != null
+          ? 'Cadastro antigo sem essa resposta — informe para salvar.'
+          : 'Troca por outro imóvel ou bem como parte do pagamento.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              choice(true, 'Sim', Icons.check_circle_rounded),
+              const SizedBox(width: 10),
+              choice(false, 'Não', Icons.cancel_rounded),
+            ],
+          ),
+          if (_acceptsExchange == true) ...[
+            const SizedBox(height: 14),
+            _buildFormField(
+              theme,
+              controller: _exchangeMaxValueController,
+              label: 'Valor máximo aceito na permuta *',
+              hint: 'R\$ 0,00',
+              keyboardType: TextInputType.number,
+              inputFormatters: [MoneyInputFormatter()],
+              validator: (value) {
+                final v = (value ?? '').trim();
+                if (v.isEmpty || Masks.unmaskMoney(v) / 100.0 <= 0) {
+                  return 'Informe o valor máximo aceito na permuta';
+                }
+                return null;
+              },
+            ),
+          ],
         ],
       ),
     );
@@ -6639,9 +7030,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                     if (value == null || value.trim().isEmpty) {
                       return 'Nome do proprietário é obrigatório';
                     }
-                    if (value.trim().length < 3) {
-                      return 'Nome deve ter pelo menos 3 caracteres';
-                    }
                     if (value.trim().length > 255) {
                       return 'Nome deve ter no máximo 255 caracteres';
                     }
@@ -6685,9 +7073,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                           if (value == null || value.trim().isEmpty) {
                             return 'Telefone do proprietário é obrigatório';
                           }
-                          if (value.trim().length < 10) {
-                            return 'Telefone deve ter pelo menos 10 caracteres';
-                          }
                           if (value.trim().length > 20) {
                             return 'Telefone deve ter no máximo 20 caracteres';
                           }
@@ -6705,9 +7090,10 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                         validator: (value) {
                           final digits =
                               value?.replaceAll(RegExp(r'\D'), '') ?? '';
-                          if (digits.isEmpty) return null;
-                          if (digits.length < 11 || digits.length > 18) {
-                            return 'CPF/CNPJ: entre 11 e 18 dígitos';
+                          // imoveis-09: sem mínimo (o web não valida); o teto
+                          // de 18 é o corte que o payload já aplica.
+                          if (digits.length > 18) {
+                            return 'CPF/CNPJ: no máximo 18 dígitos';
                           }
                           return null;
                         },
@@ -6716,19 +7102,12 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                CustomTextField(
-                  controller: _ownerAddressController,
-                  label: 'Endereço de correspondência',
-                  hint: 'Rua, número, cidade…',
-                  maxLines: 2,
-                  validator: (value) {
-                    final t = value?.trim() ?? '';
-                    if (t.isEmpty) return null;
-                    if (t.length < 10) {
-                      return 'Se informado, use um endereço mais descritivo';
-                    }
-                    return null;
-                  },
+                // Endereço estruturado do web (CEP com busca + partes); o
+                // texto legado `ownerAddress` é montado delas ao salvar.
+                PropertyOwnerAddressFields(
+                  controller: _ownerAddressParts,
+                  legacyAddress: _ownerAddressController.text,
+                  cepService: _cepService,
                 ),
               ],
             ),
@@ -6914,9 +7293,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                     if (value == null || value.trim().isEmpty) {
                       return 'Título é obrigatório';
                     }
-                    if (value.trim().length < 3) {
-                      return 'Título deve ter pelo menos 3 caracteres';
-                    }
                     if (value.trim().length > 255) {
                       return 'Título deve ter no máximo 255 caracteres';
                     }
@@ -6932,9 +7308,6 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) {
                       return 'Descrição é obrigatória';
-                    }
-                    if (value.trim().length < 10) {
-                      return 'Descrição deve ter pelo menos 10 caracteres';
                     }
                     if (value.trim().length > 5000) {
                       return 'Descrição deve ter no máximo 5000 caracteres';
@@ -7066,6 +7439,25 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
                   value: _publishToSite,
                   onChanged: (v) => _setStateAndPersist(() => _publishToSite = v),
                 ),
+                // Linha premium (`isSitePremiumLine`, etapa Site do web): só
+                // faz sentido com o imóvel no site — sem ele, vai false.
+                if (_publishToSite) ...[
+                  const SizedBox(height: 4),
+                  _wizardSwitchRow(
+                    theme,
+                    icon: Icons.diamond_outlined,
+                    title: 'Linha premium',
+                    subtitle:
+                        'Entra na seção “Linha premium” — a fileira curada do template Premium.',
+                    value: _extraFicha.flag(PropertyExtraFlag.sitePremiumLine),
+                    onChanged: (v) => _setStateAndPersist(
+                      () => _extraFicha.setFlag(
+                        PropertyExtraFlag.sitePremiumLine,
+                        v,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -7139,7 +7531,15 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
           label: 'Construída',
           value: '${_builtAreaController.text} m²',
         ),
-      if (beds.isNotEmpty)
+      if (propertyTypeCountsRooms(_typeValueForForm) &&
+          _extraFicha.rooms.text.trim().isNotEmpty)
+        _ReviewTileData(
+          icon: Icons.meeting_room_rounded,
+          label: 'Salas',
+          value: _extraFicha.rooms.text.trim(),
+        )
+      else if (!propertyTypeCountsRooms(_typeValueForForm) &&
+          beds.isNotEmpty)
         _ReviewTileData(
           icon: Icons.bed_rounded,
           label: 'Quartos',
@@ -7193,6 +7593,30 @@ class _CreatePropertyPageState extends State<CreatePropertyPage> {
             _finalidade!,
             Theme.of(context).brightness == Brightness.dark,
           ),
+        ),
+      // Captadores por papel na revisão, como o web (`CreatePropertyPage.tsx`
+      // ~9922): "Ninguém escolhido" quando o slot está vazio.
+      for (final role in CaptorRole.values)
+        _ReviewTileData(
+          icon: role == CaptorRole.venda
+              ? Icons.sell_rounded
+              : Icons.vpn_key_rounded,
+          label: role == CaptorRole.venda
+              ? 'Captador de venda'
+              : 'Captador de locação',
+          value: () {
+            final ids = role == CaptorRole.venda
+                ? _captors.saleIds
+                : _captors.rentIds;
+            return ids.isEmpty
+                ? 'Ninguém escolhido'
+                : ids.map(_captors.nameOf).join(', ');
+          }(),
+          accent: role == CaptorRole.venda
+              ? FinalidadeTint.venda(
+                  Theme.of(context).brightness == Brightness.dark)
+              : FinalidadeTint.locacao(
+                  Theme.of(context).brightness == Brightness.dark),
         ),
       _ReviewTileData(
         icon: Icons.collections_rounded,

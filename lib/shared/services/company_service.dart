@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../../core/constants/api_constants.dart';
 import '../utils/avatar_url_resolver.dart';
+import '../utils/crm_product_access.dart';
 import 'api_service.dart';
 import 'secure_storage_service.dart';
 
@@ -67,10 +68,15 @@ class CompanySelection {
   /// Não deu para concluir (rede/servidor) — tentar de novo depois.
   final bool failed;
 
+  /// A empresa escolhida, como veio de `/companies` (com os módulos). Nulo
+  /// quando a seleção não passou pela lista (falha ou sem empresa).
+  final Company? company;
+
   const CompanySelection({
     this.companyId,
     this.userHasNoCompany = false,
     this.failed = false,
+    this.company,
   });
 }
 
@@ -147,8 +153,19 @@ class CompanyService {
   }
 
   /// Seleciona a empresa preferida (prioriza isMatrix, senão primeira)
-  static Company? choosePreferredCompany(List<Company> companies) {
-    if (companies.isEmpty) return null;
+  static Company? choosePreferredCompany(List<Company> allCompanies) {
+    if (allCompanies.isEmpty) return null;
+    var companies = allCompanies;
+
+    // Plano "só Financeiro" (NEW-02, 03/10/2026): o app só tem CRM, então
+    // quem tem empresas com e sem CRM entra numa COM CRM — senão abriria
+    // numa empresa em que toda tela dá 403. Se nenhuma tem CRM, segue a
+    // regra de sempre (e o `SubscriptionAccessGate` mostra o aviso).
+    final withCrm =
+        companies.where((c) => !companyLacksCrmProduct(c.availableModules));
+    if (withCrm.isNotEmpty && withCrm.length < companies.length) {
+      companies = withCrm.toList();
+    }
 
     // Prioridade 1: Empresa com isMatrix === true
     try {
@@ -212,7 +229,10 @@ class CompanyService {
       debugPrint(
         '✅ [COMPANY_SERVICE] Empresa selecionada: ${preferredCompany.id} (${preferredCompany.name})',
       );
-      return CompanySelection(companyId: preferredCompany.id);
+      return CompanySelection(
+        companyId: preferredCompany.id,
+        company: preferredCompany,
+      );
     } catch (e, stackTrace) {
       debugPrint('❌ [COMPANY_SERVICE] Erro ao resolver empresa: $e');
       debugPrint('📚 [COMPANY_SERVICE] StackTrace: $stackTrace');

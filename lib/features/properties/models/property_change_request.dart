@@ -309,6 +309,41 @@ class OwnerAuthSendHistory {
   }
 }
 
+/// Voto de um aprovador (`votes[]` do `voting-status`, entidade
+/// `PropertyApprovalVote` com a relação `user`).
+class ApprovalVoteEntry {
+  final String userId;
+  final String userName;
+  final bool approved;
+  final String? comment;
+  final DateTime? at;
+
+  const ApprovalVoteEntry({
+    required this.userId,
+    required this.userName,
+    required this.approved,
+    this.comment,
+    this.at,
+  });
+
+  factory ApprovalVoteEntry.fromJson(Map<String, dynamic> json) {
+    final user = json['user'];
+    final name = user is Map ? user['name']?.toString().trim() ?? '' : '';
+    final comment = json['comment']?.toString().trim() ?? '';
+    final rawAt = (json['updatedAt'] ?? json['createdAt'])?.toString();
+    return ApprovalVoteEntry(
+      userId: json['userId']?.toString() ??
+          (user is Map ? user['id']?.toString() ?? '' : ''),
+      userName: name.isEmpty ? 'Aprovador' : name,
+      approved: json['decision']?.toString() == 'approved',
+      comment: comment.isEmpty ? null : comment,
+      at: rawAt == null || rawAt.isEmpty
+          ? null
+          : DateTime.tryParse(rawAt)?.toLocal(),
+    );
+  }
+}
+
 /// Status de votação de uma fila (`GET /properties/:id/voting-status`).
 class ApprovalVotingStatus {
   final int approvedCount;
@@ -318,6 +353,9 @@ class ApprovalVotingStatus {
   final int pendingCount;
   final bool approversEnabled;
 
+  /// Quem já votou e como (ordem de registro).
+  final List<ApprovalVoteEntry> votes;
+
   const ApprovalVotingStatus({
     required this.approvedCount,
     required this.rejectedCount,
@@ -325,6 +363,7 @@ class ApprovalVotingStatus {
     required this.totalApprovers,
     required this.pendingCount,
     required this.approversEnabled,
+    this.votes = const [],
   });
 
   static const ApprovalVotingStatus empty = ApprovalVotingStatus(
@@ -335,6 +374,16 @@ class ApprovalVotingStatus {
     pendingCount: 0,
     approversEnabled: false,
   );
+
+  /// Voto já registrado por [userId] — com ele, mudar o voto é `PUT`.
+  ApprovalVoteEntry? voteOf(String? userId) {
+    final id = userId?.trim() ?? '';
+    if (id.isEmpty) return null;
+    for (final v in votes) {
+      if (v.userId == id) return v;
+    }
+    return null;
+  }
 
   factory ApprovalVotingStatus.fromJson(Map<String, dynamic> json) {
     int asInt(dynamic v) {
@@ -352,6 +401,13 @@ class ApprovalVotingStatus {
       totalApprovers: lengthOf(json['approvers']),
       pendingCount: lengthOf(json['pendingApprovers']),
       approversEnabled: json['approversEnabled'] == true,
+      votes: json['votes'] is List
+          ? (json['votes'] as List)
+              .whereType<Map>()
+              .map((e) =>
+                  ApprovalVoteEntry.fromJson(Map<String, dynamic>.from(e)))
+              .toList()
+          : const [],
     );
   }
 }

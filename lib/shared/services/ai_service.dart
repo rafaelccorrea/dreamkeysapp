@@ -6,7 +6,9 @@ class GenerateDescriptionRequest {
   final String type; // 'apartment' | 'house' | 'commercial' | 'land' | 'rural'
   final String city;
   final String? neighborhood;
-  final double totalArea;
+  /// Opcional no DTO do back (`@IsOptional @Min(1)`): sem área, a IA gera
+  /// do mesmo jeito (o web só exige tipo e cidade).
+  final double? totalArea;
   final double? builtArea;
   final int? bedrooms;
   final int? bathrooms;
@@ -27,7 +29,7 @@ class GenerateDescriptionRequest {
     required this.type,
     required this.city,
     this.neighborhood,
-    required this.totalArea,
+    this.totalArea,
     this.builtArea,
     this.bedrooms,
     this.bathrooms,
@@ -49,8 +51,9 @@ class GenerateDescriptionRequest {
     final map = <String, dynamic>{
       'type': type,
       'city': city,
-      'totalArea': totalArea,
     };
+    // `@Min(1)` no back: 0/ausente não vai (mandar 0 dava 400).
+    if (totalArea != null && totalArea! >= 1) map['totalArea'] = totalArea;
     if (neighborhood != null) map['neighborhood'] = neighborhood;
     if (builtArea != null) map['builtArea'] = builtArea;
     if (bedrooms != null) map['bedrooms'] = bedrooms;

@@ -3,10 +3,15 @@ import '../../core/constants/api_constants.dart';
 import '../../core/push/app_push_service.dart';
 import '../../core/session/session_bootstrap.dart';
 import '../../features/kanban/controllers/kanban_controller.dart';
+import '../../features/finance/core/finance_me.dart';
+import '../../features/finance/core/finance_cadastros.dart';
+import '../../features/finance/notificacoes/finance_notifications_controller.dart';
+import '../../features/finance/core/finance_pin_store.dart';
 import '../utils/avatar_url_resolver.dart';
 import 'api_service.dart';
 import 'module_access_service.dart';
 import 'subscription_service.dart';
+import 'subscription_access_gate.dart';
 import 'live_activity_service.dart';
 import 'secure_storage_service.dart';
 
@@ -460,6 +465,14 @@ class AuthService {
       // herdaria equipe/funil/quadro e a sala do socket deste.
       KanbanController.instance.clear();
       SubscriptionService.instance.clearCache();
+      // Bloqueio por assinatura/plano é da conta que saiu, não da próxima.
+      SubscriptionAccessGate.instance.clear();
+      // Desbloqueio do Financeiro é da pessoa que saiu (o token salvo já
+      // caiu no `clearTokens`; aqui a memória).
+      FinancePinStore.instance.clear();
+      FinanceMeService.instance.clear();
+      FinanceNotificationsController.instance.stop();
+      FinanceCadastros.instance.clear();
       // Sem isto, o `SessionBootstrap` continuaria a dizer "pronto" depois do
       // logout — mas o companyId acabou de ser apagado. O próximo login (o do
       // Face ID, tipicamente) entraria na home sem empresa e sem NINGUÉM para
@@ -481,6 +494,10 @@ class AuthService {
         await SecureStorageService.instance.clearAuthSessionKeepCredentials();
         ModuleAccessService.instance.clear();
         KanbanController.instance.clear();
+        FinancePinStore.instance.clear();
+        FinanceMeService.instance.clear();
+        FinanceNotificationsController.instance.stop();
+        FinanceCadastros.instance.clear();
         SessionBootstrap.instance.reset();
         await LiveActivityService.instance.endCheckIn();
       } catch (clearError) {

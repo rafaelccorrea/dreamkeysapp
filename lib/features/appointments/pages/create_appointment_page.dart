@@ -55,8 +55,8 @@ Color _avatarColorFor(String name) {
 /// Fill terciário para controles "pill" (padrão dos filtros do Kanban).
 Color _fieldFillOf(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
-        ? AppColors.background.backgroundTertiaryDarkMode
-        : AppColors.background.backgroundTertiary;
+    ? AppColors.background.backgroundTertiaryDarkMode
+    : AppColors.background.backgroundTertiary;
 
 /// Página de criação de agendamento — layout FLUSH (sem card dentro de card):
 /// faixa de pré-visualização compacta, seções com header canônico
@@ -101,7 +101,9 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
   final _locationController = TextEditingController();
   final _notesController = TextEditingController();
 
-  AppointmentType _type = AppointmentType.visit;
+  /// Começa SEM tipo, como a web (`CreateAppointmentPage.tsx`: `type: ''`) —
+  /// a pessoa escolhe (agenda-06). Só vem preenchido quando a origem manda.
+  AppointmentType? _type;
   // Defaults do novo modelo (paridade web): nasce público e azul.
   AppointmentVisibility _visibility = AppointmentVisibility.public;
   String _color = '#3B82F6';
@@ -124,7 +126,8 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
   void initState() {
     super.initState();
     final now = DateTime.now();
-    _start = widget.initialStartDate ??
+    _start =
+        widget.initialStartDate ??
         DateTime(now.year, now.month, now.day, now.hour + 1, 0);
     _end = widget.initialEndDate ?? _start.add(const Duration(hours: 1));
     if (widget.initialTitle != null && widget.initialTitle!.trim().isNotEmpty) {
@@ -156,8 +159,10 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
     _notesController.addListener(() => setState(() {}));
     // Check inicial do horário default (sem setState: ainda no initState).
     _checkingAvailability = true;
-    _availabilityDebounce =
-        Timer(const Duration(milliseconds: 350), _runAvailabilityCheck);
+    _availabilityDebounce = Timer(
+      const Duration(milliseconds: 350),
+      _runAvailabilityCheck,
+    );
   }
 
   @override
@@ -173,7 +178,43 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
   // ---------------------------------------------------------------------------
   // Validations
   // ---------------------------------------------------------------------------
+  /// Limites do título iguais aos da web (`TITLE_MIN_LENGTH`/`TITLE_MAX_LENGTH`
+  /// em `CreateAppointmentPage.tsx`) — agenda-02.
+  static const int _tituloMin = 3;
+  static const int _tituloMax = 200;
+
+  String? _tituloError() {
+    final t = _titleController.text.trim();
+    if (t.isEmpty) return 'Informe um título para o compromisso';
+    if (t.length < _tituloMin) {
+      return 'O título precisa de pelo menos $_tituloMin caracteres';
+    }
+    if (t.length > _tituloMax) {
+      return 'O título pode ter no máximo $_tituloMax caracteres';
+    }
+    return null;
+  }
+
   String? _dateError() {
+    // Início no passado é recusado, como na web (agenda-05). Dia inteiro
+    // compara só a data: hoje vale.
+    final agora = DateTime.now();
+    final passado = _allDay
+        ? DateTime(
+            _start.year,
+            _start.month,
+            _start.day,
+          ).isBefore(DateTime(agora.year, agora.month, agora.day))
+        : _start.isBefore(
+            DateTime(
+              agora.year,
+              agora.month,
+              agora.day,
+              agora.hour,
+              agora.minute,
+            ),
+          );
+    if (passado) return 'A data/hora de início não pode estar no passado';
     if (_end.isBefore(_start) || _end.isAtSameMomentAs(_start)) {
       return 'O término deve ser após o início';
     }
@@ -181,7 +222,8 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
   }
 
   bool get _formValid {
-    if (_titleController.text.trim().isEmpty) return false;
+    if (_tituloError() != null) return false;
+    if (_type == null) return false;
     if (_descriptionController.text.length > 300) return false;
     if (_notesController.text.length > 300) return false;
     if (_dateError() != null) return false;
@@ -205,8 +247,9 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
       data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
       child: Theme(
         data: Theme.of(ctx).copyWith(
-          colorScheme:
-              Theme.of(ctx).colorScheme.copyWith(primary: _kApplyGreen),
+          colorScheme: Theme.of(
+            ctx,
+          ).colorScheme.copyWith(primary: _kApplyGreen),
         ),
         child: child!,
       ),
@@ -218,7 +261,8 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
     final picked = await showDatePicker(
       context: context,
       initialDate: base,
-      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      // Dias passados desabilitados, como o seletor da web.
+      firstDate: DateUtils.dateOnly(DateTime.now()),
       lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
       locale: const Locale('pt', 'BR'),
       builder: _pickerTheme,
@@ -234,8 +278,9 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
           _start.hour,
           _start.minute,
         );
-        _end =
-            _start.add(duration.isNegative ? const Duration(hours: 1) : duration);
+        _end = _start.add(
+          duration.isNegative ? const Duration(hours: 1) : duration,
+        );
       } else {
         _end = DateTime(
           picked.year,
@@ -267,8 +312,9 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
           picked.hour,
           picked.minute,
         );
-        _end =
-            _start.add(duration.isNegative ? const Duration(hours: 1) : duration);
+        _end = _start.add(
+          duration.isNegative ? const Duration(hours: 1) : duration,
+        );
       } else {
         _end = DateTime(
           _end.year,
@@ -316,8 +362,13 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
         _end = DateTime(_start.year, _start.month, _start.day, 23, 59);
       } else {
         final now = DateTime.now();
-        _start =
-            DateTime(_start.year, _start.month, _start.day, now.hour + 1, 0);
+        _start = DateTime(
+          _start.year,
+          _start.month,
+          _start.day,
+          now.hour + 1,
+          0,
+        );
         _end = _start.add(const Duration(hours: 1));
       }
     });
@@ -343,7 +394,7 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
         description: _descriptionController.text.trim().isEmpty
             ? null
             : _descriptionController.text.trim(),
-        type: _type,
+        type: _type!,
         visibility: _visibility,
         startDate: _start,
         endDate: _end,
@@ -358,8 +409,9 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
         propertyId: widget.propertyId,
         clientId: widget.clientId,
         // Convidados vão no próprio POST — o backend cria os convites junto.
-        inviteUserIds:
-            _invited.isEmpty ? null : _invited.map((m) => m.id).toList(),
+        inviteUserIds: _invited.isEmpty
+            ? null
+            : _invited.map((m) => m.id).toList(),
       ),
     );
 
@@ -372,8 +424,9 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
         SnackBar(
           backgroundColor: AppColors.status.success,
           behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           content: const Row(
             children: [
               Icon(Icons.check_circle_rounded, color: Colors.white),
@@ -389,8 +442,9 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
         SnackBar(
           backgroundColor: AppColors.status.error,
           behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           content: Text(ctrl.error ?? 'Erro ao criar agendamento'),
         ),
       );
@@ -433,9 +487,8 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
                     hint: 'Ex.: Visita ao apartamento de João',
                     controller: _titleController,
                     textInputAction: TextInputAction.next,
-                    validator: (v) => (v == null || v.trim().isEmpty)
-                        ? 'Informe um título'
-                        : null,
+                    maxLength: _tituloMax,
+                    validator: (_) => _tituloError(),
                   ),
                   const SizedBox(height: 14),
                   _fieldLabel('DESCRIÇÃO'),
@@ -582,10 +635,7 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
                         ? 'Máximo de 300 caracteres'
                         : null,
                   ),
-                  _CharCounter(
-                    current: _notesController.text.length,
-                    max: 300,
-                  ),
+                  _CharCounter(current: _notesController.text.length, max: 300),
                 ],
               ),
             ),
@@ -646,10 +696,7 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
             ],
           ),
         ),
-        if (trailing != null) ...[
-          const SizedBox(width: 8),
-          trailing,
-        ],
+        if (trailing != null) ...[const SizedBox(width: 8), trailing],
       ],
     );
   }
@@ -718,7 +765,9 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
                   borderRadius: BorderRadius.circular(13),
                 ),
                 child: Icon(
-                  AppointmentVisuals.iconFor(_type),
+                  _type == null
+                      ? Icons.event_outlined
+                      : AppointmentVisuals.iconFor(_type!),
                   color: accent,
                   size: 21,
                 ),
@@ -750,8 +799,9 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
                         letterSpacing: -0.2,
                         color: hasTitle
                             ? ThemeHelpers.textColor(context)
-                            : ThemeHelpers.textSecondaryColor(context)
-                                .withValues(alpha: 0.55),
+                            : ThemeHelpers.textSecondaryColor(
+                                context,
+                              ).withValues(alpha: 0.55),
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -784,7 +834,7 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
     return Wrap(
       spacing: 9,
       runSpacing: 9,
-      children: AppointmentType.values.map((t) {
+      children: AppointmentType.selectable.map((t) {
         final selected = _type == t;
         return InkWell(
           onTap: () {
@@ -900,8 +950,11 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
   Widget _buildWhenSection(ThemeData theme) {
     final today = DateTime.now();
     final tomorrow = today.add(const Duration(days: 1));
-    final monday = today.add(Duration(
-        days: (8 - today.weekday) % 7 == 0 ? 7 : (8 - today.weekday) % 7));
+    final monday = today.add(
+      Duration(
+        days: (8 - today.weekday) % 7 == 0 ? 7 : (8 - today.weekday) % 7,
+      ),
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -910,17 +963,29 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
           children: [
             Expanded(
               child: _quickPill(
-                  theme, 'Hoje', _isSameDay(_start, today), () => _quickDate(today)),
+                theme,
+                'Hoje',
+                _isSameDay(_start, today),
+                () => _quickDate(today),
+              ),
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: _quickPill(theme, 'Amanhã', _isSameDay(_start, tomorrow),
-                  () => _quickDate(tomorrow)),
+              child: _quickPill(
+                theme,
+                'Amanhã',
+                _isSameDay(_start, tomorrow),
+                () => _quickDate(tomorrow),
+              ),
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: _quickPill(theme, 'Próx. Seg', _isSameDay(_start, monday),
-                  () => _quickDate(monday)),
+              child: _quickPill(
+                theme,
+                'Próx. Seg',
+                _isSameDay(_start, monday),
+                () => _quickDate(monday),
+              ),
             ),
           ],
         ),
@@ -961,7 +1026,11 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
               _durationChip(theme, '30 min', const Duration(minutes: 30)),
               _durationChip(theme, '45 min', const Duration(minutes: 45)),
               _durationChip(theme, '1 h', const Duration(hours: 1)),
-              _durationChip(theme, '1h 30', const Duration(hours: 1, minutes: 30)),
+              _durationChip(
+                theme,
+                '1h 30',
+                const Duration(hours: 1, minutes: 30),
+              ),
               _durationChip(theme, '2 h', const Duration(hours: 2)),
               _durationChip(theme, '4 h', const Duration(hours: 4)),
             ],
@@ -1123,8 +1192,9 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 fontStyle: FontStyle.italic,
-                color: ThemeHelpers.textSecondaryColor(context)
-                    .withValues(alpha: 0.7),
+                color: ThemeHelpers.textSecondaryColor(
+                  context,
+                ).withValues(alpha: 0.7),
               ),
             ),
         ],
@@ -1157,8 +1227,9 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
                   fontSize: fontSize,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 0.1,
-                  fontFeatures:
-                      tabular ? const [FontFeature.tabularFigures()] : null,
+                  fontFeatures: tabular
+                      ? const [FontFeature.tabularFigures()]
+                      : null,
                   color: ThemeHelpers.textColor(context),
                 ),
               ),
@@ -1188,9 +1259,7 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: _kGuestsAccent.withValues(alpha: 0.45),
-          ),
+          border: Border.all(color: _kGuestsAccent.withValues(alpha: 0.45)),
         ),
         child: const Row(
           mainAxisSize: MainAxisSize.min,
@@ -1230,7 +1299,7 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
         Text(
           _invited.isEmpty
               ? 'Só você por enquanto. Cada convidado recebe um convite '
-                  'para aceitar ou recusar.'
+                    'para aceitar ou recusar.'
               : 'Cada convidado recebe um convite para aceitar ou recusar.',
           style: TextStyle(
             fontSize: 11,
@@ -1353,8 +1422,7 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
                         : 'Pública',
                     style: TextStyle(
                       fontSize: 13.5,
-                      fontWeight:
-                          selected ? FontWeight.w800 : FontWeight.w700,
+                      fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
                       color: ThemeHelpers.textColor(context),
                     ),
                   ),
@@ -1379,8 +1447,7 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
               height: 21,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color:
-                    selected ? _kVisibilityAccent : Colors.transparent,
+                color: selected ? _kVisibilityAccent : Colors.transparent,
                 border: Border.all(
                   color: selected
                       ? _kVisibilityAccent
@@ -1389,8 +1456,11 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
                 ),
               ),
               child: selected
-                  ? const Icon(Icons.check_rounded,
-                      color: Colors.white, size: 13)
+                  ? const Icon(
+                      Icons.check_rounded,
+                      color: Colors.white,
+                      size: 13,
+                    )
                   : null,
             ),
           ],
@@ -1435,8 +1505,7 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
               ),
             ),
             child: selected
-                ? const Icon(Icons.check_rounded,
-                    color: Colors.white, size: 19)
+                ? const Icon(Icons.check_rounded, color: Colors.white, size: 19)
                 : null,
           ),
         );
@@ -1452,6 +1521,17 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
       return const _FooterNotice(
         'Dê um título ao compromisso para salvar',
         Icons.edit_note_rounded,
+        amber: false,
+      );
+    }
+    final tituloErr = _tituloError();
+    if (tituloErr != null) {
+      return _FooterNotice(tituloErr, Icons.edit_note_rounded, amber: false);
+    }
+    if (_type == null) {
+      return const _FooterNotice(
+        'Escolha o tipo do compromisso',
+        Icons.category_outlined,
         amber: false,
       );
     }
@@ -1543,10 +1623,8 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
                 style: FilledButton.styleFrom(
                   backgroundColor: _kApplyGreen,
                   foregroundColor: Colors.white,
-                  disabledBackgroundColor:
-                      _kApplyGreen.withValues(alpha: 0.38),
-                  disabledForegroundColor:
-                      Colors.white.withValues(alpha: 0.9),
+                  disabledBackgroundColor: _kApplyGreen.withValues(alpha: 0.38),
+                  disabledForegroundColor: Colors.white.withValues(alpha: 0.9),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
                   ),
@@ -1561,8 +1639,9 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
                             height: 18,
                             child: CircularProgressIndicator(
                               strokeWidth: 2.2,
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(Colors.white),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
                             ),
                           ),
                           SizedBox(width: 10),
@@ -1614,8 +1693,10 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
       _availability = null;
       _availabilityCheckFailed = false;
     });
-    _availabilityDebounce =
-        Timer(const Duration(milliseconds: 350), _runAvailabilityCheck);
+    _availabilityDebounce = Timer(
+      const Duration(milliseconds: 350),
+      _runAvailabilityCheck,
+    );
   }
 
   Future<void> _runAvailabilityCheck() async {
@@ -1652,8 +1733,8 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
   /// Âmbar com tinta legível nos dois temas (o tom claro some no light).
   Color _amberInk(BuildContext context) =>
       Theme.of(context).brightness == Brightness.dark
-          ? _kScheduleAmber
-          : const Color(0xFFA16207);
+      ? _kScheduleAmber
+      : const Color(0xFFA16207);
 
   Color _issueInk(BuildContext context, String code) =>
       code == 'overlap' ? _kOverlapRed : _amberInk(context);
@@ -1755,8 +1836,9 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
       );
     }
     // Conflitos: régua lateral de 3px na cor do problema — nada encaixotado.
-    final hasOverlap = unavailable
-        .any((r) => r.issues.any((issue) => issue.code == 'overlap'));
+    final hasOverlap = unavailable.any(
+      (r) => r.issues.any((issue) => issue.code == 'overlap'),
+    );
     final frame = hasOverlap ? _kOverlapRed : _kScheduleAmber;
     return Padding(
       padding: const EdgeInsets.only(top: 12),
@@ -1919,8 +2001,9 @@ class _CreateAppointmentPageState extends State<CreateAppointmentPage> {
     final cached = _membersCache;
     if (cached != null) return cached;
     try {
-      final res = await ApiService.instance
-          .get<dynamic>('/users/company-members/simple');
+      final res = await ApiService.instance.get<dynamic>(
+        '/users/company-members/simple',
+      );
       if (!res.success) return null;
       final raw = res.data;
       final List<dynamic> list;
@@ -2090,9 +2173,7 @@ class _InviteMembersSheetState extends State<_InviteMembersSheet> {
       for (final id in _selected)
         if (byId.containsKey(id)) byId[id]!,
     ];
-    picked.sort(
-      (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-    );
+    picked.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     Navigator.pop(context, picked);
   }
 
@@ -2105,9 +2186,7 @@ class _InviteMembersSheetState extends State<_InviteMembersSheet> {
     final members = _members ?? const <_MemberOption>[];
     final filtered = _query.isEmpty
         ? members
-        : members
-            .where((m) => m.name.toLowerCase().contains(_query))
-            .toList();
+        : members.where((m) => m.name.toLowerCase().contains(_query)).toList();
 
     return Padding(
       padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
@@ -2118,8 +2197,7 @@ class _InviteMembersSheetState extends State<_InviteMembersSheet> {
           borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
           border: Border(
             top: BorderSide(
-              color:
-                  ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
+              color: ThemeHelpers.borderColor(context).withValues(alpha: 0.55),
             ),
           ),
           boxShadow: [
@@ -2267,8 +2345,9 @@ class _InviteMembersSheetState extends State<_InviteMembersSheet> {
                 decoration: BoxDecoration(
                   border: Border(
                     top: BorderSide(
-                      color: ThemeHelpers.borderColor(context)
-                          .withValues(alpha: 0.45),
+                      color: ThemeHelpers.borderColor(
+                        context,
+                      ).withValues(alpha: 0.45),
                     ),
                   ),
                 ),
@@ -2280,10 +2359,12 @@ class _InviteMembersSheetState extends State<_InviteMembersSheet> {
                     style: FilledButton.styleFrom(
                       backgroundColor: _kApplyGreen,
                       foregroundColor: Colors.white,
-                      disabledBackgroundColor:
-                          _kApplyGreen.withValues(alpha: 0.35),
-                      disabledForegroundColor:
-                          Colors.white.withValues(alpha: 0.85),
+                      disabledBackgroundColor: _kApplyGreen.withValues(
+                        alpha: 0.35,
+                      ),
+                      disabledForegroundColor: Colors.white.withValues(
+                        alpha: 0.85,
+                      ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
                       ),
@@ -2433,8 +2514,7 @@ class _InviteMembersSheetState extends State<_InviteMembersSheet> {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 13.5,
-                      fontWeight:
-                          selected ? FontWeight.w800 : FontWeight.w600,
+                      fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
                       color: ThemeHelpers.textColor(context),
                     ),
                   ),
@@ -2673,8 +2753,9 @@ class _DaySlotsSheetState extends State<_DaySlotsSheet>
               decoration: BoxDecoration(
                 border: Border(
                   top: BorderSide(
-                    color: ThemeHelpers.borderColor(context)
-                        .withValues(alpha: 0.45),
+                    color: ThemeHelpers.borderColor(
+                      context,
+                    ).withValues(alpha: 0.45),
                   ),
                 ),
               ),
@@ -2715,8 +2796,7 @@ class _DaySlotsSheetState extends State<_DaySlotsSheet>
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                               decoration: TextDecoration.lineThrough,
-                              decorationColor:
-                                  muted.withValues(alpha: 0.6),
+                              decorationColor: muted.withValues(alpha: 0.6),
                               color: muted.withValues(alpha: 0.6),
                             ),
                           ),
@@ -2729,12 +2809,13 @@ class _DaySlotsSheetState extends State<_DaySlotsSheet>
                       // Tema global pinta TextButton de vermelho — forçar.
                       foregroundColor: muted,
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 10),
+                        horizontal: 10,
+                        vertical: 10,
+                      ),
                       minimumSize: Size.zero,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
-                    onPressed: () =>
-                        Navigator.pop(context, _kManualTimeChoice),
+                    onPressed: () => Navigator.pop(context, _kManualTimeChoice),
                     child: const Text(
                       'Escolher outro horário…',
                       maxLines: 1,
@@ -2757,36 +2838,37 @@ class _DaySlotsSheetState extends State<_DaySlotsSheet>
   /// Skeleton de chips com pulso suave — nada de spinner seco.
   Widget _buildSkeleton(Color muted) {
     Widget ghostChip() => Container(
-          width: 62,
-          height: 40,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            color: muted.withValues(alpha: 0.10),
-          ),
-        );
-    Widget ghostGroup(double labelWidth, int chips) => Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: labelWidth,
-              height: 9,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(5),
-                color: muted.withValues(alpha: 0.16),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [for (var i = 0; i < chips; i++) ghostChip()],
-            ),
-          ],
-        );
-    return FadeTransition(
-      opacity: Tween<double>(begin: 0.45, end: 1).animate(
-        CurvedAnimation(parent: _pulse, curve: Curves.easeInOut),
+      width: 62,
+      height: 40,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        color: muted.withValues(alpha: 0.10),
       ),
+    );
+    Widget ghostGroup(double labelWidth, int chips) => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: labelWidth,
+          height: 9,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(5),
+            color: muted.withValues(alpha: 0.16),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [for (var i = 0; i < chips; i++) ghostChip()],
+        ),
+      ],
+    );
+    return FadeTransition(
+      opacity: Tween<double>(
+        begin: 0.45,
+        end: 1,
+      ).animate(CurvedAnimation(parent: _pulse, curve: Curves.easeInOut)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2876,8 +2958,9 @@ class _DaySlotsSheetState extends State<_DaySlotsSheet>
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children:
-                periods[p].slots.map((s) => _slotChip(context, s)).toList(),
+            children: periods[p].slots
+                .map((s) => _slotChip(context, s))
+                .toList(),
           ),
         ],
       ],
@@ -2970,8 +3053,8 @@ class _DaySlotsSheetState extends State<_DaySlotsSheet>
     final names = s.blockedFor;
     final tooltipMessage = names.isEmpty
         ? ((s.reason != null && s.reason!.isNotEmpty)
-            ? 'Ocupado: ${s.reason}'
-            : 'Horário indisponível')
+              ? 'Ocupado: ${s.reason}'
+              : 'Horário indisponível')
         : 'Ocupado: ${names.join(', ')}';
     final struckColor = muted.withValues(alpha: 0.45);
     final isDark = Theme.of(context).brightness == Brightness.dark;

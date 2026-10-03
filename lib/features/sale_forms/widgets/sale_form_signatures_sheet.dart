@@ -9,11 +9,13 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/autentique_status_service.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import 'sale_form_row_actions.dart' show showSaleFormPdfSheet;
+import 'sale_form_row_rules.dart' show saleFormSignaturesBlockReason;
 import 'sale_form_tones.dart';
 
 /// Bottom sheet de assinaturas da FICHA DE VENDA — paridade com
@@ -35,6 +37,16 @@ import 'sale_form_tones.dart';
 /// [canInvalidate]: `null` (padrão) = regra do web calculada aqui com os dados
 /// da própria ficha (`canInvalidateSignatures`, status, assinaturas ativas e
 /// `sale_form:update`); `false` esconde o "Cancelar todas" de qualquer jeito.
+/// Painel web em produção (mesma base de `subscription_page.dart`).
+const String kSistemaWebBase = 'https://intellisysbr.com/sistema';
+
+/// Rotas do web usadas na caixa de status do WhatsApp
+/// (`SaleFormSignatureModalPrivate.tsx`: `MANDATORY_SIGNERS_PATH` e
+/// `WHATSAPP_CONFIG_PATH`).
+const String kSaleFormMandatorySignersWebPath =
+    '/fichas-venda/signatarios-obrigatorios?tab=whatsapp';
+const String kWhatsappConfigWebPath = '/integrations/whatsapp/config';
+
 Future<void> showSaleFormSignaturesSheet(
   BuildContext context, {
   required String saleFormId,
@@ -100,6 +112,9 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
   SaleFormWhatsappEnvio? _whatsapp;
   SaleFormEmailEnvio? _ultimoEmail;
 
+  /// Integração Autentique inativa (só quando o back confirmou).
+  bool _autentiqueBloqueado = false;
+
   late final TextEditingController _docName;
   late final TextEditingController _docMessage;
   bool _docNameTouched = false;
@@ -158,13 +173,17 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
     final waFut = svc.getWhatsappEnvio(widget.saleFormId);
     final emailFut = svc.getUltimoEnvioEmail(widget.saleFormId);
     final formFut = svc.getById(widget.saleFormId);
+    // Web: `useAutentiqueStatus` — integração inativa trava "Gerar links".
+    final autFut = AutentiqueStatusService.instance.isBlocked();
     final sigsRes = await sigsFut;
     final autoRes = await autoFut;
     final waRes = await waFut;
     final emailRes = await emailFut;
     final formRes = await formFut;
+    final autBloq = await autFut;
     if (!mounted) return;
     setState(() {
+      _autentiqueBloqueado = autBloq;
       if (sigsRes.success && sigsRes.data != null) {
         _signatures = sigsRes.data!;
         _error = null;
@@ -237,7 +256,21 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
 
   bool get _alreadySent => _signatures.isNotEmpty;
   bool get _nenhumaAssinada => _signatures.every((s) => !s.isSigned);
-  bool get _mostrarFormularioEnvio => !_alreadySent || _nenhumaAssinada;
+
+  /// Web (`SaleFormsPage.tsx`): o modal de assinaturas só existe com
+  /// `sale_form:update` e ficha não finalizada, não cancelada e não excluída.
+  /// O back também recusa gerar links em ficha cancelada/excluída
+  /// (03/10/2026). Aqui o envio some e fica só o Status (se houver).
+  String? get _envioBloqueadoMotivo => _form == null
+      ? null
+      : saleFormSignaturesBlockReason(
+          _form!,
+          canUpdate:
+              ModuleAccessService.instance.hasPermission('sale_form:update'),
+        );
+
+  bool get _mostrarFormularioEnvio =>
+      _envioBloqueadoMotivo == null && (!_alreadySent || _nenhumaAssinada);
   bool get _showTabs => _alreadySent && _mostrarFormularioEnvio;
   bool get _temAuto => _autoSigners.isNotEmpty;
 
@@ -745,7 +778,9 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
     final assinados = ativas.where((s) => s.isSigned).length;
     final pendentes = ativas.where(_pendente).length;
     final algumaAssinada = _signatures.any((s) => s.isSigned);
-    final canResendWa = _whatsapp?.canResend ?? false;
+    // Mesma trava do reenvio em lote: envio configurado e sessão conectada.
+    final canResendWa = (_whatsapp?.autoSendEnabled ?? false) &&
+        (_whatsapp?.canResend ?? false);
     final hasEmailPending = _signatures.any((s) =>
         (s.signatureUrl?.trim().isNotEmpty ?? false) &&
         (s.signerEmail?.trim().isNotEmpty ?? false) &&
@@ -920,8 +955,11 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
                         _emailingSigId == null
                     ? () => _reenviarEmailUm(s)
                     : null,
-                onResendWhatsapp:
-                    canResendWa ? () => _reenviarWhatsappUm(s) : null,
+                // Reenvio pela sessão da empresa (só no app, R9): só na
+                // pendente — o back ignora assinatura encerrada.
+                onResendWhatsapp: canResendWa && _pendente(s)
+                    ? () => _reenviarWhatsappUm(s)
+                    : null,
               ),
           if (_canCancelarTodas) ...[
             const SizedBox(height: 22),
@@ -996,13 +1034,22 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
     late final bool ok;
     late final String titulo;
     late final String texto;
+    // Mesmas ações do web (`whatsappConfigStatus.action`). Essas telas de
+    // configuração só existem no sistema web: o botão abre a mesma página no
+    // navegador.
+    ({String label, String path})? acao;
     if (!wa.autoSendEnabled) {
       ok = false;
       titulo = 'Envio de assinaturas por WhatsApp não configurado';
       texto = podeObrig
-          ? 'Ative o envio automático dos links em Signatários obrigatórios '
-              '(sistema web).'
+          ? 'Ative o envio automático dos links em Signatários obrigatórios.'
           : pedir;
+      if (podeObrig) {
+        acao = (
+          label: 'Ir para Signatários obrigatórios',
+          path: kSaleFormMandatorySignersWebPath,
+        );
+      }
     } else if (!wa.canResend) {
       ok = false;
       titulo = wa.preferredSessionKind != null
@@ -1010,9 +1057,21 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
           : 'Nenhuma sessão WhatsApp conectada para envio';
       texto = podeWa
           ? 'Conecte a sessão WhatsApp da empresa nas configurações do '
-              'WhatsApp (sistema web).'
+              'WhatsApp.'
           : pedir;
+      if (podeWa) {
+        acao = (
+          label: 'Ir para configurações do WhatsApp',
+          path: kWhatsappConfigWebPath,
+        );
+      }
     } else {
+      if (podeObrig) {
+        acao = (
+          label: 'Trocar número de envio',
+          path: kSaleFormMandatorySignersWebPath,
+        );
+      }
       ok = true;
       final kind = wa.sessionKind ?? wa.preferredSessionKind;
       final canal = kind == 'monitor'
@@ -1061,12 +1120,39 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
                         height: 1.35,
                       ),
                 ),
+                if (acao != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: TextButton.icon(
+                      onPressed: () => _abrirNoWeb(acao!.path),
+                      icon: const Icon(LucideIcons.externalLink, size: 15),
+                      label: Text(acao.label),
+                      style: TextButton.styleFrom(
+                        foregroundColor: _accent,
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                        textStyle: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// Abre uma tela do sistema web (configurações que não existem no app).
+  Future<void> _abrirNoWeb(String path) async {
+    final ok = await launchUrl(
+      Uri.parse('$kSistemaWebBase$path'),
+      mode: LaunchMode.externalApplication,
+    );
+    if (!ok) _snack('Não foi possível abrir o sistema web.');
   }
 
   static String? _formatWaPhone(String? digits) {
@@ -1154,6 +1240,8 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
             'Você não tem permissão para enviar esta ficha para assinatura.',
       );
     }
+    final bloqueio = _envioBloqueadoMotivo;
+    if (bloqueio != null) return _LockedNotice(message: bloqueio);
     if (!_mostrarFormularioEnvio) {
       return const _LockedNotice(
         message: 'Esta ficha já tem assinatura concluída. Para um novo envio, '
@@ -1355,10 +1443,41 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
           ),
         ],
         const SizedBox(height: 16),
+        // Web: `AutentiqueSendGate` + `disabled={autentiqueBlocked}`.
+        if (_autentiqueBloqueado) ...[
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _warn.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _warn.withValues(alpha: 0.35)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(LucideIcons.plugZap, size: 18, color: _warn),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    kAutentiqueInactiveMessage,
+                    style: t.bodySmall?.copyWith(
+                      color: _warn,
+                      fontWeight: FontWeight.w700,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+        ],
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
-            onPressed: _sending || dups.isNotEmpty ? null : _enviar,
+            onPressed: _sending || dups.isNotEmpty || _autentiqueBloqueado
+                ? null
+                : _enviar,
             icon: _sending
                 ? const _Spin(color: Colors.white)
                 : const Icon(LucideIcons.link, size: 18),
@@ -1392,6 +1511,18 @@ class _SaleFormSignaturesSheetState extends State<_SaleFormSignaturesSheet>
             style: t.labelSmall?.copyWith(color: muted),
           ),
         ],
+        // Web: o rodapé do modal tem "PDF original" também no envio — dá
+        // para conferir o PDF antes de gerar os links.
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.center,
+          child: _AcaoTexto(
+            icon: LucideIcons.fileText,
+            label: _pdfBusy == 'sistema' ? 'Baixando…' : 'PDF original',
+            busy: _pdfBusy == 'sistema',
+            onTap: _pdfBusy != null ? null : () => _abrirPdf('sistema'),
+          ),
+        ),
       ],
     );
   }
@@ -1852,6 +1983,11 @@ class _SignatureRow extends StatelessWidget {
         st == 'cancelled' ||
         st == 'canceled' ||
         st == 'expired';
+    // Web (`SaleFormSignatureModalPrivate.tsx`): copiar, e-mail e WhatsApp
+    // ficam em toda assinatura que não foi assinada nem recusada — inclusive
+    // cancelada/expirada (o back não recusa o link). "Assinar agora" só na
+    // pendente.
+    final comAcoes = !signature.isSigned && !signature.isRejected;
     final nome = signature.signerName?.trim().isNotEmpty == true
         ? signature.signerName!.trim()
         : (signature.signerEmail ?? 'Signatário sem nome');
@@ -1934,7 +2070,7 @@ class _SignatureRow extends StatelessWidget {
                   ],
                 ),
               ),
-              if (!encerrada)
+              if (comAcoes)
                 PopupMenuButton<String>(
                   padding: EdgeInsets.zero,
                   tooltip: 'Ações do signatário',

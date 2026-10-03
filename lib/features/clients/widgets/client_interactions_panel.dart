@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -48,8 +51,9 @@ class _ClientInteractionsPanelState extends State<ClientInteractionsPanel> {
     });
 
     try {
-      final response =
-          await _clientService.getClientInteractions(widget.clientId);
+      final response = await _clientService.getClientInteractions(
+        widget.clientId,
+      );
       if (!mounted) return;
 
       if (response.success && response.data != null) {
@@ -89,15 +93,14 @@ class _ClientInteractionsPanelState extends State<ClientInteractionsPanel> {
     }
   }
 
-  Future<void> _showCreateInteractionModal() async {
+  Future<void> _showCreateInteractionModal({ClientInteraction? editing}) async {
     final result = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => _CreateInteractionSheet(
-        clientId: widget.clientId,
-      ),
+      builder: (ctx) =>
+          _CreateInteractionSheet(clientId: widget.clientId, editing: editing),
     );
 
     if (result == true) {
@@ -233,11 +236,7 @@ class _ClientInteractionsPanelState extends State<ClientInteractionsPanel> {
               shape: BoxShape.circle,
               color: accent.withValues(alpha: 0.10),
             ),
-            child: Icon(
-              Icons.forum_outlined,
-              size: 30,
-              color: accent,
-            ),
+            child: Icon(Icons.forum_outlined, size: 30, color: accent),
           ),
           const SizedBox(height: 12),
           Text(
@@ -332,8 +331,7 @@ class _ClientInteractionsPanelState extends State<ClientInteractionsPanel> {
                   child: Container(
                     width: 2,
                     margin: const EdgeInsets.symmetric(vertical: 4),
-                    color:
-                        accent.withValues(alpha: 0.20),
+                    color: accent.withValues(alpha: 0.20),
                   ),
                 ),
             ],
@@ -373,8 +371,27 @@ class _ClientInteractionsPanelState extends State<ClientInteractionsPanel> {
                           ),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.delete_outline,
-                              size: 20, color: Colors.red),
+                          icon: Icon(
+                            Icons.edit_outlined,
+                            size: 20,
+                            color: ThemeHelpers.textSecondaryColor(context),
+                          ),
+                          tooltip: 'Editar',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minHeight: 24,
+                            minWidth: 24,
+                          ),
+                          onPressed: () =>
+                              _showCreateInteractionModal(editing: interaction),
+                        ),
+                        const SizedBox(width: 6),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.delete_outline,
+                            size: 20,
+                            color: Colors.red,
+                          ),
                           tooltip: 'Excluir',
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(
@@ -423,10 +440,11 @@ class _ClientInteractionsPanelState extends State<ClientInteractionsPanel> {
                         children: interaction.attachments.map((a) {
                           return Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 5),
+                              horizontal: 8,
+                              vertical: 5,
+                            ),
                             decoration: BoxDecoration(
-                              color:
-                                  accent.withValues(alpha: 0.12),
+                              color: accent.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(999),
                               border: Border.all(
                                 color: accent.withValues(alpha: 0.28),
@@ -435,18 +453,21 @@ class _ClientInteractionsPanelState extends State<ClientInteractionsPanel> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.attach_file,
-                                    size: 13, color: accent),
+                                Icon(
+                                  Icons.attach_file,
+                                  size: 13,
+                                  color: accent,
+                                ),
                                 const SizedBox(width: 5),
                                 ConstrainedBox(
-                                  constraints:
-                                      const BoxConstraints(maxWidth: 160),
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 160,
+                                  ),
                                   child: Text(
                                     a.name ?? 'Anexo',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.labelSmall
-                                        ?.copyWith(
+                                    style: theme.textTheme.labelSmall?.copyWith(
                                       color: accent,
                                       fontWeight: FontWeight.w800,
                                       fontSize: 11,
@@ -511,9 +532,7 @@ class _ClientInteractionsPanelState extends State<ClientInteractionsPanel> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
             Container(
@@ -576,10 +595,22 @@ class _ClientInteractionsPanelState extends State<ClientInteractionsPanel> {
   }
 }
 
+/// Limites do back (`clients.controller.ts`: `FilesInterceptor('files', 10)`,
+/// 20 MB por arquivo; `client-interaction.dto.ts`: título até 150) — os
+/// mesmos que a web aplica em `ClientInteractionsPanel.tsx`.
+const int kMaxArquivosPorAtendimento = 10;
+const int kMaxBytesPorArquivo = 20 * 1024 * 1024;
+const int kMaxTituloAtendimento = 150;
+
+/// Criação e EDIÇÃO de um registro de atendimento (clientes-11, 03/10/2026):
+/// antes só criava, sem anexos e sem editar.
 class _CreateInteractionSheet extends StatefulWidget {
-  const _CreateInteractionSheet({required this.clientId});
+  const _CreateInteractionSheet({required this.clientId, this.editing});
 
   final String clientId;
+
+  /// Quando presente, o formulário edita este registro (PUT) em vez de criar.
+  final ClientInteraction? editing;
 
   @override
   State<_CreateInteractionSheet> createState() =>
@@ -593,6 +624,71 @@ class _CreateInteractionSheetState extends State<_CreateInteractionSheet> {
   DateTime _interactionAt = DateTime.now();
   String? _suggestedTitle;
   bool _isSaving = false;
+
+  /// Arquivos novos escolhidos neste envio (até 10, 20 MB cada).
+  final List<File> _novosArquivos = [];
+
+  /// Edição: chaves dos anexos atuais que continuam (os demais o back remove).
+  final Set<String> _manterAnexos = {};
+
+  bool get _editando => widget.editing != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.editing;
+    if (e != null) {
+      _titleController.text = e.title ?? '';
+      _notesController.text = e.notes;
+      final quando = DateTime.tryParse(e.interactionAt ?? e.createdAt);
+      if (quando != null) _interactionAt = quando.toLocal();
+      for (final a in e.attachments) {
+        if (a.key != null && a.key!.isNotEmpty) _manterAnexos.add(a.key!);
+      }
+    }
+  }
+
+  Future<void> _escolherArquivos() async {
+    final restantes = kMaxArquivosPorAtendimento - _novosArquivos.length;
+    if (restantes <= 0) {
+      _avisar(
+        'É permitido anexar até $kMaxArquivosPorAtendimento arquivos por atendimento.',
+      );
+      return;
+    }
+    final result = await FilePicker.pickFiles(type: FileType.any);
+    if (result == null || !mounted) return;
+    final escolhidos = <File>[];
+    var grandes = 0;
+    for (final f in result.files) {
+      if (f.path == null) continue;
+      if (f.size > kMaxBytesPorArquivo) {
+        grandes++;
+        continue;
+      }
+      escolhidos.add(File(f.path!));
+    }
+    final cabem = escolhidos.take(restantes).toList();
+    setState(() => _novosArquivos.addAll(cabem));
+    if (grandes > 0) {
+      _avisar(
+        '${grandes == 1 ? 'Um arquivo passou' : '$grandes arquivos passaram'} de 20 MB e não ${grandes == 1 ? 'foi anexado' : 'foram anexados'}.',
+      );
+    } else if (cabem.length < escolhidos.length) {
+      _avisar(
+        'É permitido anexar até $kMaxArquivosPorAtendimento arquivos por atendimento.',
+      );
+    }
+  }
+
+  void _avisar(String mensagem) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensagem),
+        backgroundColor: AppColors.status.error,
+      ),
+    );
+  }
 
   static const _suggestions = [
     {'icon': Icons.call_outlined, 'label': 'Ligação telefônica'},
@@ -645,28 +741,50 @@ class _CreateInteractionSheetState extends State<_CreateInteractionSheet> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isSaving = true);
     try {
-      final response = await ClientService.instance.createClientInteraction(
-        widget.clientId,
-        notes: _notesController.text.trim(),
-        title: _titleController.text.trim().isEmpty
-            ? _suggestedTitle
-            : _titleController.text.trim(),
-        interactionAt: _interactionAt.toUtc().toIso8601String(),
-      );
+      final titulo = _titleController.text.trim().isEmpty
+          ? _suggestedTitle
+          : _titleController.text.trim();
+      final quando = _interactionAt.toUtc().toIso8601String();
+      final response = _editando
+          ? await ClientService.instance.updateClientInteraction(
+              widget.clientId,
+              widget.editing!.id,
+              notes: _notesController.text.trim(),
+              title: titulo,
+              interactionAt: quando,
+              files: _novosArquivos,
+              retainAttachmentKeys: _manterAnexos.toList(),
+            )
+          : await ClientService.instance.createClientInteraction(
+              widget.clientId,
+              notes: _notesController.text.trim(),
+              title: titulo,
+              interactionAt: quando,
+              files: _novosArquivos,
+            );
 
       if (!mounted) return;
       if (response.success) {
         Navigator.pop(context, true);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Interação registrada!'),
+            content: Text(
+              _editando
+                  ? 'Registro de atendimento atualizado!'
+                  : 'Interação registrada!',
+            ),
             backgroundColor: AppColors.status.success,
           ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(response.message ?? 'Erro ao registrar interação'),
+            content: Text(
+              response.message ??
+                  (_editando
+                      ? 'Erro ao atualizar interação'
+                      : 'Erro ao registrar interação'),
+            ),
             backgroundColor: AppColors.status.error,
           ),
         );
@@ -684,12 +802,117 @@ class _CreateInteractionSheetState extends State<_CreateInteractionSheet> {
     }
   }
 
+  /// Anexos: os atuais (edição) com manter/remover e os novos com remover.
+  Widget _buildAnexos(BuildContext context, ThemeData theme, Color accent) {
+    final atuais =
+        widget.editing?.attachments
+            .where((a) => a.key != null && a.key!.isNotEmpty)
+            .toList() ??
+        const [];
+    final muted = ThemeHelpers.textSecondaryColor(context);
+
+    Widget linha({
+      required IconData icon,
+      required String nome,
+      required bool riscado,
+      required Widget acao,
+    }) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: riscado ? muted : accent),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                nome,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  decoration: riscado ? TextDecoration.lineThrough : null,
+                  color: riscado ? muted : ThemeHelpers.textColor(context),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            acao,
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Anexos',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            TextButton.icon(
+              onPressed:
+                  _isSaving ||
+                      _novosArquivos.length >= kMaxArquivosPorAtendimento
+                  ? null
+                  : _escolherArquivos,
+              icon: const Icon(Icons.attach_file_rounded, size: 18),
+              label: Text(
+                'Anexar (${_novosArquivos.length}/$kMaxArquivosPorAtendimento)',
+              ),
+            ),
+          ],
+        ),
+        for (final a in atuais)
+          linha(
+            icon: Icons.insert_drive_file_outlined,
+            nome: a.name ?? 'Anexo',
+            riscado: !_manterAnexos.contains(a.key),
+            acao: TextButton(
+              onPressed: _isSaving
+                  ? null
+                  : () => setState(() {
+                      if (!_manterAnexos.remove(a.key)) {
+                        _manterAnexos.add(a.key!);
+                      }
+                    }),
+              child: Text(_manterAnexos.contains(a.key) ? 'Remover' : 'Manter'),
+            ),
+          ),
+        for (final f in _novosArquivos)
+          linha(
+            icon: Icons.upload_file_outlined,
+            nome: f.path.split(RegExp(r'[\\/]')).last,
+            riscado: false,
+            acao: IconButton(
+              tooltip: 'Tirar',
+              icon: const Icon(Icons.close_rounded, size: 18),
+              onPressed: _isSaving
+                  ? null
+                  : () => setState(() => _novosArquivos.remove(f)),
+            ),
+          ),
+        if (atuais.isEmpty && _novosArquivos.isEmpty)
+          Text(
+            'Até $kMaxArquivosPorAtendimento arquivos de até 20 MB.',
+            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final accent = _accentColor(context);
-    final dateLabel = DateFormat("EEEE, dd MMM yyyy 'às' HH:mm", 'pt_BR')
-        .format(_interactionAt);
+    final dateLabel = DateFormat(
+      "EEEE, dd MMM yyyy 'às' HH:mm",
+      'pt_BR',
+    ).format(_interactionAt);
 
     return Padding(
       padding: EdgeInsets.only(
@@ -715,8 +938,9 @@ class _CreateInteractionSheetState extends State<_CreateInteractionSheet> {
                       height: 4,
                       margin: const EdgeInsets.only(bottom: 14),
                       decoration: BoxDecoration(
-                        color: ThemeHelpers.borderColor(context)
-                            .withValues(alpha: 0.55),
+                        color: ThemeHelpers.borderColor(
+                          context,
+                        ).withValues(alpha: 0.55),
                         borderRadius: BorderRadius.circular(999),
                       ),
                     ),
@@ -741,7 +965,9 @@ class _CreateInteractionSheetState extends State<_CreateInteractionSheet> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          'Registrar interação',
+                          _editando
+                              ? 'Editar interação'
+                              : 'Registrar interação',
                           style: theme.textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w900,
                             letterSpacing: -0.3,
@@ -784,7 +1010,9 @@ class _CreateInteractionSheetState extends State<_CreateInteractionSheet> {
                         borderRadius: BorderRadius.circular(999),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
                           decoration: BoxDecoration(
                             color: selected
                                 ? accent
@@ -802,8 +1030,7 @@ class _CreateInteractionSheetState extends State<_CreateInteractionSheet> {
                               Icon(
                                 icon,
                                 size: 14,
-                                color:
-                                    selected ? Colors.white : accent,
+                                color: selected ? Colors.white : accent,
                               ),
                               const SizedBox(width: 6),
                               Text(
@@ -825,6 +1052,11 @@ class _CreateInteractionSheetState extends State<_CreateInteractionSheet> {
                   TextFormField(
                     controller: _titleController,
                     textInputAction: TextInputAction.next,
+                    maxLength: kMaxTituloAtendimento,
+                    validator: (value) =>
+                        (value?.trim().length ?? 0) > kMaxTituloAtendimento
+                        ? 'O título deve ter no máximo $kMaxTituloAtendimento caracteres.'
+                        : null,
                     decoration: InputDecoration(
                       labelText: 'Título (opcional)',
                       hintText: 'Ex: Conversa sobre financiamento',
@@ -848,16 +1080,17 @@ class _CreateInteractionSheetState extends State<_CreateInteractionSheet> {
                         borderRadius: BorderRadius.circular(14),
                       ),
                     ),
+                    // Igual à web e ao back (`notes` só não pode ser vazio):
+                    // o "mínimo 4 caracteres" era só do app.
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
                         return 'Descreva os detalhes da interação';
                       }
-                      if (value.trim().length < 4) {
-                        return 'Mínimo 4 caracteres';
-                      }
                       return null;
                     },
                   ),
+                  const SizedBox(height: 12),
+                  _buildAnexos(context, theme, accent),
                   const SizedBox(height: 12),
                   InkWell(
                     onTap: _isSaving ? null : _pickDateTime,
@@ -895,7 +1128,8 @@ class _CreateInteractionSheetState extends State<_CreateInteractionSheet> {
                                   'Data e hora',
                                   style: theme.textTheme.labelSmall?.copyWith(
                                     color: ThemeHelpers.textSecondaryColor(
-                                        context),
+                                      context,
+                                    ),
                                     fontWeight: FontWeight.w700,
                                     letterSpacing: 0.2,
                                   ),
@@ -952,10 +1186,10 @@ class _CreateInteractionSheetState extends State<_CreateInteractionSheet> {
                                 )
                               : const Icon(Icons.check_rounded, size: 18),
                           label: Text(
-                            _isSaving ? 'Salvando…' : 'Registrar',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                            ),
+                            _isSaving
+                                ? 'Salvando…'
+                                : (_editando ? 'Salvar' : 'Registrar'),
+                            style: const TextStyle(fontWeight: FontWeight.w800),
                           ),
                           style: FilledButton.styleFrom(
                             backgroundColor: accent,

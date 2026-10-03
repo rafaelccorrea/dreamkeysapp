@@ -9,6 +9,7 @@ import '../../core/session/session_bootstrap.dart';
 import '../../core/utils/api_connection_message.dart';
 import 'secure_storage_service.dart';
 import 'auth_service.dart';
+import 'subscription_access_gate.dart';
 import '../utils/jwt_utils.dart';
 
 /// Serviço base para chamadas de API
@@ -134,6 +135,13 @@ class ApiService {
     String? endpoint,
     bool excludeContentType = false,
   }) async {
+    // transv-22 (03/10/2026): quem usa este helper (multipart, downloads)
+    // não passa pelo `_executeRequest`, então não tinha refresh proativo nem
+    // retry em 401 — upload com o token de 15 min vencido falhava. Renova
+    // pela fila única antes de montar o header (falha de rede mantém o atual).
+    if (_token != null && !_isAuthRouteWithoutToken(endpoint)) {
+      await garantirTokenFresco(margemSegundos: 120);
+    }
     final headers = await _getDefaultHeaders(endpoint);
     if (excludeContentType) {
       headers.remove(ApiConstants.contentTypeHeader);
@@ -242,12 +250,14 @@ class ApiService {
     );
   }
 
-  /// Realiza uma requisição POST
+  /// Realiza uma requisição POST. [timeout] substitui o padrão
+  /// ([ApiConstants.connectTimeout]) só nesta chamada.
   Future<ApiResponse<T>> post<T>(
     String endpoint, {
     Object? body,
     Map<String, String>? headers,
     bool retryOn401 = true,
+    Duration? timeout,
   }) async {
     return _executeRequest<T>(
       () async {
@@ -260,7 +270,7 @@ class ApiService {
               headers: {...defaultHeaders, ...?headers},
               body: body != null ? jsonEncode(body) : null,
             )
-            .timeout(ApiConstants.connectTimeout);
+            .timeout(timeout ?? ApiConstants.connectTimeout);
 
         return _handleResponse<T>(response);
       },
@@ -296,12 +306,14 @@ class ApiService {
     );
   }
 
-  /// Realiza uma requisição PATCH
+  /// Realiza uma requisição PATCH. [timeout] substitui o padrão
+  /// ([ApiConstants.connectTimeout]) só nesta chamada.
   Future<ApiResponse<T>> patch<T>(
     String endpoint, {
     Object? body,
     Map<String, String>? headers,
     bool retryOn401 = true,
+    Duration? timeout,
   }) async {
     return _executeRequest<T>(
       () async {
@@ -314,7 +326,7 @@ class ApiService {
               headers: {...defaultHeaders, ...?headers},
               body: body != null ? jsonEncode(body) : null,
             )
-            .timeout(ApiConstants.connectTimeout);
+            .timeout(timeout ?? ApiConstants.connectTimeout);
 
         return _handleResponse<T>(response);
       },
@@ -398,6 +410,14 @@ class ApiService {
       }
 
       final response = await request();
+
+      // 403 do `SubscriptionGuard` do back no meio da sessão (assinatura
+      // suspensa/expirada depois do login): leva à tela de assinatura ou de
+      // "sistema indisponível", como o interceptor do web — em vez de cada
+      // tela mostrar um erro genérico (NEW-01, 03/10/2026).
+      if (isSubscriptionGuardForbidden(response.statusCode, response.error)) {
+        unawaited(SubscriptionAccessGate.instance.onSubscriptionForbidden());
+      }
 
       // Tratar erros relacionados a Company ID inválido (400/403).
       //

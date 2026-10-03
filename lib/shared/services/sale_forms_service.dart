@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../../core/constants/api_constants.dart';
+import '../utils/ficha_anexo_content_type.dart';
 import 'api_service.dart';
 
 /// Status de uma ficha de venda (espelha o backend — coluna `status`).
@@ -31,7 +32,7 @@ extension SaleFormStatusX on SaleFormStatus {
       case SaleFormStatus.waitingForSignature:
         return 'Aguardando assinatura';
       case SaleFormStatus.processing:
-        return 'Em assinatura';
+        return 'Em processamento';
       case SaleFormStatus.finalized:
         return 'Finalizada';
       case SaleFormStatus.canceled:
@@ -45,7 +46,7 @@ extension SaleFormStatusX on SaleFormStatus {
       case SaleFormStatus.waitingForSignature:
         return 'Aguardando';
       case SaleFormStatus.processing:
-        return 'Em assinatura';
+        return 'Em processo';
       case SaleFormStatus.finalized:
         return 'Finalizadas';
       case SaleFormStatus.canceled:
@@ -151,6 +152,13 @@ class SaleForm {
 
   /// Rótulo do status igual ao web: distrato vence o "Cancelada".
   String get statusLabel {
+    if (distratoConcluido) return 'Distratada';
+    if (distratoAberto) return 'Em distrato — aguardando anexo no Financeiro';
+    return status.label;
+  }
+
+  /// Rótulo curto da pílula (web `saleFormStatusShortLabel` para distrato).
+  String get statusShortLabel {
     if (distratoConcluido) return 'Distratada';
     if (distratoAberto) return 'Em distrato';
     return status.label;
@@ -633,7 +641,8 @@ class SaleFormAttachment {
         return 'Rejeitado';
       case 'pending_approval':
       default:
-        return 'Aguardando aprovação';
+        // Web (`FichaVendaAnexosModalPrivate.tsx`): "Pendente".
+        return 'Pendente';
     }
   }
 
@@ -1072,6 +1081,11 @@ String _semAcento(String s) {
 /// Teto das operações pesadas de assinatura (paridade com o web: 120 s).
 const Duration _kLongTimeout = Duration(seconds: 120);
 
+/// Teto de criar/editar ficha — igual ao web (`saleFormsApi.ts`,
+/// `SALE_FORMS_LONG_REQUEST_TIMEOUT_MS` = 120 s). Com 30 s o app dava erro com a
+/// ficha talvez já criada, e o reenvio duplicava.
+const Duration kSaleFormSaveTimeout = Duration(seconds: 120);
+
 class SaleFormsService {
   SaleFormsService._();
   static final SaleFormsService instance = SaleFormsService._();
@@ -1121,6 +1135,56 @@ class SaleFormsService {
       );
     } catch (e) {
       debugPrint('❌ [SALE_FORMS] list: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// Linhas brutas para o relatório XLSX — `fetchAllSaleFormsForExport` do
+  /// web: percorre as páginas (100 por vez, o `@Max(100)` do
+  /// `ListSaleFormsDto`) com `includeLastAuditChanges=true`, até
+  /// [maxRows]. `truncated` = havia mais fichas que o limite.
+  Future<ApiResponse<({List<Map<String, dynamic>> rows, bool truncated})>>
+      listForExport(
+    SaleFormFilters base, {
+    int pageSize = 100,
+    int maxRows = 5000,
+  }) async {
+    final rows = <Map<String, dynamic>>[];
+    var page = 1;
+    var total = -1;
+    try {
+      while (rows.length < maxRows && (total < 0 || rows.length < total)) {
+        final qp = base.copyWith(page: page, limit: pageSize).toQuery()
+          ..['includeLastAuditChanges'] = 'true';
+        final res = await _api.get<Map<String, dynamic>>(
+          ApiConstants.saleForms,
+          queryParameters: qp,
+        );
+        if (!res.success || res.data == null) {
+          return ApiResponse.error(
+            message: res.message ?? 'Erro ao buscar as fichas para exportar',
+            statusCode: res.statusCode,
+          );
+        }
+        final data = res.data!['data'];
+        final list = data is List ? data.whereType<Map>().toList() : const [];
+        for (final m in list) {
+          rows.add(Map<String, dynamic>.from(m));
+        }
+        total = _int(res.data!['total']) ?? rows.length;
+        if (list.length < pageSize) break;
+        page++;
+      }
+      final truncated = total > maxRows && rows.length >= maxRows;
+      return ApiResponse.success(
+        data: (
+          rows: rows.length > maxRows ? rows.sublist(0, maxRows) : rows,
+          truncated: truncated,
+        ),
+        statusCode: 200,
+      );
+    } catch (e) {
+      debugPrint('❌ [SALE_FORMS] listForExport: $e');
       return ApiResponse.error(message: e.toString(), statusCode: 0);
     }
   }
@@ -1205,11 +1269,14 @@ class SaleFormsService {
       final res = await _api.post<Map<String, dynamic>>(
         ApiConstants.saleForms,
         body: body,
+        timeout: kSaleFormSaveTimeout,
       );
       if (!res.success || res.data == null) {
+        // `data` = corpo do erro (a tela marca os campos do 400).
         return ApiResponse.error(
           message: res.message ?? 'Erro ao criar ficha de venda',
           statusCode: res.statusCode,
+          data: res.error,
         );
       }
       final root = res.data!;
@@ -1235,11 +1302,13 @@ class SaleFormsService {
       final res = await _api.patch<Map<String, dynamic>>(
         ApiConstants.saleFormById(id),
         body: body,
+        timeout: kSaleFormSaveTimeout,
       );
       if (!res.success || res.data == null) {
         return ApiResponse.error(
           message: res.message ?? 'Erro ao salvar ficha de venda',
           statusCode: res.statusCode,
+          data: res.error,
         );
       }
       final root = res.data!;
@@ -1979,7 +2048,7 @@ class SaleFormsService {
           )
           .timeout(timeout);
       if (res.statusCode == 401) {
-        return _api.post<T>(endpoint, body: body);
+        return await _api.post<T>(endpoint, body: body);
       }
       dynamic decoded;
       if (res.bodyBytes.isNotEmpty) {
@@ -2077,11 +2146,14 @@ class SaleFormsService {
       request.headers.addAll(headers);
 
       final fileLength = await file.length();
+      final fileName = file.path.split('/').last.split('\\').last;
       request.files.add(http.MultipartFile(
         'file',
         http.ByteStream(file.openRead()),
         fileLength,
-        filename: file.path.split('/').last.split('\\').last,
+        filename: fileName,
+        // Sem isso vai `application/octet-stream` e o back recusa.
+        contentType: fichaAnexoContentType(fileName),
       ));
 
       if (descricao != null && descricao.trim().isNotEmpty) {

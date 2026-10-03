@@ -5,14 +5,22 @@ import '../../../core/constants/app_permissions.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/api_service.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
+import '../../../shared/widgets/file_delivery_sheet.dart';
+import '../ficha_draft_store.dart';
+import '../sale_form_list_display.dart';
+import '../sale_forms_filters_storage.dart';
+import '../sale_forms_relatorio_export.dart';
 import '../widgets/fichas_filters_kit.dart';
 import '../widgets/sale_form_card.dart';
+import '../widgets/sale_form_report_row.dart';
 import '../widgets/sale_form_row_actions.dart';
 import '../widgets/sale_form_row_rules.dart';
+import '../widgets/sale_form_signatures_sheet.dart';
 import '../widgets/sale_form_tones.dart';
 import '../widgets/sale_form_type_modal.dart';
 import '../widgets/sale_forms_filters_sheet.dart';
@@ -57,11 +65,33 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
   int _errorStatus = 0;
   bool _showDeletedOnly = false;
 
+  /// V-L4: "Lista operacional" × "Relatório fichas", como as abas da web.
+  bool _modoRelatorio = false;
+  FichaDraft? _rascunho;
+
   @override
   void initState() {
     super.initState();
-    _load();
     _scroll.addListener(_onScroll);
+    _restaurarFiltrosECarregar();
+    _lerRascunho();
+  }
+
+  /// Filtros guardados (web `loadSaleFormsFilters`): voltar à lista mantém
+  /// busca, status, criadores, equipes, datas, ordenação e excluídas.
+  Future<void> _restaurarFiltrosECarregar() async {
+    final salvo = await SaleFormsFiltersStore.instance.ler(
+      limit: _filters.limit,
+    );
+    if (!mounted) return;
+    if (salvo != null) {
+      _filters = salvo.filters;
+      // Web: "Apenas excluídas" só vale com `sale_form:view_all` (o back
+      // devolve 403 sem ela).
+      _showDeletedOnly = salvo.showDeletedOnly && _podeVerExcluidas;
+      _search.text = salvo.filters.search ?? '';
+    }
+    await _load();
   }
 
   @override
@@ -84,9 +114,12 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
     final s = _search.text.trim();
     return base.copyWith(
       search: s.isEmpty ? null : s,
-      listDeletedOnly: _showDeletedOnly ? true : null,
+      listDeletedOnly: _showDeletedOnly && _podeVerExcluidas ? true : null,
     );
   }
+
+  bool get _podeVerExcluidas => ModuleAccessService.instance
+      .hasPermission(AppPermissions.saleFormViewAll);
 
   Future<void> _load() async {
     setState(() {
@@ -94,6 +127,8 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
       _error = null;
     });
     final f = _withSearchAndDeleted(_filters.copyWith(page: 1));
+    // `persistListUi` do web: o recorte vale também na próxima visita.
+    SaleFormsFiltersStore.instance.salvar(f, showDeletedOnly: _showDeletedOnly);
     final statsFut = SaleFormsService.instance.getStats(filters: f);
     final res = await SaleFormsService.instance.list(filters: f);
     final statsRes = await statsFut;
@@ -139,6 +174,16 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
     });
   }
 
+  /// "Itens por página" (web `PageSizePill`): recomeça da 1ª página com o
+  /// novo tamanho — a rolagem infinita segue carregando de [n] em [n].
+  void _mudarItensPorPagina(int n) {
+    final limit = sanitizeSaleFormsPageSize(n);
+    if (limit == _filters.limit) return;
+    setState(() => _filters = _filters.copyWith(limit: limit));
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+    _load();
+  }
+
   /// Tocar na linha abre a ficha em LEITURA (igual ao web); editar é uma
   /// ação do menu, bloqueada com motivo quando a ficha não pode mudar.
   Future<void> _openDetail(SaleForm f) async {
@@ -175,23 +220,133 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
     _load();
   }
 
+  /// Rascunho da ficha de venda guardado no aparelho (web: botão "Retomar
+  /// rascunho (salvo …)" com X para descartar, ao lado de "Nova ficha").
+  Future<void> _lerRascunho() async {
+    final d = await FichaDraftStore.instance.ler('venda');
+    if (mounted) setState(() => _rascunho = d);
+  }
+
+  Future<void> _descartarRascunho() async {
+    await FichaDraftStore.instance.limpar('venda');
+    if (!mounted) return;
+    setState(() => _rascunho = null);
+    _toast('Rascunho descartado', ok: true);
+  }
+
+  /// "Nova ficha" (web): vai direto ao modal de tipo; o rascunho tem botão
+  /// próprio.
   Future<void> _openCreate() async {
     final choice = await showSaleFormTypeModal(context);
     if (choice == null || !mounted) return;
-    final created = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => CreateSaleFormPage(choice: choice)),
+    await _abrirFormulario(choice: choice);
+  }
+
+  Future<void> _retomarRascunho() async {
+    final draft = await FichaDraftStore.instance.ler('venda');
+    if (!mounted) return;
+    if (draft == null) {
+      setState(() => _rascunho = null);
+      return;
+    }
+    await _abrirFormulario(rascunho: draft.data);
+  }
+
+  Future<void> _abrirFormulario({
+    SaleFormTypeChoice? choice,
+    Map<String, dynamic>? rascunho,
+  }) async {
+    final created = await Navigator.of(context).push<Object?>(
+      MaterialPageRoute(
+        builder: (_) => CreateSaleFormPage(choice: choice, rascunho: rascunho),
+      ),
     );
-    if (created == true && mounted) {
-      _toast('Ficha de venda criada com sucesso.', ok: true);
-      _load();
+    if (mounted) _lerRascunho();
+    if (!mounted || (created != true && created is! SaleFormCreatedResult)) {
+      return;
+    }
+    _toast('Ficha de venda criada com sucesso.', ok: true);
+    _load();
+    // Web: `navigate('/fichas-venda', { state: { openSignaturesFormId } })`
+    // — a lista abre as assinaturas da ficha nova.
+    if (created is SaleFormCreatedResult) {
+      await showSaleFormSignaturesSheet(
+        context,
+        saleFormId: created.id,
+        formNumber: created.formNumber,
+        onChanged: _load,
+      );
     }
   }
 
-  /// "Nova ficha" travada: aparece com cadeado e diz o porquê (não some).
-  void _createLocked() {
-    _toast(
-      'Criar fichas de venda depende de permissão. Peça ao administrador '
-      'da empresa.',
+
+  /// Relatório XLSX da lista — `ExportSaleFormsRelatorioModal` do web: busca
+  /// todas as páginas do recorte atual (até 5000 fichas) com o último evento
+  /// de auditoria e monta a planilha no aparelho; sai por Compartilhar ou
+  /// Salvar no aparelho.
+  Future<void> _exportarRelatorio() async {
+    // Web: antes de exportar abre o modal para ajustar o recorte (parte do
+    // recorte da lista); `userIds` só vai com `sale_form:view_all`.
+    final escolha = await showSaleFormsExportSheet(
+      context,
+      initial: _filters,
+      search: _search.text,
+      deletedOnly: _showDeletedOnly,
+      canViewAll: _podeVerExcluidas,
+    );
+    if (escolha == null || !mounted) return;
+    final base = escolha.filters;
+    var truncado = false;
+    var quantas = 0;
+    await showFileDeliverySheet(
+      context,
+      title: 'Relatório de fichas (Excel)',
+      subtitle: 'Só entram fichas que você já pode ver no sistema.',
+      paper: FileDeliveryPaper.spreadsheet,
+      expectedType: 'XLSX',
+      generatingTitle: 'Montando a planilha…',
+      generatingHint: 'Busca todas as fichas do recorte, com o último evento '
+          'de auditoria de cada uma.',
+      readyTitle: 'Planilha pronta',
+      readyNote: (_) => truncado
+          ? 'Exportação limitada a $kSaleFormsExportMaxRows fichas. Refine '
+              'período, status ou criadores para pegar o resto.'
+          : '$quantas ficha(s) exportada(s). O arquivo respeita o mesmo '
+              'acesso da listagem.',
+      shareSubject: 'Relatório de fichas de venda',
+      saveDialogTitle: 'Salvar relatório de fichas',
+      load: () async {
+        final res = await SaleFormsService.instance.listForExport(
+          base,
+          pageSize: kSaleFormsExportPageSize,
+          maxRows: kSaleFormsExportMaxRows,
+        );
+        final data = res.data;
+        if (!res.success || data == null) {
+          return ApiResponse.error(
+            message: res.message ?? 'Não foi possível buscar as fichas.',
+            statusCode: res.statusCode,
+          );
+        }
+        truncado = data.truncated;
+        quantas = data.rows.length;
+        // Web: sem fichas no recorte, não gera arquivo.
+        if (quantas == 0) {
+          return ApiResponse.error(
+            message: 'Nenhuma ficha encontrada com estes filtros.',
+            statusCode: 422,
+          );
+        }
+        return ApiResponse.success(
+          data: DeliverableFile(
+            bytes: buildSaleFormsRelatorioXlsx(data.rows),
+            fileName: saleFormsRelatorioFileName(DateTime.now()),
+            mimeType: 'application/vnd.openxmlformats-officedocument.'
+                'spreadsheetml.sheet',
+          ),
+          statusCode: 200,
+        );
+      },
     );
   }
 
@@ -214,13 +369,12 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
     return ListenableBuilder(
       listenable: ModuleAccessService.instance,
       builder: (context, _) {
-        final canView =
-            ModuleAccessService.instance.hasAnyPermission(
-              AppPermissions.saleFormMenu,
-            ) ||
-            ModuleAccessService.instance.hasPermission(
-              AppPermissions.saleFormView,
-            );
+        // Web (`fichas.routes.tsx`) e back (`GET /sistema/fichas-venda` com
+        // `SALE_FORM_VIEW`) exigem `sale_form:view`; só `view_team`/`view_all`
+        // abriria a tela para dar 403.
+        final canView = ModuleAccessService.instance.hasPermission(
+          AppPermissions.saleFormView,
+        );
         if (!canView) {
           return const AppScaffold(
             title: 'Fichas de venda',
@@ -258,6 +412,13 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
       currentBottomNavIndex: -1,
       showBottomNavigation: false,
       actions: [
+        // "Exportar XLSX" do web (aba Relatório fichas): mesmo recorte da
+        // lista (busca, filtros e "Apenas excluídas").
+        IconButton(
+          tooltip: 'Exportar relatório (Excel)',
+          icon: const Icon(LucideIcons.fileSpreadsheet, size: 19),
+          onPressed: _loading ? null : _exportarRelatorio,
+        ),
         // Painel de fichas (paridade com "Dash Fichas Venda" do web —
         // permissão sale_form:view_dashboard; backend valida o escopo).
         if (ModuleAccessService.instance
@@ -289,8 +450,17 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
                       accent: accent,
                       stats: _stats,
                       canCreate: canCreate,
-                      onCreate: canCreate ? _openCreate : _createLocked,
+                      onCreate: _openCreate,
                       onPendentes: _openPendentes,
+                      // Web: "Retomar rascunho" só com `sale_form:create`.
+                      rascunhoSalvoEm: canCreate && _rascunho != null
+                          ? fichaRascunhoSalvoEm(
+                              _rascunho!.savedAt,
+                              DateTime.now(),
+                            )
+                          : null,
+                      onRetomar: _retomarRascunho,
+                      onDescartar: _descartarRascunho,
                     ),
                     const SizedBox(height: 14),
                     Row(
@@ -332,6 +502,25 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
                       },
                     ),
                     const SizedBox(height: 12),
+                    SegmentedButton<bool>(
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment(
+                          value: false,
+                          icon: Icon(LucideIcons.list, size: 16),
+                          label: Text('Lista operacional'),
+                        ),
+                        ButtonSegment(
+                          value: true,
+                          icon: Icon(LucideIcons.clipboardCheck, size: 16),
+                          label: Text('Relatório fichas'),
+                        ),
+                      ],
+                      selected: {_modoRelatorio},
+                      onSelectionChanged: (s) =>
+                          setState(() => _modoRelatorio = s.first),
+                    ),
+                    const SizedBox(height: 10),
                     _LinhaDaLista(
                       total: _data?.total,
                       carregando: _loading,
@@ -384,7 +573,7 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
               )
             else
               SliverPadding(
-                padding: EdgeInsets.fromLTRB(padH, 0, padH, 40),
+                padding: EdgeInsets.fromLTRB(padH, 0, padH, 8),
                 sliver: SliverList.builder(
                   itemCount: itens.length + (_loadingMore ? 1 : 0),
                   itemBuilder: (_, i) {
@@ -393,6 +582,12 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
                       return const SaleFormCardSkeleton();
                     }
                     final f = itens[i];
+                    if (_modoRelatorio) {
+                      return SaleFormReportRow(
+                        saleForm: f,
+                        onTap: () => _openDetail(f),
+                      );
+                    }
                     return SaleFormCard(
                       saleForm: f,
                       accent: accent,
@@ -400,6 +595,21 @@ class _SaleFormsPageState extends State<SaleFormsPage> {
                       onAction: (a) => _onAction(f, a),
                     );
                   },
+                ),
+              ),
+            // V-L9: "página X de Y · N fichas" + itens por página (web).
+            if (!_loading && _error == null && _data != null && itens.isNotEmpty)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(padH, 0, padH, 40),
+                  child: _RodapePaginacao(
+                    page: _data!.page,
+                    totalPages: _data!.totalPages,
+                    total: _data!.total,
+                    limit: _filters.limit,
+                    accent: accent,
+                    onLimit: _mudarItensPorPagina,
+                  ),
                 ),
               ),
           ],
@@ -420,6 +630,9 @@ class _Hero extends StatelessWidget {
     required this.canCreate,
     required this.onCreate,
     required this.onPendentes,
+    required this.onRetomar,
+    required this.onDescartar,
+    this.rascunhoSalvoEm,
   });
 
   final Color accent;
@@ -427,12 +640,16 @@ class _Hero extends StatelessWidget {
   final bool canCreate;
   final VoidCallback onCreate;
   final VoidCallback onPendentes;
+  final VoidCallback onRetomar;
+  final VoidCallback onDescartar;
+
+  /// "hoje às 10:12" etc.; `null` = sem rascunho (ou sem `create`).
+  final String? rascunhoSalvoEm;
 
   @override
   Widget build(BuildContext context) {
     final muted = ThemeHelpers.textSecondaryColor(context);
     final st = stats;
-    final esperando = st == null ? null : st.waitingForSignature + st.processing;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -485,10 +702,22 @@ class _Hero extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(width: 12),
-            _NovaFicha(accent: accent, canCreate: canCreate, onTap: onCreate),
+            // Web: sem `sale_form:create` o botão não aparece.
+            if (canCreate) ...[
+              const SizedBox(width: 12),
+              _NovaFicha(accent: accent, onTap: onCreate),
+            ],
           ],
         ),
+        if (rascunhoSalvoEm != null) ...[
+          const SizedBox(height: 10),
+          _RetomarRascunho(
+            accent: accent,
+            salvoEm: rascunhoSalvoEm!,
+            onTap: onRetomar,
+            onDescartar: onDescartar,
+          ),
+        ],
         const SizedBox(height: 6),
         // Linha de apoio: a leitura do momento + atalho para o que espera
         // assinatura (antes era um botão grande só para isso).
@@ -500,8 +729,7 @@ class _Hero extends StatelessWidget {
             Text(
               st == null
                   ? 'Registre, assine e acompanhe cada venda.'
-                  : '${st.total} ${st.total == 1 ? 'ficha' : 'fichas'}'
-                        '${esperando != null && esperando > 0 ? ' · $esperando em assinatura' : ''}',
+                  : saleFormsHeroResumo(st),
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
@@ -537,24 +765,17 @@ class _Hero extends StatelessWidget {
   }
 }
 
-/// "Nova ficha" no canto do hero: compacto, na cor da marca. Sem permissão
-/// continua à vista com cadeado e diz o porquê ao tocar.
+/// "Nova ficha" no canto do hero: compacto, na cor da marca. Só existe com
+/// `sale_form:create` (o web esconde o botão sem a permissão).
 class _NovaFicha extends StatelessWidget {
-  const _NovaFicha({
-    required this.accent,
-    required this.canCreate,
-    required this.onTap,
-  });
+  const _NovaFicha({required this.accent, required this.onTap});
   final Color accent;
-  final bool canCreate;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final muted = ThemeHelpers.textSecondaryColor(context);
-    final cheio = canCreate;
     return Material(
-      color: cheio ? accent : Colors.transparent,
+      color: accent,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
@@ -562,21 +783,11 @@ class _NovaFicha extends StatelessWidget {
         child: Container(
           constraints: const BoxConstraints(minHeight: 42),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          decoration: cheio
-              ? null
-              : BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: ThemeHelpers.borderColor(context)),
-                ),
-          child: Row(
+          child: const Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                cheio ? Icons.add_rounded : Icons.lock_outline_rounded,
-                size: 19,
-                color: cheio ? Colors.white : muted,
-              ),
-              const SizedBox(width: 6),
+              Icon(Icons.add_rounded, size: 19, color: Colors.white),
+              SizedBox(width: 6),
               Text(
                 'Nova ficha',
                 maxLines: 1,
@@ -584,8 +795,73 @@ class _NovaFicha extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w800,
-                  color: cheio ? Colors.white : muted,
+                  color: Colors.white,
                 ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// "Retomar rascunho · salvo …" com X para descartar (web `DraftWrap`).
+class _RetomarRascunho extends StatelessWidget {
+  const _RetomarRascunho({
+    required this.accent,
+    required this.salvoEm,
+    required this.onTap,
+    required this.onDescartar,
+  });
+  final Color accent;
+  final String salvoEm;
+  final VoidCallback onTap;
+  final VoidCallback onDescartar;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final tom = SaleFormTom.aviso(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Material(
+      color: tom.sinal.withValues(alpha: isDark ? 0.14 : 0.10),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+          child: Row(
+            children: [
+              Icon(LucideIcons.fileClock, size: 18, color: tom.texto),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Retomar rascunho',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: ThemeHelpers.textColor(context),
+                      ),
+                    ),
+                    Text(
+                      'salvo $salvoEm',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: muted),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Descartar rascunho',
+                onPressed: onDescartar,
+                icon: Icon(Icons.close_rounded, size: 18, color: muted),
               ),
             ],
           ),
@@ -714,7 +990,8 @@ class _PainelDeStatus extends StatelessWidget {
     final itens = <(SaleFormStatus, String, SaleFormTom)>[
       (SaleFormStatus.waitingForSignature, 'Aguardando',
           SaleFormTom.aviso(context)),
-      (SaleFormStatus.processing, 'Assinando', SaleFormTom.info(context)),
+      // Mesmo rótulo curto do web (`saleFormStatusShortLabel`).
+      (SaleFormStatus.processing, 'Em processo', SaleFormTom.info(context)),
       (SaleFormStatus.finalized, 'Finalizadas', SaleFormTom.sucesso(context)),
       (SaleFormStatus.canceled, 'Canceladas', SaleFormTom.erro(context)),
     ];
@@ -1114,6 +1391,109 @@ class _SemAcesso extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Rodapé da lista (V-L9, paridade com `ListFooter` do web): onde a rolagem
+/// está ("página X de Y · N fichas", o mesmo `total` do web) e o seletor
+/// "Por página" 10/20/30/50 — pílulas de 40dp, alcançáveis com o polegar.
+class _RodapePaginacao extends StatelessWidget {
+  const _RodapePaginacao({
+    required this.page,
+    required this.totalPages,
+    required this.total,
+    required this.limit,
+    required this.accent,
+    required this.onLimit,
+  });
+
+  final int page;
+  final int totalPages;
+  final int total;
+  final int limit;
+  final Color accent;
+  final ValueChanged<int> onLimit;
+
+  @override
+  Widget build(BuildContext context) {
+    final tp = totalPages < 1 ? 1 : totalPages;
+    final pg = page.clamp(1, tp);
+    final secundaria = ThemeHelpers.textSecondaryColor(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: ThemeHelpers.borderLightColor(context)),
+      ),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        runSpacing: 8,
+        spacing: 12,
+        children: [
+          Text(
+            'Página $pg de $tp · $total ${total == 1 ? 'ficha' : 'fichas'}',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: ThemeHelpers.textColor(context),
+            ),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Por página',
+                style: TextStyle(fontSize: 12, color: secundaria),
+              ),
+              const SizedBox(width: 6),
+              for (final n in kSaleFormsPageSizes)
+                Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: Semantics(
+                    button: true,
+                    selected: n == limit,
+                    label: '$n itens por página',
+                    child: Material(
+                      color: n == limit
+                          ? accent.withValues(alpha: 0.14)
+                          : Colors.transparent,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        side: BorderSide(
+                          color: n == limit
+                              ? accent
+                              : ThemeHelpers.borderColor(context),
+                        ),
+                      ),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(10),
+                        onTap: n == limit ? null : () => onLimit(n),
+                        child: SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: Center(
+                            child: Text(
+                              '$n',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: n == limit
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                                color: n == limit ? accent : secundaria,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }

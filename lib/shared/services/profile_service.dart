@@ -358,7 +358,11 @@ class ProfileService {
     try {
       debugPrint('📸 [PROFILE_SERVICE] Iniciando upload de avatar');
 
-      final token = await SecureStorageService.instance.getAccessToken();
+      // transv-22: renova antes do upload se o token estiver para vencer.
+      final token = await ApiService.instance.garantirTokenFresco(
+            margemSegundos: 120,
+          ) ??
+          await SecureStorageService.instance.getAccessToken();
       if (token == null || token.isEmpty) {
         return ApiResponse.error(
           message: 'Token de autenticação não encontrado',

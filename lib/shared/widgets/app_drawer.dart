@@ -16,12 +16,18 @@ import '../services/dashboard_service.dart';
 import '../services/permission_service.dart';
 import '../services/secure_storage_service.dart';
 import '../utils/avatar_url_resolver.dart';
+import '../utils/fichas_menu_rules.dart';
 import 'logout_confirm_sheet.dart';
 import 'skeleton_box.dart';
 import '../../features/notifications/controllers/notification_controller.dart';
 import '../../features/chat/controllers/chat_unread_controller.dart';
 import '../../features/kanban/controllers/kanban_controller.dart';
 import '../../features/visit_reports/models/visit_report_access.dart';
+import '../../features/check_in/utils/check_in_access.dart';
+import '../../features/finance/core/finance_access.dart';
+import '../../features/finance/core/finance_me.dart';
+import '../../features/finance/core/finance_route_names.dart';
+import '../../features/finance/core/finance_visibility.dart';
 
 /// Drawer (menu lateral) — itens alinhados ao menu **visível** do web
 /// (`imobx-front/src/components/layout/Drawer.tsx`): sem Chat, Matches,
@@ -1020,16 +1026,27 @@ class _AppDrawerState extends State<AppDrawer> {
     final canSeeAssets =
         ModuleAccessService.instance.hasCompanyModule('asset_management') &&
         ModuleAccessService.instance.hasPermission('asset:view');
-    final canSeeProposals =
-        ModuleAccessService.instance.hasCompanyModule('sale_forms') &&
-        (ModuleAccessService.instance.hasPermission('proposal:view') ||
-            ModuleAccessService.instance.hasPermission('proposal:view_team') ||
-            ModuleAccessService.instance.hasPermission('proposal:view_all'));
-    final canSeeSaleForms =
-        ModuleAccessService.instance.hasCompanyModule('sale_forms') &&
-        ModuleAccessService.instance.hasAnyPermission(
-          AppPermissions.saleFormMenu,
-        );
+    // Fichas (M-1/M-2/M-3, 03/10/2026): regra do web em `FichasMenuRules` —
+    // lista exige a `view` exata (+ uma ação), dashboards a `view_dashboard`.
+    final fichasModule = ModuleAccessService.instance.hasCompanyModule(
+      FichasMenuRules.module,
+    );
+    final canSeeProposals = FichasMenuRules.canSeeProposals(
+      hasModule: fichasModule,
+      has: ModuleAccessService.instance.hasPermission,
+    );
+    final canSeeSaleForms = FichasMenuRules.canSeeSaleForms(
+      hasModule: fichasModule,
+      has: ModuleAccessService.instance.hasPermission,
+    );
+    final canSeeSaleFormsDash = FichasMenuRules.canSeeSaleFormsDashboard(
+      hasModule: fichasModule,
+      has: ModuleAccessService.instance.hasPermission,
+    );
+    final canSeeProposalsDash = FichasMenuRules.canSeeProposalsDashboard(
+      hasModule: fichasModule,
+      has: ModuleAccessService.instance.hasPermission,
+    );
     // Comissões: módulo da empresa + permissão de visualização (corretor vê só
     // as próprias; master/admin/manager têm bypass no ModuleAccessService).
     // Colaboradores → Usuários (drawer item).
@@ -1045,19 +1062,10 @@ class _AppDrawerState extends State<AppDrawer> {
     final canSeeTeams =
         ModuleAccessService.instance.hasCompanyModule('team_management') &&
         ModuleAccessService.instance.hasPermission(AppPermissions.teamView);
-    /// Visibilidade do item "Check-in": liberado pra master/admin/manager
-    /// (gestores veem tudo) ou para quem tem `check_in:do` / `check_in:view`.
-    /// O backend bate as permissões finais; aqui é só gating de menu.
-    final checkInRole =
-        ModuleAccessService.instance.userRole?.toLowerCase().trim() ?? '';
-    final isCheckInPrivileged =
-        checkInRole == 'master' ||
-        checkInRole == 'admin' ||
-        checkInRole == 'manager';
-    final canSeeCheckIn =
-        isCheckInPrivileged ||
-        ModuleAccessService.instance.hasPermission(AppPermissions.checkInDo) ||
-        ModuleAccessService.instance.hasPermission(AppPermissions.checkInView);
+    /// Visibilidade do item "Check-in" (transv-08, 03/10/2026): exige o
+    /// módulo `visit_report` (o back e o web gateiam por ele) e alguma
+    /// permissão de check-in; só master/admin têm bypass (gestor não).
+    final canSeeCheckIn = CheckInAccess.canSeeCheckIn;
 
     // Colaboradores agrupa Usuários, Equipes e Check-in (posição do web).
     final canSeeWorkspace = canSeeUsers || canSeeTeams || canSeeCheckIn;
@@ -1134,12 +1142,19 @@ class _AppDrawerState extends State<AppDrawer> {
     // Vendas & CRM como no menu web).
     final canSeeRentalForms =
         ModuleAccessService.instance.hasCompanyModule('rental_management') &&
-        ModuleAccessService.instance.hasPermission('rental_form:view');
+        // transv-06: o controller /sistema/fichas-locacao exige a família
+        // RENTAL_* (`rental:view`); `rental_form:*` gateia só a fila de
+        // aprovação de fichas (web: `locacaoVisibility.ts`, fichas.routes).
+        ModuleAccessService.instance.hasPermission('rental:view');
 
     // Suporte — Central de Ajuda é aberta a todos; tickets exigem criar/ver.
     final canSeeTickets =
         ModuleAccessService.instance.hasPermission('ticket:create') ||
         ModuleAccessService.instance.hasPermission('ticket:view');
+
+    final canSeeFinance =
+        companyHasFinanceModule(ModuleAccessService.instance.companyModules) ==
+        true;
 
     final showImoveisGroup =
         canSeeProperties || canSeeApprovalsMenu || canSeeCondominiums;
@@ -1201,6 +1216,50 @@ class _AppDrawerState extends State<AppDrawer> {
                               );
                             },
                           ),
+                          // Dash Fichas Venda/Proposta (M-3): itens próprios
+                          // como no web (bloco Dashboards, antes do Dash SDR).
+                          if (canSeeSaleFormsDash)
+                            _buildDrawerItem(
+                              context: context,
+                              currentRoute: activeRoute,
+                              route: AppRoutes.saleFormsDashboard,
+                              icon: LucideIcons.chartColumn,
+                              activeIcon: LucideIcons.chartColumn,
+                              title: 'Dash Fichas Venda',
+                              accent: accent,
+                              showLeadingTile: true,
+                              onTap: () {
+                                Navigator.pop(context);
+                                if (activeRoute ==
+                                    AppRoutes.saleFormsDashboard) {
+                                  return;
+                                }
+                                Navigator.of(context).pushNamed(
+                                  AppRoutes.saleFormsDashboard,
+                                );
+                              },
+                            ),
+                          if (canSeeProposalsDash)
+                            _buildDrawerItem(
+                              context: context,
+                              currentRoute: activeRoute,
+                              route: AppRoutes.proposalsDashboard,
+                              icon: LucideIcons.chartPie,
+                              activeIcon: LucideIcons.chartPie,
+                              title: 'Dash Fichas Proposta',
+                              accent: accent,
+                              showLeadingTile: true,
+                              onTap: () {
+                                Navigator.pop(context);
+                                if (activeRoute ==
+                                    AppRoutes.proposalsDashboard) {
+                                  return;
+                                }
+                                Navigator.of(context).pushNamed(
+                                  AppRoutes.proposalsDashboard,
+                                );
+                              },
+                            ),
                           if (canSeeSdrDash)
                             _buildDrawerItem(
                               context: context,
@@ -1804,6 +1863,77 @@ class _AppDrawerState extends State<AppDrawer> {
                                 Navigator.of(
                                   context,
                                 ).pushNamed(AppRoutes.assets);
+                              },
+                            ),
+                          // Financeiro (fase 1 do app, 03/10/2026): módulo
+                          // `financial_management` da empresa, SEM bypass de
+                          // papel (paridade com o web). Meu Financeiro não
+                          // exige `financial:access`. O PIN é pedido na tela.
+                          if (canSeeFinance)
+                            _buildDrawerItem(
+                              context: context,
+                              currentRoute: activeRoute,
+                              route: AppRoutes.financeiroMeuDashboard,
+                              icon: LucideIcons.wallet,
+                              activeIcon: LucideIcons.wallet,
+                              title: 'Meu Financeiro',
+                              accent: accent,
+                              showLeadingTile: true,
+                              isActive: activeRoute.startsWith(
+                                AppRoutes.financeiro,
+                              ),
+                              onTap: () {
+                                Navigator.pop(context);
+                                if (activeRoute ==
+                                    AppRoutes.financeiroMeuDashboard) {
+                                  return;
+                                }
+                                Navigator.of(context).pushNamed(
+                                  AppRoutes.financeiroMeuDashboard,
+                                );
+                              },
+                            ),
+                          // Fase 2 (03/10/2026): Solicitações (todos com o
+                          // módulo) e Para aprovar (crachá `financial:access`
+                          // ou master/admin + matriz do `/auth/me`).
+                          if (canSeeFinance)
+                            _buildDrawerItem(
+                              context: context,
+                              currentRoute: activeRoute,
+                              route: FinanceRouteNames.solicitacoes,
+                              icon: LucideIcons.fileText,
+                              activeIcon: LucideIcons.fileText,
+                              title: 'Solicitações',
+                              accent: accent,
+                              showLeadingTile: true,
+                              onTap: () {
+                                Navigator.pop(context);
+                                Navigator.of(
+                                  context,
+                                ).pushNamed(FinanceRouteNames.solicitacoes);
+                              },
+                            ),
+                          if (canSeeFinance &&
+                              canSeeParaAprovar(
+                                crmRole: ModuleAccessService.instance.userRole,
+                                hasFinancialAccess: ModuleAccessService.instance
+                                    .hasPermission('financial:access'),
+                                me: FinanceMeService.instance.cached,
+                              ))
+                            _buildDrawerItem(
+                              context: context,
+                              currentRoute: activeRoute,
+                              route: FinanceRouteNames.aprovacoes,
+                              icon: LucideIcons.stamp,
+                              activeIcon: LucideIcons.stamp,
+                              title: 'Para aprovar',
+                              accent: accent,
+                              showLeadingTile: true,
+                              onTap: () {
+                                Navigator.pop(context);
+                                Navigator.of(
+                                  context,
+                                ).pushNamed(FinanceRouteNames.aprovacoes);
                               },
                             ),
                           // Comissões: oculto do menu (rota /commissions viva).

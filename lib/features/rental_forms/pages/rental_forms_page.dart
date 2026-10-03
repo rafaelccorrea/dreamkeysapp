@@ -240,10 +240,10 @@ class _RentalFormsPageState extends State<RentalFormsPage> {
     return ListenableBuilder(
       listenable: ModuleAccessService.instance,
       builder: (context, _) {
+        // transv-06: a rota web /fichas-locacao exige `rental:view` (o GET
+        // do back é da família RENTAL_*); `rental_form:*` só gateia ações.
         final canView = ModuleAccessService.instance
-                .hasAnyPermission(RentalFormPermissions.menu) ||
-            ModuleAccessService.instance
-                .hasPermission(RentalFormPermissions.view);
+            .hasPermission(RentalFormPermissions.listView);
         if (!canView) {
           return AppScaffold(
             title: 'Fichas de locação',

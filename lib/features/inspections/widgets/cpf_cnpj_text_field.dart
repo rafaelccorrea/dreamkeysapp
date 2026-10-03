@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../shared/utils/masks.dart';
-import '../../../shared/utils/input_formatters.dart';
 
 /// Campo de texto que aplica máscara de CPF ou CNPJ automaticamente
 class CpfCnpjTextField extends StatefulWidget {
@@ -42,6 +41,7 @@ class _CpfCnpjTextFieldState extends State<CpfCnpjTextField> {
   void initState() {
     super.initState();
     _controller = widget.controller ?? TextEditingController();
+    _isCpf = Masks.isCpfDocument(_controller.text);
     _controller.addListener(_onTextChanged);
   }
 
@@ -56,28 +56,11 @@ class _CpfCnpjTextFieldState extends State<CpfCnpjTextField> {
   }
 
   void _onTextChanged() {
-    final text = _controller.text;
-    final digits = text.replaceAll(RegExp(r'[^0-9]'), '');
-    
-    // Se tem mais de 11 dígitos, é CNPJ
-    final wasCpf = _isCpf;
-    _isCpf = digits.length <= 11;
-    
-    // Se mudou o tipo, reaplica a máscara
-    if (wasCpf != _isCpf && digits.isNotEmpty) {
-      final masked = _isCpf ? Masks.cpf(digits) : Masks.cnpj(digits);
-      if (masked != text) {
-        _controller.value = TextEditingValue(
-          text: masked,
-          selection: TextSelection.collapsed(offset: masked.length),
-        );
-      }
-    }
+    final isCpf = Masks.isCpfDocument(_controller.text);
+    if (isCpf != _isCpf && mounted) setState(() => _isCpf = isCpf);
   }
 
-  TextInputFormatter _getFormatter() {
-    return _isCpf ? CpfInputFormatter() : CnpjInputFormatter();
-  }
+  TextInputFormatter _getFormatter() => _CpfCnpjInputFormatter();
 
   String? Function(String?)? _buildValidator() {
     if (widget.validator != null) {
@@ -90,16 +73,16 @@ class _CpfCnpjTextFieldState extends State<CpfCnpjTextField> {
       }
 
       if (value != null && value.trim().isNotEmpty) {
-        final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
-        if (digits.length <= 11) {
+        final clean = Masks.unmaskCnpj(value);
+        if (Masks.isCpfDocument(value)) {
           // Validação básica de CPF (11 dígitos)
-          if (digits.length != 11) {
+          if (clean.length != 11) {
             return 'CPF deve ter 11 dígitos';
           }
         } else {
-          // Validação básica de CNPJ (14 dígitos)
-          if (digits.length != 14) {
-            return 'CNPJ deve ter 14 dígitos';
+          // Validação básica de CNPJ (14 caracteres, aceita alfanumérico)
+          if (clean.length != 14) {
+            return 'CNPJ deve ter 14 caracteres';
           }
         }
       }
@@ -126,36 +109,24 @@ class _CpfCnpjTextFieldState extends State<CpfCnpjTextField> {
         ],
         TextFormField(
           controller: _controller,
-          keyboardType: TextInputType.number,
+          // Teclado com letras: o CNPJ alfanumérico (2026) tem letras nos 12
+          // primeiros caracteres.
+          keyboardType: TextInputType.visiblePassword,
+          textCapitalization: TextCapitalization.characters,
           validator: _buildValidator(),
-          onChanged: (value) {
-            // Aplicar máscara
-            final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
-            final masked = digits.length <= 11 
-                ? Masks.cpf(digits) 
-                : Masks.cnpj(digits);
-            
-            if (masked != value) {
-              _controller.value = TextEditingValue(
-                text: masked,
-                selection: TextSelection.collapsed(offset: masked.length),
-              );
-            }
-            
-            widget.onChanged?.call(masked);
-          },
+          // A máscara já foi aplicada pelo formatter.
+          onChanged: (value) => widget.onChanged?.call(value),
           enabled: widget.enabled,
           focusNode: widget.focusNode,
           readOnly: widget.readOnly,
           inputFormatters: [_getFormatter()],
           style: theme.textTheme.bodyLarge,
           decoration: InputDecoration(
-            hintText: widget.hint ?? (_isCpf ? '000.000.000-00' : '00.000.000/0000-00'),
+            hintText:
+                widget.hint ??
+                (_isCpf ? '000.000.000-00' : 'XX.XXX.XXX/XXXX-00'),
             errorText: widget.errorText,
-            suffixIcon: Icon(
-              _isCpf ? Icons.person : Icons.business,
-              size: 20,
-            ),
+            suffixIcon: Icon(_isCpf ? Icons.person : Icons.business, size: 20),
           ),
         ),
       ],
@@ -163,3 +134,19 @@ class _CpfCnpjTextFieldState extends State<CpfCnpjTextField> {
   }
 }
 
+/// Máscara dinâmica CPF ↔ CNPJ — com letra ou mais de 11 caracteres vira
+/// CNPJ (inclusive o alfanumérico de 2026).
+class _CpfCnpjInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.isEmpty) return newValue;
+    final masked = Masks.cpfOrCnpj(newValue.text);
+    return TextEditingValue(
+      text: masked,
+      selection: TextSelection.collapsed(offset: masked.length),
+    );
+  }
+}

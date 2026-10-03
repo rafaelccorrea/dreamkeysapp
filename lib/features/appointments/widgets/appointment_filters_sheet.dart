@@ -298,7 +298,7 @@ class _AppointmentFiltersSheetState extends State<AppointmentFiltersSheet> {
                               () => _state = _state.copyWith(type: null),
                             ),
                           ),
-                          for (final t in AppointmentType.values)
+                          for (final t in AppointmentType.selectable)
                             _ChipChoice(
                               label: t.label,
                               icon: AppointmentVisuals.iconFor(t),

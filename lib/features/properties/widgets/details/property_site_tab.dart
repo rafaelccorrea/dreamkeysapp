@@ -6,6 +6,7 @@ import '../../../../core/theme/theme_helpers.dart';
 import '../../../../shared/services/property_service.dart';
 import '../../../../shared/utils/error_cause.dart';
 import '../../services/property_detail_extras_service.dart';
+import '../../utils/property_publish_rules.dart';
 import 'property_details_kit.dart';
 
 /// Corpo da aba "Site" da ficha — paridade com o `PropertySiteSection` do web
@@ -101,8 +102,14 @@ class _PropertySiteTabState extends State<PropertySiteTab> {
 
   bool get _locked => (widget.lockedReason ?? '').trim().isNotEmpty;
 
+  /// Por que não dá para PUBLICAR agora (ativo, Disponível e 5 fotos — regra
+  /// do web com `publishableImageCount`). Tirar do site nunca trava.
+  String? get _publishBlock =>
+      _site ? null : sitePublishBlockReason(widget.property);
+
   void _toggleSite() {
     final next = !_site;
+    if (next && _publishBlock != null) return;
     _save(
       site: next,
       // Saiu do site: sai também das vitrines (regra do web).
@@ -197,9 +204,12 @@ class _PropertySiteTabState extends State<PropertySiteTab> {
           description: _site
               ? 'O imóvel aparece na listagem do site público e pode ser '
                   'encontrado na busca.'
-              : 'O imóvel fica só no CRM — ninguém o encontra pelo site.',
+              : (_publishBlock != null
+                  ? 'Ainda não dá para publicar: $_publishBlock.'
+                  : 'O imóvel fica só no CRM — ninguém o encontra pelo site.'),
           tag: _site ? 'no ar' : 'fora do site',
-          enabled: !_saving && lockReason.isEmpty,
+          tagLocked: !_site && _publishBlock != null,
+          enabled: !_saving && lockReason.isEmpty && _publishBlock == null,
           onToggle: _toggleSite,
         ),
         Container(height: 1, color: ThemeHelpers.borderLightColor(context)),

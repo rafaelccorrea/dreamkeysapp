@@ -30,6 +30,71 @@ Future<SaleFormsFiltersOutcome?> showSaleFormsFiltersSheet(
   );
 }
 
+/// Recorte escolhido no modal de exportação.
+class SaleFormsExportChoice {
+  final SaleFormFilters filters;
+  final bool deletedOnly;
+  const SaleFormsExportChoice(this.filters, {this.deletedOnly = false});
+}
+
+/// Web (`SaleFormsPage.tsx` / `SaleFormsFiltersDrawer.tsx`): o filtro abre
+/// com "Data da venda" = hoje (de/até) quando não há data da venda aplicada —
+/// só vira filtro ao tocar em Aplicar. Cada ponta independe da outra.
+({DateTime? from, DateTime? to}) saleFormsFiltroDataVendaInicial(
+  SaleFormFilters f,
+  DateTime agora,
+) {
+  final hoje = DateTime(agora.year, agora.month, agora.day);
+  return (from: f.saleDateFrom ?? hoje, to: f.saleDateTo ?? hoje);
+}
+
+/// Filtros que vão para a exportação (web `ExportSaleFormsRelatorioModal`):
+/// ordem por criação (mais recente primeiro), `userIds` só com
+/// `sale_form:view_all` e "só excluídas" só para quem pode auditar.
+SaleFormFilters saleFormsExportFilters(
+  SaleFormFilters f, {
+  required String search,
+  required bool canViewAll,
+  bool deletedOnly = false,
+}) {
+  final s = search.trim();
+  return f.copyWith(
+    search: s.isEmpty ? null : s,
+    userIds: canViewAll ? f.userIds : const <String>[],
+    userId: canViewAll ? f.userId : null,
+    listDeletedOnly: canViewAll && deletedOnly ? true : null,
+    sortBy: 'createdAt',
+    sortOrder: 'DESC',
+    page: 1,
+  );
+}
+
+/// Modal "Exportar relatório de fichas (XLSX)" — paridade com
+/// `ExportSaleFormsRelatorioModal.tsx`: começa no recorte da lista e deixa
+/// ajustar busca, período de criação, data da venda, status, unidade,
+/// equipes, criadores (só com `view_all`) e "só excluídas" (quem audita).
+Future<SaleFormsExportChoice?> showSaleFormsExportSheet(
+  BuildContext context, {
+  required SaleFormFilters initial,
+  required String search,
+  required bool deletedOnly,
+  required bool canViewAll,
+}) {
+  return showModalBottomSheet<SaleFormsExportChoice>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    barrierColor: Colors.black54,
+    builder: (_) => _SaleFormsFiltersSheet(
+      initial: initial,
+      exportar: true,
+      exportSearch: search,
+      exportDeletedOnly: deletedOnly,
+      canViewAll: canViewAll,
+    ),
+  );
+}
+
 const List<FichasSortOption> _kSortOptions = [
   FichasSortOption(
     value: 'createdAt',
@@ -76,9 +141,21 @@ const List<FichasSortOption> _kSortOptions = [
 enum _Preset { last7, last30, month, year }
 
 class _SaleFormsFiltersSheet extends StatefulWidget {
-  const _SaleFormsFiltersSheet({required this.initial});
+  const _SaleFormsFiltersSheet({
+    required this.initial,
+    this.exportar = false,
+    this.exportSearch = '',
+    this.exportDeletedOnly = false,
+    this.canViewAll = true,
+  });
 
   final SaleFormFilters initial;
+
+  /// Modo "Exportar relatório" (web `ExportSaleFormsRelatorioModal`).
+  final bool exportar;
+  final String exportSearch;
+  final bool exportDeletedOnly;
+  final bool canViewAll;
 
   @override
   State<_SaleFormsFiltersSheet> createState() => _SaleFormsFiltersSheetState();
@@ -96,6 +173,8 @@ class _SaleFormsFiltersSheetState extends State<_SaleFormsFiltersSheet> {
   late String _sortBy;
   late String _sortOrder;
   String? _error;
+  late final TextEditingController _busca;
+  bool _soExcluidas = false;
 
   late final Future<List<FichasPickOption>> _usersFut;
   late final Future<List<FichasPickOption>> _teamsFut;
@@ -108,13 +187,26 @@ class _SaleFormsFiltersSheetState extends State<_SaleFormsFiltersSheet> {
     super.initState();
     final f = widget.initial;
     _statuses = f.effectiveStatuses.toSet();
-    _userIds = f.userIds.toSet();
+    // Exportação: criadores só com `view_all` (web).
+    _userIds = widget.exportar && !widget.canViewAll
+        ? <String>{}
+        : f.userIds.toSet();
     _teamIds = f.teamIds.toSet();
     _saleUnit = f.saleUnit;
     _dateFrom = f.dateFrom;
     _dateTo = f.dateTo;
-    _saleDateFrom = f.saleDateFrom;
-    _saleDateTo = f.saleDateTo;
+    if (widget.exportar) {
+      // O modal de exportação do web parte do recorte da lista, sem o
+      // "hoje" do filtro.
+      _saleDateFrom = f.saleDateFrom;
+      _saleDateTo = f.saleDateTo;
+    } else {
+      final venda = saleFormsFiltroDataVendaInicial(f, DateTime.now());
+      _saleDateFrom = venda.from;
+      _saleDateTo = venda.to;
+    }
+    _busca = TextEditingController(text: widget.exportSearch);
+    _soExcluidas = widget.exportar && widget.canViewAll && widget.exportDeletedOnly;
     _sortBy = f.sortBy;
     _sortOrder = f.sortOrder;
 
@@ -130,6 +222,12 @@ class _SaleFormsFiltersSheetState extends State<_SaleFormsFiltersSheet> {
       if (mounted) setState(() => _teams = l);
     }).catchError((Object _) {});
     _unitsFut.catchError((Object _) => <FichasPickOption>[]);
+  }
+
+  @override
+  void dispose() {
+    _busca.dispose();
+    super.dispose();
   }
 
   SaleFormFilters _build() {
@@ -214,10 +312,41 @@ class _SaleFormsFiltersSheetState extends State<_SaleFormsFiltersSheet> {
       );
       return;
     }
+    if (widget.exportar) {
+      Navigator.of(context).pop(
+        SaleFormsExportChoice(
+          saleFormsExportFilters(
+            _build(),
+            search: _busca.text,
+            canViewAll: widget.canViewAll,
+            deletedOnly: _soExcluidas,
+          ),
+          deletedOnly: widget.canViewAll && _soExcluidas,
+        ),
+      );
+      return;
+    }
     Navigator.of(context).pop(SaleFormsFiltersOutcome(_build()));
   }
 
   void _clear() {
+    if (widget.exportar) {
+      // Exportação: limpa os campos aqui mesmo (o modal continua aberto).
+      setState(() {
+        _busca.clear();
+        _statuses = <SaleFormStatus>{};
+        _userIds = <String>{};
+        _teamIds = <String>{};
+        _saleUnit = null;
+        _dateFrom = null;
+        _dateTo = null;
+        _saleDateFrom = null;
+        _saleDateTo = null;
+        _soExcluidas = false;
+        _error = null;
+      });
+      return;
+    }
     Navigator.of(context).pop(
       SaleFormsFiltersOutcome(
         widget.initial.withoutListFilters(),
@@ -290,17 +419,53 @@ class _SaleFormsFiltersSheetState extends State<_SaleFormsFiltersSheet> {
     String? plural(int n, String one, String many) =>
         n == 0 ? null : '$n ${n == 1 ? one : many}';
 
+    final exportar = widget.exportar;
+    final mostraCorretores = !exportar || widget.canViewAll;
     return FichasSheetShell(
       header: FichasFilterSheetHeader(
-        title: 'Filtros de fichas de venda',
+        title: exportar
+            ? 'Exportar relatório de fichas (XLSX)'
+            : 'Filtros de fichas de venda',
         activeCount: activeCount,
       ),
       body: ListView(
         shrinkWrap: true,
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
         children: [
+          if (exportar) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 14),
+              child: Text(
+                widget.canViewAll
+                    ? 'Com permissão de ver todas as fichas, você pode '
+                        'restringir por criador, equipe (membros) e período. '
+                        'Gestores sem essa permissão exportam apenas o escopo '
+                        'já aplicado pela regra de acesso.'
+                    : 'Sem «ver todas», a planilha segue a mesma regra da '
+                        'lista (suas fichas, vínculos e hierarquia). Você '
+                        'ainda pode filtrar por período, status, busca e '
+                        'unidade.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      height: 1.4,
+                    ),
+              ),
+            ),
+            FichasFilterSection(
+              accent: cStatus,
+              label: 'Buscar ficha (comprador, nº, imóvel…)',
+              child: TextField(
+                controller: _busca,
+                textInputAction: TextInputAction.done,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  prefixIcon: Icon(Icons.search_rounded, size: 20),
+                  hintText: 'Nº, comprador, vendedor ou imóvel',
+                ),
+              ),
+            ),
+          ],
           FichasFilterSection(
-            first: true,
+            first: !exportar,
             accent: cStatus,
             label: 'Status',
             hint: 'Marque um ou mais.',
@@ -322,6 +487,7 @@ class _SaleFormsFiltersSheetState extends State<_SaleFormsFiltersSheet> {
               ],
             ),
           ),
+          if (mostraCorretores)
           FichasFilterSection(
             accent: cUsers,
             label: 'Corretores',
@@ -442,6 +608,21 @@ class _SaleFormsFiltersSheetState extends State<_SaleFormsFiltersSheet> {
               }),
             ),
           ),
+          // Exportação: sempre por criação, mais recente primeiro (web).
+          if (exportar && widget.canViewAll)
+            FichasFilterSection(
+              accent: cSort,
+              label: 'Excluídas',
+              child: SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: _soExcluidas,
+                onChanged: (v) => setState(() => _soExcluidas = v),
+                title: const Text(
+                  'Somente fichas excluídas (com motivo registrado)',
+                ),
+              ),
+            ),
+          if (!exportar)
           FichasFilterSection(
             accent: cSort,
             label: 'Ordenação',
@@ -466,6 +647,8 @@ class _SaleFormsFiltersSheetState extends State<_SaleFormsFiltersSheet> {
         error: _error,
         onApply: _apply,
         onClear: _clear,
+        applyLabel: exportar ? 'Exportar' : 'Aplicar',
+        clearLabel: exportar ? 'Limpar' : 'Limpar filtros',
       ),
     );
   }

@@ -94,8 +94,10 @@ class MaskedTextField extends StatelessWidget {
     if (keyboardType != null) return keyboardType!;
     
     switch (maskType) {
-      case MaskType.cpf:
       case MaskType.cnpj:
+        // CNPJ alfanumérico: precisa do teclado com letras.
+        return TextInputType.visiblePassword;
+      case MaskType.cpf:
       case MaskType.phone:
       case MaskType.cep:
       case MaskType.numeric:

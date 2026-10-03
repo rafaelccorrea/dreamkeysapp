@@ -41,6 +41,14 @@ class SubscriptionAccessInfo {
   final Subscription? subscription;
   final int? daysUntilExpiry;
 
+  /// Regime de cobrança do titular (`managed` | `self_serve` | null).
+  /// Escopa a UI de bloqueio como no web: conta gerenciada só é barrada em
+  /// estado terminal (ver `decideSubscriptionAccess`).
+  final String? billingRegime;
+
+  /// Back marca `true` quando faltam poucos dias (<= 15) para vencer.
+  final bool isExpiringSoon;
+
   /// `false` quando o dado NÃO veio do servidor nesta chamada (falha de
   /// transporte). Nesse caso o acesso é otimista e deve ser reavaliado — nunca
   /// use para bloquear a conta.
@@ -55,6 +63,8 @@ class SubscriptionAccessInfo {
     required this.isSuspended,
     this.subscription,
     this.daysUntilExpiry,
+    this.billingRegime,
+    this.isExpiringSoon = false,
     this.isAuthoritative = true,
   });
 
@@ -82,6 +92,8 @@ class SubscriptionAccessInfo {
       isSuspended: isSuspended,
       subscription: subscription,
       daysUntilExpiry: daysUntilExpiry,
+      billingRegime: billingRegime,
+      isExpiringSoon: isExpiringSoon,
       isAuthoritative: false,
     );
   }
@@ -97,7 +109,9 @@ class SubscriptionAccessInfo {
       subscription: json['subscription'] != null
           ? Subscription.fromJson(json['subscription'] as Map<String, dynamic>)
           : null,
-      daysUntilExpiry: json['daysUntilExpiry'] as int?,
+      daysUntilExpiry: (json['daysUntilExpiry'] as num?)?.toInt(),
+      billingRegime: json['billingRegime']?.toString(),
+      isExpiringSoon: json['isExpiringSoon'] as bool? ?? false,
     );
   }
 }

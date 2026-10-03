@@ -23,6 +23,7 @@ import '../../../core/notifications/subtask_reminder_service.dart';
 import '../../../core/navigation/deep_link_service.dart';
 import '../../../core/push/app_push_service.dart';
 import '../../sale_forms/widgets/sale_form_signature_lock_sheet.dart';
+import '../../finance/home/meu_dinheiro_card.dart';
 
 // Formatters globais
 final _numberFormatter = NumberFormat.decimalPattern('pt_BR');
@@ -82,16 +83,15 @@ class _DashboardPageState extends State<DashboardPage> {
       DeepLinkService.instance.notifyHomeReady();
       AppPushService.instance.notifyHomeReady();
       // Trava de assinatura parada (paridade com o SignatureLockGate do web):
-      // UMA consulta por abertura do app — cada consulta conta um aviso no back.
-      if (!_travaDeAssinaturaConferida && mounted) {
-        _travaDeAssinaturaConferida = true;
-        unawaited(showSignatureLockIfBlocked(context));
+      // reavaliada ao montar a Home, ao voltar o app para o primeiro plano e
+      // ao sair da ficha aberta pela trava — com intervalo mínimo entre
+      // consultas, porque cada uma conta um aviso no back.
+      if (mounted) {
+        SignatureLockWatcher.instance.start();
+        unawaited(SignatureLockWatcher.instance.check(context: context));
       }
     });
   }
-
-  /// Já consultou a trava de assinatura nesta execução do app.
-  static bool _travaDeAssinaturaConferida = false;
 
   /// Decide qual Home montar (29/09/2026, dash-01).
   ///
@@ -231,6 +231,8 @@ class _DashboardPageState extends State<DashboardPage> {
                       const SizedBox(height: 8),
                       const BrokerDashboardHub(),
                       _buildStatsCards(context, theme),
+                      // Financeiro (fin-13): some sozinho sem o módulo/dado.
+                      const MeuDinheiroCard(),
                       if (_dashboardData != null) ...[
                         SizedBox(height: _kSectionGap),
                         // OCULTO a pedido: "Performance mensal" (meta/projecao/

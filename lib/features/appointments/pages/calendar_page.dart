@@ -121,7 +121,24 @@ class _CalendarPageState extends State<CalendarPage>
     return _eventsByDay[AppointmentVisuals.dayKey(day)] ?? const [];
   }
 
+  /// Paridade com o web (`CalendarPage.tsx`: `hasPermission('calendar:create')`)
+  /// e com o back (`POST /appointments` exige `calendar:create`): sem a
+  /// permissão o "criar" some e nenhum caminho abre o formulário que daria 403.
+  bool get _podeCriar =>
+      ModuleAccessService.instance.hasPermission('calendar:create');
+
   Future<void> _openCreate({DateTime? date}) async {
+    if (!_podeCriar) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Você não tem permissão para criar agendamentos. '
+            'Fale com o seu gestor.',
+          ),
+        ),
+      );
+      return;
+    }
     final base = date ?? _selectedDay;
     final now = DateTime.now();
 
@@ -1742,6 +1759,7 @@ class _CalendarPageState extends State<CalendarPage>
                 ),
                 const SizedBox(width: 14),
               ],
+              if (_podeCriar)
               InkWell(
                 borderRadius: BorderRadius.circular(8),
                 onTap: () => _openCreate(date: _selectedDay),
@@ -1859,6 +1877,7 @@ class _CalendarPageState extends State<CalendarPage>
             ),
           ),
           const SizedBox(height: 12),
+          if (_podeCriar)
           InkWell(
             borderRadius: BorderRadius.circular(8),
             onTap: () => _openCreate(date: _selectedDay),
@@ -1941,6 +1960,7 @@ class _CalendarPageState extends State<CalendarPage>
               ),
             ),
             const SizedBox(height: 12),
+            if (hasFilters || _podeCriar)
             InkWell(
               borderRadius: BorderRadius.circular(8),
               onTap: hasFilters

@@ -7,6 +7,7 @@ import '../../../../shared/services/property_service.dart';
 import '../../../../shared/utils/error_cause.dart';
 import '../../../../shared/utils/property_finalidade.dart';
 import '../../utils/property_edit_permissions.dart';
+import '../../utils/property_publish_rules.dart';
 import '../../utils/property_status_visual.dart';
 import 'property_details_kit.dart';
 
@@ -280,8 +281,17 @@ class _StatusChangeSheetState extends State<_StatusChangeSheet> {
       .trim()
       .toLowerCase()
       .replaceAll('-', '_');
+  /// Aprovação financeira pendente: o web não deixa marcar vendido/alugado
+  /// (`!hasPendingFinancialApproval` em `canMarkSold`/`canMarkRented`).
+  bool get _financialLock =>
+      widget.property.hasPendingFinancialApproval == true;
+
   late final List<PropertyStatus> _options =
-      _kTransitions[_current] ?? const <PropertyStatus>[];
+      (_kTransitions[_current] ?? const <PropertyStatus>[])
+          .where((s) =>
+              !_financialLock ||
+              (s != PropertyStatus.sold && s != PropertyStatus.rented))
+          .toList();
   late PropertyStatus? _selected = _options.isEmpty ? null : _options.first;
 
   /// Escolha do "Alugado" num imóvel `ambos`: segue à venda (padrão do web)
@@ -440,8 +450,18 @@ class _StatusChangeSheetState extends State<_StatusChangeSheet> {
           text: 'Não há mudança direta a partir de "${current.label}". Use '
               'a edição da ficha ou as filas de aprovação quando for o caso.',
         ),
+      if (!_locked && _financialLock) ...[
+        const SizedBox(height: 10),
+        _financialLockNote(context),
+      ],
     ];
   }
+
+  Widget _financialLockNote(BuildContext context) => PdkNote(
+        icon: LucideIcons.landmark,
+        tone: PdkTone.amber(context),
+        text: financialApprovalLockReason(widget.property) ?? '',
+      );
 
   List<Widget> _openBody(BuildContext context, bool isDark) {
     final current = PropertyStatusVisual.ofRaw(
@@ -472,6 +492,10 @@ class _StatusChangeSheetState extends State<_StatusChangeSheet> {
 
     return [
       _TransitionLine(from: current, to: target),
+      if (_financialLock) ...[
+        const SizedBox(height: 14),
+        _financialLockNote(context),
+      ],
       const SizedBox(height: 18),
       const PdkBlockLabel(
         'Novo status',

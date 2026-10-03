@@ -722,6 +722,27 @@ class Property {
   /// A galeria tem vídeo (`hasVideo`).
   final bool? hasVideo;
 
+  /// Fotos que contam para publicar no site (`publishableImageCount`): sem
+  /// vídeo, sem foto oculta do site e sem registro sem URL. Na listagem
+  /// `images` vem recortado — este é o número certo para a regra das 5 fotos.
+  final int? publishableImageCount;
+
+  /// Há aprovação financeira pendente (`hasPendingFinancialApproval`) — o web
+  /// esconde "Marcar como vendido/alugado" enquanto ela não sai.
+  final bool? hasPendingFinancialApproval;
+
+  /// Só na resposta do `PATCH /properties/:id`: parte da edição virou
+  /// solicitação de alteração (campos protegidos) e ainda NÃO foi aplicada.
+  final PropertyPendingChangeRequest? pendingChangeRequest;
+
+  /// Só na resposta do `PATCH`: imóvel recusado editado voltou para a fila
+  /// (`resubmittedForApproval`). Nunca vem junto com [pendingChangeRequest].
+  final PropertyResubmission? resubmittedForApproval;
+
+  /// Último evento do histórico (`lastActivity`, só na listagem com
+  /// `includeLastActivity=true`).
+  final PropertyLastActivity? lastActivity;
+
   Property({
     required this.id,
     this.code,
@@ -821,6 +842,11 @@ class Property {
     this.linkedSaleForm,
     this.additionalInfo,
     this.hasVideo,
+    this.publishableImageCount,
+    this.hasPendingFinancialApproval,
+    this.pendingChangeRequest,
+    this.resubmittedForApproval,
+    this.lastActivity,
   })  : typeRaw = (typeRaw == null || typeRaw.trim().isEmpty)
             ? type.value
             : typeRaw.trim().toLowerCase(),
@@ -1028,7 +1054,10 @@ class Property {
           : null,
       clientCount: parseInt(json['clientCount'] ?? json['client_count']),
       owner: json['owner'] != null
-          ? PropertyOwner.fromJson(json['owner'] as Map<String, dynamic>)
+          ? PropertyOwner.fromJson(
+              json['owner'] as Map<String, dynamic>,
+              root: json,
+            )
           : null,
       acceptsNegotiation: json['acceptsNegotiation'] as bool? ?? json['accepts_negotiation'] as bool?,
       minSalePrice: parseDouble(json['minSalePrice'] ?? json['min_sale_price']),
@@ -1094,6 +1123,72 @@ class Property {
       ),
       additionalInfo: PropertyAdditionalInfo.fromJson(json),
       hasVideo: parseBool(json['hasVideo'] ?? json['has_video']),
+      publishableImageCount: parseInt(
+        json['publishableImageCount'] ?? json['publishable_image_count'],
+      ),
+      hasPendingFinancialApproval: parseBool(
+        json['hasPendingFinancialApproval'] ??
+            json['has_pending_financial_approval'],
+      ),
+      pendingChangeRequest:
+          PropertyPendingChangeRequest.tryParse(json['pendingChangeRequest']),
+      resubmittedForApproval:
+          PropertyResubmission.tryParse(json['resubmittedForApproval']),
+      lastActivity: PropertyLastActivity.tryParse(json['lastActivity']),
+    );
+  }
+}
+
+/// `pendingChangeRequest` do `PATCH /properties/:id` (`property-response.dto`):
+/// campos protegidos que viraram solicitação de alteração.
+class PropertyPendingChangeRequest {
+  final String id;
+  final List<String> fields;
+  final List<String> fieldLabels;
+
+  const PropertyPendingChangeRequest({
+    required this.id,
+    required this.fields,
+    required this.fieldLabels,
+  });
+
+  static PropertyPendingChangeRequest? tryParse(dynamic raw) {
+    if (raw is! Map) return null;
+    List<String> strings(dynamic v) => v is List
+        ? v
+            .map((e) => e?.toString().trim() ?? '')
+            .where((e) => e.isNotEmpty)
+            .toList()
+        : const <String>[];
+    final fields = strings(raw['fields']);
+    final labels = strings(raw['fieldLabels']);
+    if (fields.isEmpty && labels.isEmpty) return null;
+    return PropertyPendingChangeRequest(
+      id: raw['id']?.toString() ?? '',
+      fields: fields,
+      fieldLabels: labels,
+    );
+  }
+}
+
+/// `resubmittedForApproval` do `PATCH`: a recusa foi resolvida e o imóvel
+/// voltou para a fila ([stage] = `availability` | `publication`).
+class PropertyResubmission {
+  final String stage;
+  final String? reason;
+
+  const PropertyResubmission({required this.stage, this.reason});
+
+  bool get isAvailability => stage == 'availability';
+
+  static PropertyResubmission? tryParse(dynamic raw) {
+    if (raw is! Map) return null;
+    final stage = raw['stage']?.toString().trim() ?? '';
+    if (stage.isEmpty) return null;
+    final reason = raw['reason']?.toString().trim() ?? '';
+    return PropertyResubmission(
+      stage: stage,
+      reason: reason.isEmpty ? null : reason,
     );
   }
 }
@@ -1134,21 +1229,28 @@ class PropertyCaptor {
   final String? phone;
   final String? avatar;
 
+  /// Papel neste imóvel (`'venda'` | `'locacao'`); o back devolve uma entrada
+  /// por (usuário, papel). `null` em linha antiga, sem papel gravado.
+  final String? role;
+
   PropertyCaptor({
     required this.id,
     this.name,
     this.email,
     this.phone,
     this.avatar,
+    this.role,
   });
 
   factory PropertyCaptor.fromJson(Map<String, dynamic> json) {
+    final role = json['role']?.toString().trim().toLowerCase();
     return PropertyCaptor(
-      id: json['id']?.toString() ?? '',
+      id: json['id']?.toString() ?? json['userId']?.toString() ?? '',
       name: json['name']?.toString(),
       email: json['email']?.toString(),
       phone: json['phone']?.toString(),
       avatar: AvatarUrlResolver.resolve(json['avatar']?.toString()),
+      role: role == 'venda' || role == 'locacao' ? role : null,
     );
   }
 }
@@ -1238,6 +1340,7 @@ class PropertyImage {
     String? thumbnailUrl,
     String? category,
     bool? isMain,
+    bool? showOnPublicSite,
   }) {
     return PropertyImage(
       id: id,
@@ -1248,7 +1351,7 @@ class PropertyImage {
       createdAt: createdAt,
       mediaType: mediaType,
       durationSeconds: durationSeconds,
-      showOnPublicSite: showOnPublicSite,
+      showOnPublicSite: showOnPublicSite ?? this.showOnPublicSite,
     );
   }
 
@@ -1336,21 +1439,51 @@ class PropertyOwner {
   final String? document;
   final String? address;
 
+  /// Endereço estruturado (mesmos nomes do web: `owner.zipCode`… no
+  /// detalhe; `ownerZipCode`… no payload). Tolerante: lê também da raiz do
+  /// imóvel (`ownerZipCode`) quando o bloco `owner` não traz.
+  final String? zipCode;
+  final String? street;
+  final String? number;
+  final String? complement;
+  final String? neighborhood;
+  final String? city;
+  final String? state;
+
   PropertyOwner({
     this.name,
     this.email,
     this.phone,
     this.document,
     this.address,
+    this.zipCode,
+    this.street,
+    this.number,
+    this.complement,
+    this.neighborhood,
+    this.city,
+    this.state,
   });
 
-  factory PropertyOwner.fromJson(Map<String, dynamic> json) {
+  factory PropertyOwner.fromJson(
+    Map<String, dynamic> json, {
+    Map<String, dynamic>? root,
+  }) {
+    String? part(String key, String rootKey) =>
+        _optText(json[key]) ?? _optText(root?[rootKey]);
     return PropertyOwner(
       name: json['name']?.toString(),
       email: json['email']?.toString(),
       phone: json['phone']?.toString(),
       document: json['document']?.toString(),
       address: json['address']?.toString(),
+      zipCode: part('zipCode', 'ownerZipCode'),
+      street: part('street', 'ownerStreet'),
+      number: part('number', 'ownerNumber'),
+      complement: part('complement', 'ownerComplement'),
+      neighborhood: part('neighborhood', 'ownerNeighborhood'),
+      city: part('city', 'ownerCity'),
+      state: part('state', 'ownerState'),
     );
   }
 }
@@ -1482,6 +1615,9 @@ class PropertyAdditionalInfo {
   final String? lastUpdateEntryAt;
   final String? soldAt;
   final String? rentedAt;
+
+  /// Salas do imóvel comercial (`rooms`; o wizard mostra no lugar de quartos).
+  final num? rooms;
   final bool? isHighStandard;
   final bool? hasPlaque;
   final bool? hasExclusivity;
@@ -1515,6 +1651,7 @@ class PropertyAdditionalInfo {
     this.lastUpdateEntryAt,
     this.soldAt,
     this.rentedAt,
+    this.rooms,
     this.isHighStandard,
     this.hasPlaque,
     this.hasExclusivity,
@@ -1553,6 +1690,7 @@ class PropertyAdditionalInfo {
           _optText(pick('lastUpdateEntryAt', 'last_update_entry_at')),
       soldAt: _optText(pick('soldAt', 'sold_at')),
       rentedAt: _optText(pick('rentedAt', 'rented_at')),
+      rooms: _optNum(json['rooms']),
       isHighStandard: _optBool(pick('isHighStandard', 'is_high_standard')),
       hasPlaque: _optBool(pick('hasPlaque', 'has_plaque')),
       hasExclusivity: _optBool(pick('hasExclusivity', 'has_exclusivity')),
@@ -1690,14 +1828,295 @@ class PropertyLocationSuggestion {
 /// O backend aceita este parâmetro para filtrar imóveis por uma combinação
 /// pré-definida de status/flags (ex.: pendentes inclui `pending_approval` e
 /// `pending_owner_authorization`).
+///
+/// Os sete primeiros particionam a carteira por situação (a soma fecha com
+/// "Todos"); `inactive` é transversal — cadastro desativado em qualquer
+/// situação (`PORTFOLIO_SCOPES` do back, `properties.service.ts`).
 enum PortfolioScope {
   available('available'),
   pending('pending'),
   rejected('rejected'),
-  sold('sold');
+  sold('sold'),
+  rented('rented'),
+  negotiation('negotiation'),
+  others('others'),
+  inactive('inactive');
 
   final String value;
   const PortfolioScope(this.value);
+
+  static PortfolioScope? fromValue(String? raw) {
+    final v = raw?.trim().toLowerCase() ?? '';
+    for (final s in PortfolioScope.values) {
+      if (s.value == v) return s;
+    }
+    return null;
+  }
+}
+
+/// Último evento do histórico do imóvel — `lastActivity` da listagem
+/// (`PropertyLastActivity` do web: event, createdAt, description, userName).
+class PropertyLastActivity {
+  final String event;
+  final DateTime? createdAt;
+  final String? description;
+  final String? userId;
+  final String? userName;
+
+  const PropertyLastActivity({
+    required this.event,
+    this.createdAt,
+    this.description,
+    this.userId,
+    this.userName,
+  });
+
+  /// `null` quando não veio (ou veio sem evento).
+  static PropertyLastActivity? tryParse(dynamic raw) {
+    if (raw is! Map) return null;
+    String? opt(dynamic v) {
+      final s = v?.toString().trim() ?? '';
+      return s.isEmpty ? null : s;
+    }
+
+    final event = opt(raw['event']);
+    if (event == null) return null;
+    final created = opt(raw['createdAt']);
+    return PropertyLastActivity(
+      event: event,
+      createdAt: created == null ? null : DateTime.tryParse(created)?.toLocal(),
+      description: opt(raw['description']),
+      userId: opt(raw['userId']),
+      userName: opt(raw['userName']),
+    );
+  }
+}
+
+/// Contagem por aba da carteira (`GET /properties/portfolio-counts`), sob os
+/// MESMOS filtros da listagem. [total] é a aba "Todos".
+class PropertyPortfolioCounts {
+  final int total;
+  final Map<PortfolioScope, int> byScope;
+
+  const PropertyPortfolioCounts({required this.total, required this.byScope});
+
+  int? of(PortfolioScope scope) => byScope[scope];
+
+  factory PropertyPortfolioCounts.fromJson(Map<String, dynamic> json) {
+    int asInt(dynamic v) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      return int.tryParse(v?.toString() ?? '') ?? 0;
+    }
+
+    final body = json['data'] is Map && json['total'] == null
+        ? Map<String, dynamic>.from(json['data'] as Map)
+        : json;
+    return PropertyPortfolioCounts(
+      total: asInt(body['total']),
+      byScope: {
+        for (final s in PortfolioScope.values)
+          if (body.containsKey(s.value)) s: asInt(body[s.value]),
+      },
+    );
+  }
+}
+
+/// Planilha devolvida por `POST /properties/export`.
+class PropertyExportFile {
+  final Uint8List bytes;
+  final String fileName;
+  final String? mimeType;
+
+  const PropertyExportFile({
+    required this.bytes,
+    required this.fileName,
+    this.mimeType,
+  });
+}
+
+/// Nome do arquivo no `Content-Disposition` (`filename="x.xlsx"` ou
+/// `filename*=UTF-8''x.xlsx`). `null` quando o cabeçalho não traz.
+String? propertyExportFileName(String? contentDisposition) {
+  final cd = contentDisposition ?? '';
+  if (cd.isEmpty) return null;
+  final star = RegExp(r"filename\*\s*=\s*(?:UTF-8'')?([^;]+)", caseSensitive: false)
+      .firstMatch(cd);
+  if (star != null) {
+    final v = Uri.decodeComponent(star.group(1)!.trim().replaceAll('"', ''));
+    if (v.isNotEmpty) return v;
+  }
+  final plain =
+      RegExp(r'filename\s*=\s*"?([^";]+)"?', caseSensitive: false).firstMatch(cd);
+  final v = plain?.group(1)?.trim() ?? '';
+  return v.isEmpty ? null : v;
+}
+
+/// Prévia da exportação (`dryRun`): quantos imóveis vão no arquivo, o escopo
+/// aplicado pelo papel e o teto de linhas do servidor.
+class PropertyExportPreview {
+  final int total;
+  final String? scopeLabel;
+  final int? limit;
+
+  const PropertyExportPreview({required this.total, this.scopeLabel, this.limit});
+
+  bool get exceedsLimit => limit != null && limit! > 0 && total > limit!;
+
+  factory PropertyExportPreview.fromJson(Map<String, dynamic> json) {
+    int? asInt(dynamic v) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      return int.tryParse(v?.toString() ?? '');
+    }
+
+    final label = json['scopeLabel']?.toString().trim() ?? '';
+    return PropertyExportPreview(
+      total: asInt(json['total']) ?? 0,
+      scopeLabel: label.isEmpty ? null : label,
+      limit: asInt(json['limit']),
+    );
+  }
+}
+
+/// Item de `GET /properties/recent-deals` — recorte mínimo de propósito
+/// (código, foto, tipo, finalidade, bairro/cidade, situação e data).
+class RecentDeal {
+  final String id;
+  final String? code;
+  final String? type;
+  final String? finalidade;
+  final String? status;
+  final String? city;
+  final String? neighborhood;
+  final int? bedrooms;
+  final double? totalArea;
+  final DateTime? soldAt;
+  final DateTime? rentedAt;
+  final DateTime? concludedAt;
+  final String? imageUrl;
+
+  const RecentDeal({
+    required this.id,
+    this.code,
+    this.type,
+    this.finalidade,
+    this.status,
+    this.city,
+    this.neighborhood,
+    this.bedrooms,
+    this.totalArea,
+    this.soldAt,
+    this.rentedAt,
+    this.concludedAt,
+    this.imageUrl,
+  });
+
+  /// Vendido (tem `soldAt` ou status `sold`); senão, locado.
+  bool get isSold => soldAt != null || status == 'sold';
+
+  factory RecentDeal.fromJson(Map<String, dynamic> json) {
+    String? text(dynamic v) {
+      final s = v?.toString().trim() ?? '';
+      return s.isEmpty ? null : s;
+    }
+
+    DateTime? date(dynamic v) {
+      final s = text(v);
+      return s == null ? null : DateTime.tryParse(s)?.toLocal();
+    }
+
+    final img = json['mainImage'];
+    String? imageUrl;
+    if (img is Map) {
+      imageUrl = text(img['thumbnailUrl']) ?? text(img['url']);
+    }
+    final area = json['totalArea'];
+    return RecentDeal(
+      id: _readAnyId(json),
+      code: text(json['code']),
+      type: text(json['type']),
+      finalidade: text(json['finalidade']),
+      status: text(json['status']),
+      city: text(json['city']),
+      neighborhood: text(json['neighborhood']),
+      bedrooms: json['bedrooms'] is num
+          ? (json['bedrooms'] as num).toInt()
+          : int.tryParse(json['bedrooms']?.toString() ?? ''),
+      totalArea: area is num ? area.toDouble() : double.tryParse('${area ?? ''}'),
+      soldAt: date(json['soldAt']),
+      rentedAt: date(json['rentedAt']),
+      concludedAt: date(json['concludedAt']),
+      imageUrl: imageUrl == null ? null : _normalizeMediaUrl(imageUrl),
+    );
+  }
+}
+
+/// Página de `GET /properties/recent-deals` (`{ data, total, page, ... }`).
+class RecentDealsResult {
+  final List<RecentDeal> items;
+  final int total;
+  final int page;
+  final int totalPages;
+
+  const RecentDealsResult({
+    required this.items,
+    required this.total,
+    required this.page,
+    required this.totalPages,
+  });
+
+  factory RecentDealsResult.fromJson(Map<String, dynamic> json) {
+    int asInt(dynamic v, int fallback) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      return int.tryParse(v?.toString() ?? '') ?? fallback;
+    }
+
+    final raw = json['data'] ?? json['properties'] ?? json['items'];
+    final items = raw is List
+        ? raw
+            .whereType<Map>()
+            .map((e) => RecentDeal.fromJson(Map<String, dynamic>.from(e)))
+            .where((d) => d.id.isNotEmpty)
+            .toList()
+        : <RecentDeal>[];
+    final total = asInt(json['total'], items.length);
+    final limit = asInt(json['limit'], 24);
+    return RecentDealsResult(
+      items: items,
+      total: total,
+      page: asInt(json['page'], 1),
+      totalPages: asInt(
+        json['totalPages'],
+        limit > 0 ? ((total + limit - 1) ~/ limit) : 1,
+      ),
+    );
+  }
+}
+
+/// Item do catálogo da empresa (`GET /property-catalog`).
+class PropertyCatalogItem {
+  final String id;
+  final String kind; // 'room' | 'infrastructure'
+  final String name;
+
+  const PropertyCatalogItem({
+    required this.id,
+    required this.kind,
+    required this.name,
+  });
+
+  bool get isRoom => kind == 'room';
+  bool get isInfrastructure => kind == 'infrastructure';
+
+  factory PropertyCatalogItem.fromJson(Map<String, dynamic> json) {
+    return PropertyCatalogItem(
+      id: json['id']?.toString() ?? '',
+      kind: json['kind']?.toString() ?? '',
+      name: json['name']?.toString().trim() ?? '',
+    );
+  }
 }
 
 class PropertyFilters {
@@ -1727,6 +2146,46 @@ class PropertyFilters {
   final PortfolioScope? portfolioScope;
   final bool? includeInactive;
 
+  /// Ordenação (`sortBy`/`sortOrder` do `GET /properties`; colunas aceitas em
+  /// `PROPERTY_SORTABLE_COLUMNS` + `lastActivity`). `null` = padrão do back
+  /// (mais novos primeiro).
+  final String? sortBy;
+  final String? sortOrder; // 'ASC' | 'DESC'
+
+  /// Finalidade (`venda` | `locacao` | `ambos`) e código exato — lidos por
+  /// `buildPropertyListFilters` no back.
+  final String? finalidade;
+  final String? code;
+
+  /// Demais filtros da listagem do web (`PropertyFiltersDrawer.tsx` +
+  /// `buildPropertyListFilters` do back). Nomes de query em
+  /// [PropertyListQueryKeys].
+  final String? zipCode;
+  final String? sector;
+  final String? ownerName;
+  final String? ownerPhone;
+  final String? number;
+  final String? propertyUnity;
+  final String? tower;
+  final String? block;
+  final String? lot;
+
+  /// Período de cadastro, `AAAA-MM-DD` (inclusivo).
+  final String? createdFrom;
+  final String? createdTo;
+  final String? teamId;
+  final String? captorsTeamId;
+  final bool? responsibleWithoutCaptor;
+  final double? minSalePrice;
+  final double? maxSalePrice;
+  final double? minRentPrice;
+  final double? maxRentPrice;
+  final int? suites;
+  final int? rooms;
+
+  /// Só excluídos (soft delete) — auditoria; ignora aba e inativos.
+  final bool? listDeletedOnly;
+
   PropertyFilters({
     this.type,
     this.status,
@@ -1751,7 +2210,100 @@ class PropertyFilters {
     this.onlyMyData,
     this.portfolioScope,
     this.includeInactive,
+    this.sortBy,
+    this.sortOrder,
+    this.finalidade,
+    this.code,
+    this.zipCode,
+    this.sector,
+    this.ownerName,
+    this.ownerPhone,
+    this.number,
+    this.propertyUnity,
+    this.tower,
+    this.block,
+    this.lot,
+    this.createdFrom,
+    this.createdTo,
+    this.teamId,
+    this.captorsTeamId,
+    this.responsibleWithoutCaptor,
+    this.minSalePrice,
+    this.maxSalePrice,
+    this.minRentPrice,
+    this.maxRentPrice,
+    this.suites,
+    this.rooms,
+    this.listDeletedOnly,
   });
+
+  /// Filtros do drawer além dos básicos (para "Filtros aplicados" e para não
+  /// tratar a consulta como vazia). Não conta [listDeletedOnly], que tem
+  /// atalho próprio na tela.
+  bool get hasExtendedListFilters {
+    bool txt(String? v) => (v ?? '').trim().isNotEmpty;
+    return txt(zipCode) ||
+        txt(sector) ||
+        txt(ownerName) ||
+        txt(ownerPhone) ||
+        txt(number) ||
+        txt(propertyUnity) ||
+        txt(tower) ||
+        txt(block) ||
+        txt(lot) ||
+        txt(createdFrom) ||
+        txt(createdTo) ||
+        txt(teamId) ||
+        txt(captorsTeamId) ||
+        txt(responsibleUserId) ||
+        responsibleWithoutCaptor == true ||
+        minSalePrice != null ||
+        maxSalePrice != null ||
+        minRentPrice != null ||
+        maxRentPrice != null ||
+        suites != null ||
+        rooms != null;
+  }
+
+  /// Chave → valor dos filtros estendidos (texto aparado; vazios fora).
+  Map<String, dynamic> _extendedParams() {
+    final p = <String, dynamic>{};
+    void put(String key, Object? value) {
+      if (value == null) return;
+      if (value is String) {
+        final t = value.trim();
+        if (t.isEmpty) return;
+        p[key] = t;
+        return;
+      }
+      p[key] = value;
+    }
+
+    const k = PropertyListQueryKeys();
+    put(k.zipCode, zipCode);
+    put(k.sector, sector);
+    put(k.ownerName, ownerName);
+    put(k.ownerPhone, ownerPhone);
+    put(k.number, number);
+    put(k.propertyUnity, propertyUnity);
+    put(k.tower, tower);
+    put(k.block, block);
+    put(k.lot, lot);
+    put(k.createdFrom, createdFrom);
+    put(k.createdTo, createdTo);
+    put(k.teamId, teamId);
+    put(k.captorsTeamId, captorsTeamId);
+    if (responsibleWithoutCaptor == true) {
+      p[k.responsibleWithoutCaptor] = true;
+    }
+    put(k.minSalePrice, minSalePrice);
+    put(k.maxSalePrice, maxSalePrice);
+    put(k.minRentPrice, minRentPrice);
+    put(k.maxRentPrice, maxRentPrice);
+    put(k.suites, suites);
+    put(k.rooms, rooms);
+    return p;
+  }
 
   Map<String, dynamic> toQueryParams() {
     final params = <String, dynamic>{};
@@ -1780,7 +2332,62 @@ class PropertyFilters {
       params['portfolioScope'] = portfolioScope!.value;
     }
     if (includeInactive != null) params['includeInactive'] = includeInactive;
+    if ((sortBy ?? '').isNotEmpty) params['sortBy'] = sortBy;
+    if ((sortOrder ?? '').isNotEmpty) params['sortOrder'] = sortOrder;
+    if ((finalidade ?? '').isNotEmpty) params['finalidade'] = finalidade;
+    if ((code ?? '').trim().isNotEmpty) params['code'] = code!.trim();
+    params.addAll(_extendedParams());
+    // Paridade `buildCombinedPropertyFilters`: "só excluídos" ignora a aba
+    // da carteira e o `includeInactive`.
+    if (listDeletedOnly == true) {
+      params
+        ..remove('portfolioScope')
+        ..remove('includeInactive');
+      params[const PropertyListQueryKeys().listDeletedOnly] = true;
+    }
     return params;
+  }
+
+  /// Corpo de `POST /properties/export` (`{ filters }`) — o back lê só as
+  /// chaves da whitelist `pickExportFilters` (mesmo vocabulário da listagem).
+  /// `condominiumId` e `isActive` não estão nela e ficam de fora; o escopo
+  /// por papel é decidido no servidor.
+  Map<String, dynamic> toExportFilters() {
+    final f = <String, dynamic>{};
+    void put(String key, Object? value) {
+      if (value == null) return;
+      if (value is String && value.trim().isEmpty) return;
+      f[key] = value is String ? value.trim() : value;
+    }
+
+    put('type', type?.value);
+    put('status', status?.value);
+    put('portfolioScope', portfolioScope?.value);
+    put('city', city);
+    put('state', state);
+    put('neighborhood', neighborhood);
+    put('street', street);
+    put('minPrice', minPrice);
+    put('maxPrice', maxPrice);
+    put('minArea', minArea);
+    put('maxArea', maxArea);
+    put('bedrooms', bedrooms);
+    put('bathrooms', bathrooms);
+    put('parkingSpaces', parkingSpaces);
+    put('isFeatured', isFeatured);
+    put('includeInactive', includeInactive);
+    put('responsibleUserId', responsibleUserId);
+    put('onlyMyData', onlyMyData);
+    put('search', search);
+    put('finalidade', finalidade);
+    put('code', code);
+    if (features != null && features!.isNotEmpty) f['features'] = features;
+    // Mesmos filtros estendidos da listagem. Hoje a whitelist do back lê
+    // sector, teamId, captorsTeamId, createdFrom/To e
+    // responsibleWithoutCaptor; o resto ele descarta sem erro (e passa a
+    // valer quando entrar lá). `listDeletedOnly` nunca vai: o back proíbe.
+    f.addAll(_extendedParams());
+    return f;
   }
 
   PropertyFilters copyWith({
@@ -1807,8 +2414,16 @@ class PropertyFilters {
     bool? onlyMyData,
     PortfolioScope? portfolioScope,
     bool? includeInactive,
+    String? sortBy,
+    String? sortOrder,
+    String? finalidade,
+    String? code,
   }) {
     return PropertyFilters(
+      sortBy: sortBy ?? this.sortBy,
+      sortOrder: sortOrder ?? this.sortOrder,
+      finalidade: finalidade ?? this.finalidade,
+      code: code ?? this.code,
       type: type ?? this.type,
       status: status ?? this.status,
       city: city ?? this.city,
@@ -1832,6 +2447,163 @@ class PropertyFilters {
       onlyMyData: onlyMyData ?? this.onlyMyData,
       portfolioScope: portfolioScope ?? this.portfolioScope,
       includeInactive: includeInactive ?? this.includeInactive,
+    )._withExtendedFrom(this);
+  }
+
+  /// Cópia deste filtro com os campos estendidos (proprietário, endereço,
+  /// equipes, período, faixas, excluídos) vindos de [src].
+  PropertyFilters _withExtendedFrom(
+    PropertyFilters src, {
+    bool? listDeletedOnly,
+    bool resetListDeletedOnly = false,
+  }) {
+    return PropertyFilters(
+      type: type,
+      status: status,
+      city: city,
+      state: state,
+      neighborhood: neighborhood,
+      street: street,
+      condominiumId: condominiumId,
+      minPrice: minPrice,
+      maxPrice: maxPrice,
+      minArea: minArea,
+      maxArea: maxArea,
+      bedrooms: bedrooms,
+      bathrooms: bathrooms,
+      parkingSpaces: parkingSpaces,
+      features: features,
+      isActive: isActive,
+      isFeatured: isFeatured,
+      companyId: companyId,
+      responsibleUserId: responsibleUserId,
+      search: search,
+      onlyMyData: onlyMyData,
+      portfolioScope: portfolioScope,
+      includeInactive: includeInactive,
+      sortBy: sortBy,
+      sortOrder: sortOrder,
+      finalidade: finalidade,
+      code: code,
+      zipCode: src.zipCode,
+      sector: src.sector,
+      ownerName: src.ownerName,
+      ownerPhone: src.ownerPhone,
+      number: src.number,
+      propertyUnity: src.propertyUnity,
+      tower: src.tower,
+      block: src.block,
+      lot: src.lot,
+      createdFrom: src.createdFrom,
+      createdTo: src.createdTo,
+      teamId: src.teamId,
+      captorsTeamId: src.captorsTeamId,
+      responsibleWithoutCaptor: src.responsibleWithoutCaptor,
+      minSalePrice: src.minSalePrice,
+      maxSalePrice: src.maxSalePrice,
+      minRentPrice: src.minRentPrice,
+      maxRentPrice: src.maxRentPrice,
+      suites: src.suites,
+      rooms: src.rooms,
+      listDeletedOnly: resetListDeletedOnly
+          ? null
+          : (listDeletedOnly ?? src.listDeletedOnly),
+    );
+  }
+
+  /// Troca TODOS os campos do drawer de filtros avançados pelos dados (`null`
+  /// limpa — o `copyWith` não conseguia desmarcar "Todos os tipos"), mantendo
+  /// o que vem de fora dele (busca, aba, "minhas", rua/condomínio da
+  /// sugestão, "só excluídos"). O responsável agora é campo do drawer, como
+  /// no web.
+  PropertyFilters withAdvancedFilters({
+    PropertyType? type,
+    PropertyStatus? status,
+    String? city,
+    String? state,
+    String? neighborhood,
+    double? minPrice,
+    double? maxPrice,
+    double? minArea,
+    double? maxArea,
+    int? bedrooms,
+    int? bathrooms,
+    int? parkingSpaces,
+    String? sortBy,
+    String? sortOrder,
+    String? finalidade,
+    String? code,
+    String? responsibleUserId,
+    String? zipCode,
+    String? sector,
+    String? ownerName,
+    String? ownerPhone,
+    String? number,
+    String? propertyUnity,
+    String? tower,
+    String? block,
+    String? lot,
+    String? createdFrom,
+    String? createdTo,
+    String? teamId,
+    String? captorsTeamId,
+    bool? responsibleWithoutCaptor,
+    double? minSalePrice,
+    double? maxSalePrice,
+    double? minRentPrice,
+    double? maxRentPrice,
+    int? suites,
+    int? rooms,
+  }) {
+    return PropertyFilters(
+      type: type,
+      status: status,
+      city: city,
+      state: state,
+      neighborhood: neighborhood,
+      street: street,
+      condominiumId: condominiumId,
+      minPrice: minPrice,
+      maxPrice: maxPrice,
+      minArea: minArea,
+      maxArea: maxArea,
+      bedrooms: bedrooms,
+      bathrooms: bathrooms,
+      parkingSpaces: parkingSpaces,
+      features: features,
+      isActive: isActive,
+      isFeatured: isFeatured,
+      companyId: companyId,
+      responsibleUserId: responsibleUserId,
+      search: search,
+      onlyMyData: onlyMyData,
+      portfolioScope: portfolioScope,
+      includeInactive: includeInactive,
+      sortBy: sortBy,
+      sortOrder: sortOrder,
+      finalidade: finalidade,
+      code: code,
+      zipCode: zipCode,
+      sector: sector,
+      ownerName: ownerName,
+      ownerPhone: ownerPhone,
+      number: number,
+      propertyUnity: propertyUnity,
+      tower: tower,
+      block: block,
+      lot: lot,
+      createdFrom: createdFrom,
+      createdTo: createdTo,
+      teamId: teamId,
+      captorsTeamId: captorsTeamId,
+      responsibleWithoutCaptor: responsibleWithoutCaptor,
+      minSalePrice: minSalePrice,
+      maxSalePrice: maxSalePrice,
+      minRentPrice: minRentPrice,
+      maxRentPrice: maxRentPrice,
+      suites: suites,
+      rooms: rooms,
+      listDeletedOnly: listDeletedOnly,
     );
   }
 
@@ -1848,8 +2620,14 @@ class PropertyFilters {
     bool resetOnlyMyData = false,
     bool? isActive,
     bool resetIsActive = false,
+    bool? listDeletedOnly,
+    bool resetListDeletedOnly = false,
   }) {
     return PropertyFilters(
+      sortBy: sortBy,
+      sortOrder: sortOrder,
+      finalidade: finalidade,
+      code: code,
       type: type,
       status: status,
       city: city,
@@ -1879,8 +2657,46 @@ class PropertyFilters {
       includeInactive: resetIncludeInactive
           ? null
           : (includeInactive ?? this.includeInactive),
+    )._withExtendedFrom(
+      this,
+      listDeletedOnly: listDeletedOnly,
+      resetListDeletedOnly: resetListDeletedOnly,
     );
   }
+}
+
+/// Nomes de query/corpo dos filtros estendidos da listagem — os MESMOS do
+/// web (`types/property.ts` `PropertyFilters`, serializados como vieram por
+/// `buildListFilterParams`) e de `RawPropertyListQuery` no back. Centralizado
+/// aqui para trocar fácil se o back mudar algum nome.
+class PropertyListQueryKeys {
+  const PropertyListQueryKeys();
+
+  final String zipCode = 'zipCode';
+  final String sector = 'sector';
+  final String ownerName = 'ownerName';
+  final String ownerPhone = 'ownerPhone';
+  final String number = 'number';
+  final String propertyUnity = 'propertyUnity';
+  final String tower = 'tower';
+  final String block = 'block';
+  final String lot = 'lot';
+  final String createdFrom = 'createdFrom';
+  final String createdTo = 'createdTo';
+  final String teamId = 'teamId';
+  final String captorsTeamId = 'captorsTeamId';
+  final String responsibleWithoutCaptor = 'responsibleWithoutCaptor';
+  final String listDeletedOnly = 'listDeletedOnly';
+
+  /// Faixas de venda/aluguel, suítes e salas: nomes do web
+  /// (`PropertyFiltersModal.tsx`, `types/property.ts`). O `GET /properties`
+  /// passa a lê-los com a mudança no back feita em paralelo.
+  final String minSalePrice = 'minSalePrice';
+  final String maxSalePrice = 'maxSalePrice';
+  final String minRentPrice = 'minRentPrice';
+  final String maxRentPrice = 'maxRentPrice';
+  final String suites = 'suites';
+  final String rooms = 'rooms';
 }
 
 /// Imóvel que coincide com o endereço de um cadastro novo — espelho de
@@ -3014,23 +3830,19 @@ class PropertyService {
     }
   }
 
-  /// Exporta propriedades
-  Future<ApiResponse<List<int>>> exportProperties({
+  /// Exporta a carteira — `POST /properties/export?format=` (o back só tem
+  /// POST; o antigo GET caía em `GET :id` e voltava 400). O corpo leva
+  /// `{ filters }` (whitelist `pickExportFilters`), o mesmo recorte da tela.
+  /// Devolve os bytes e o nome do `Content-Disposition`.
+  Future<ApiResponse<PropertyExportFile>> exportProperties({
     String format = 'xlsx', // 'xlsx' | 'csv'
-    String? type,
-    String? status,
+    PropertyFilters? filters,
   }) async {
     debugPrint('📤 [PROPERTY_SERVICE] Exportando propriedades (formato: $format)');
 
     try {
-      final queryParams = <String, String>{
-        'format': format,
-      };
-      if (type != null) queryParams['type'] = type;
-      if (status != null) queryParams['status'] = status;
-
       final uri = Uri.parse('${ApiConstants.baseApiUrl}/properties/export')
-          .replace(queryParameters: queryParams);
+          .replace(queryParameters: {'format': format});
 
       // Headers padronizados (Authorization + X-Company-ID) — paridade
       // `imobx-front`. Sem o `X-Company-ID`, o backend responde com 400
@@ -3039,24 +3851,193 @@ class PropertyService {
         endpoint: '/properties/export',
       );
 
-      final httpResponse = await http.get(uri, headers: headers).timeout(
-            const Duration(seconds: 60),
-          );
+      final httpResponse = await http
+          .post(
+            uri,
+            headers: headers,
+            body: jsonEncode({
+              'filters': filters?.toExportFilters() ?? const {},
+            }),
+          )
+          .timeout(const Duration(seconds: 120));
 
       if (httpResponse.statusCode >= 200 && httpResponse.statusCode < 300) {
         debugPrint('✅ [PROPERTY_SERVICE] Propriedades exportadas');
+        final fallbackName =
+            'propriedades_${DateTime.now().toIso8601String().split('T').first}.$format';
         return ApiResponse.success(
-          data: httpResponse.bodyBytes.toList(),
+          data: PropertyExportFile(
+            bytes: httpResponse.bodyBytes,
+            fileName: propertyExportFileName(
+                  httpResponse.headers['content-disposition'],
+                ) ??
+                fallbackName,
+            mimeType: httpResponse.headers['content-type'],
+          ),
           statusCode: httpResponse.statusCode,
         );
       }
 
       return ApiResponse.error(
-        message: 'Erro ao exportar propriedades',
+        message: _messageFromRawBody(httpResponse.body) ??
+            'Erro ao exportar propriedades',
         statusCode: httpResponse.statusCode,
       );
     } catch (e) {
       debugPrint('❌ [PROPERTY_SERVICE] Erro de conexão: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Prévia da exportação — `POST /properties/export?dryRun=true`: conta pelo
+  /// MESMO caminho do arquivo (filtros + escopo por papel).
+  Future<ApiResponse<PropertyExportPreview>> previewExport({
+    PropertyFilters? filters,
+  }) async {
+    try {
+      final response = await _apiService.post<Map<String, dynamic>>(
+        '/properties/export?dryRun=true',
+        body: {'filters': filters?.toExportFilters() ?? const {}},
+      );
+      if (response.success && response.data != null) {
+        return ApiResponse.success(
+          data: PropertyExportPreview.fromJson(response.data!),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao contar os imóveis da exportação',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_SERVICE] Prévia da exportação: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  static String? _messageFromRawBody(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map) {
+        final m = decoded['message'];
+        if (m is String && m.trim().isNotEmpty) return m.trim();
+        if (m is List && m.isNotEmpty) return m.join('\n');
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Contagem por aba da carteira — `GET /properties/portfolio-counts` com os
+  /// mesmos filtros da listagem (o back ignora `portfolioScope` aqui).
+  Future<ApiResponse<PropertyPortfolioCounts>> getPortfolioCounts({
+    PropertyFilters? filters,
+  }) async {
+    try {
+      final params = filters?.toQueryParams() ?? <String, dynamic>{};
+      params
+        ..remove('portfolioScope')
+        ..remove('sortBy')
+        ..remove('sortOrder');
+      final response = await _apiService.get<Map<String, dynamic>>(
+        '/properties/portfolio-counts',
+        queryParameters: params.map((k, v) => MapEntry(k, v.toString())),
+      );
+      if (response.success && response.data != null) {
+        return ApiResponse.success(
+          data: PropertyPortfolioCounts.fromJson(response.data!),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao contar a carteira',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_SERVICE] portfolio-counts: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// "Vendidos e locados recentemente" — `GET /properties/recent-deals`
+  /// (recorte mínimo: sem preço, endereço nem proprietário).
+  Future<ApiResponse<RecentDealsResult>> getRecentDeals({
+    int page = 1,
+    int limit = 24,
+    String kind = 'all', // 'all' | 'sold' | 'rented'
+    String? search,
+    bool onlyMyData = false,
+  }) async {
+    try {
+      final params = <String, String>{
+        'page': '$page',
+        'limit': '$limit',
+        if (kind == 'sold' || kind == 'rented') 'kind': kind,
+        if ((search ?? '').trim().isNotEmpty) 'search': search!.trim(),
+        if (onlyMyData) 'onlyMyData': 'true',
+      };
+      final response = await _apiService.get<Map<String, dynamic>>(
+        '/properties/recent-deals',
+        queryParameters: params,
+      );
+      if (response.success && response.data != null) {
+        return ApiResponse.success(
+          data: RecentDealsResult.fromJson(response.data!),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao carregar os negócios recentes',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_SERVICE] recent-deals: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Catálogo da empresa — `GET /property-catalog`: cômodos (`room`, vão em
+  /// `extraRooms` com quantidade) e infraestrutura (`infrastructure`, entram
+  /// como opções de `features`). Falha = formulário só com os campos padrão.
+  Future<ApiResponse<List<PropertyCatalogItem>>> getPropertyCatalog() async {
+    try {
+      final response = await _apiService.get<dynamic>('/property-catalog');
+      if (response.success) {
+        final raw = response.data;
+        final list = raw is List
+            ? raw
+            : (raw is Map && raw['data'] is List ? raw['data'] as List : []);
+        return ApiResponse.success(
+          data: list
+              .whereType<Map>()
+              .map((e) =>
+                  PropertyCatalogItem.fromJson(Map<String, dynamic>.from(e)))
+              .where((i) => i.name.isNotEmpty)
+              .toList(),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao carregar o catálogo',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [PROPERTY_SERVICE] property-catalog: $e');
       return ApiResponse.error(
         message: 'Erro de conexão: ${e.toString()}',
         statusCode: 0,

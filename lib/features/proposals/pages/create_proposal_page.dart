@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -13,8 +15,13 @@ import '../../../shared/utils/error_cause.dart';
 import '../../../shared/utils/input_formatters.dart';
 import '../../../shared/utils/jwt_utils.dart';
 import '../../../shared/widgets/app_error_state.dart';
+import '../../../shared/widgets/permission_route.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import '../../sale_forms/ficha_draft_store.dart';
+import '../utils/proposal_draft.dart';
+import '../utils/proposal_edit_rules.dart';
 import '../utils/proposal_form_rules.dart';
+import '../widgets/proposal_row_actions.dart' show showProposalPdfSheet;
 import '../widgets/proposal_signatures_sheet.dart';
 
 /// Cria ou edita uma ficha de proposta — paridade 1:1 com o
@@ -25,21 +32,49 @@ import '../widgets/proposal_signatures_sheet.dart';
 ///   - validação só da etapa atual, com as mesmas regras e mensagens;
 ///   - payload idêntico ao do web (ver `CreateProposalPayload`);
 ///   - etapa 3 = usuários que poderão ver a proposta (`addUsers`);
-///   - editar etapa já assinada pede confirmação e reinicia o fluxo.
-class CreateProposalPage extends StatefulWidget {
-  const CreateProposalPage({super.key, this.proposalId});
+///   - editar etapa já assinada pede confirmação e reinicia o fluxo;
+///   - proposta finalizada, cancelada ou excluída não abre o formulário (o
+///     back recusa o `PATCH`): a tela diz o motivo e oferece histórico e PDF.
+///
+/// A guarda de acesso fica AQUI (não na rota): módulo `sale_forms` +
+/// `proposal:update` para editar / `proposal:create` para criar — as mesmas
+/// do `fichas.routes.tsx` do web. Assim lista, rota nomeada e deep link
+/// passam todos por ela.
+class CreateProposalPage extends StatelessWidget {
+  const CreateProposalPage({super.key, this.proposalId, this.rascunho});
 
   final String? proposalId;
+
+  /// Rascunho a retomar ("Retomar rascunho" da lista) — só na criação.
+  final Map<String, dynamic>? rascunho;
 
   bool get isEditing => proposalId != null;
 
   @override
-  State<CreateProposalPage> createState() => _CreateProposalPageState();
+  Widget build(BuildContext context) {
+    return PermissionRoute(
+      module: 'sale_forms',
+      permission: isEditing ? 'proposal:update' : 'proposal:create',
+      child: _CreateProposalForm(proposalId: proposalId, rascunho: rascunho),
+    );
+  }
+}
+
+class _CreateProposalForm extends StatefulWidget {
+  const _CreateProposalForm({this.proposalId, this.rascunho});
+
+  final String? proposalId;
+  final Map<String, dynamic>? rascunho;
+
+  bool get isEditing => proposalId != null;
+
+  @override
+  State<_CreateProposalForm> createState() => _CreateProposalPageState();
 }
 
 /// Abas internas da etapa 1 (web `TABS_ETAPA_1`).
 const List<(String, IconData)> _kTabsEtapa1 = [
-  ('Proposta', LucideIcons.handshake),
+  ('Dados da Proposta', LucideIcons.handshake),
   ('Proponente', LucideIcons.user),
   ('Cônjuge', LucideIcons.heart),
   ('Imóvel', LucideIcons.house),
@@ -71,7 +106,7 @@ const Set<String> _kTab3Keys = {
 
 const int _kMaxLinkedUsers = 10;
 
-class _CreateProposalPageState extends State<CreateProposalPage>
+class _CreateProposalPageState extends State<_CreateProposalForm>
     with SingleTickerProviderStateMixin {
   final _scroll = ScrollController();
 
@@ -86,7 +121,12 @@ class _CreateProposalPageState extends State<CreateProposalPage>
   bool _saving = false;
   String _proposalNumber = '';
   ProposalStatus? _loadedStatus;
-  bool _avisoFinalizada = false;
+
+  /// Edição recusada pelo back (finalizada/cancelada/excluída): a tela mostra
+  /// o motivo no lugar do formulário.
+  String? _bloqueio;
+  bool _bloqueadaExcluida = false;
+  int? _bloqueadaPdfEtapa;
   Map<String, String>? _loadedSnap1;
   Map<String, String>? _loadedSnap2;
   Map<int, bool> _concluidas = {1: false, 2: false, 3: false};
@@ -189,7 +229,11 @@ class _CreateProposalPageState extends State<CreateProposalPage>
   bool _cepProp = false;
   bool _cepOwner = false;
   bool _searchingProperty = false;
-  final Map<String, String> _lastAutoCep = {};
+
+  /// Gatilho do CEP automático por campo (`useCepAutofill` do web).
+  final Map<String, ProposalCepGate> _cepGates = {};
+  ProposalCepGate _cepGate(String key) =>
+      _cepGates.putIfAbsent(key, ProposalCepGate.new);
 
   List<TextEditingController> get _controllers => [
         _validityDays, _proposedPrice, _commission, _downPayment,
@@ -223,10 +267,216 @@ class _CreateProposalPageState extends State<CreateProposalPage>
     _loading = widget.isEditing;
     _loadCatalogs();
     if (widget.isEditing) _loadExisting();
+    if (!widget.isEditing) {
+      final r = widget.rascunho;
+      if (r != null) {
+        _aplicarRascunho(r);
+        // Web: toast "Seu rascunho foi recuperado".
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _toast('Seu rascunho foi recuperado — você pode continuar de '
+                'onde parou.', info: true);
+          }
+        });
+      }
+      // Autosave do rascunho (web: `useFormDraft`, `debounceMs: 700`, só na
+      // criação). Confere a cada 700 ms e só grava quando algo mudou.
+      _rascunhoTimer = Timer.periodic(
+        const Duration(milliseconds: 700),
+        (_) => _salvarRascunho(),
+      );
+    }
+  }
+
+  // ── Rascunho local ("Retomar rascunho", só na criação) ─────────────────
+
+  Timer? _rascunhoTimer;
+  String? _ultimoRascunho;
+  bool _rascunhoGravado = false;
+
+  /// Proposta criada: não regrava o rascunho (já foi apagado).
+  bool _criada = false;
+
+  /// Todo o formulário em texto (datas `yyyy-MM-dd`), com as mesmas chaves
+  /// que [_aplicarRascunho] lê.
+  Map<String, String> _camposRascunho() => {
+        'proposalDate': _iso(_proposalDate),
+        'validityDays': _validityDays.text,
+        'proposedPrice': _proposedPrice.text,
+        'commission': _commission.text,
+        'downPayment': _downPayment.text,
+        'downPaymentDays': _downPaymentDays.text,
+        'deliveryDays': _deliveryDays.text,
+        'monthlyPenalty': _monthlyPenalty.text,
+        'paymentConditions': _paymentConditions.text,
+        'teamId': _teamId,
+        'saleUnit': _saleUnit,
+        'captureUnit': _captureUnit,
+        'observations': _observations,
+        'buyerName': _buyerName.text,
+        'buyerCpf': _buyerCpf.text,
+        'buyerRg': _buyerRg.text,
+        'buyerBirth': _iso(_buyerBirth),
+        'buyerNationality': _buyerNationality.text,
+        'buyerMarital': _buyerMarital,
+        'buyerRegime': _buyerRegime,
+        'buyerProfession': _buyerProfession.text,
+        'buyerEmail': _buyerEmail.text,
+        'buyerPhone': _buyerPhone.text,
+        'buyerZip': _buyerZip.text,
+        'buyerAddress': _buyerAddress.text,
+        'buyerNeighborhood': _buyerNeighborhood.text,
+        'buyerCity': _buyerCity.text,
+        'buyerState': _buyerState,
+        'bsName': _bsName.text,
+        'bsCpf': _bsCpf.text,
+        'bsRg': _bsRg.text,
+        'bsProfession': _bsProfession.text,
+        'bsPhone': _bsPhone.text,
+        'bsEmail': _bsEmail.text,
+        'propCode': _propCode.text,
+        'propRegistry': _propRegistry.text,
+        'propNotary': _propNotary.text,
+        'propZip': _propZip.text,
+        'propAddress': _propAddress.text,
+        'propNeighborhood': _propNeighborhood.text,
+        'propCity': _propCity.text,
+        'propState': _propState,
+        'ownerName': _ownerName.text,
+        'ownerCpf': _ownerCpf.text,
+        'ownerRg': _ownerRg.text,
+        'ownerBirth': _iso(_ownerBirth),
+        'ownerNationality': _ownerNationality.text,
+        'ownerMarital': _ownerMarital,
+        'ownerRegime': _ownerRegime,
+        'ownerProfession': _ownerProfession.text,
+        'ownerEmail': _ownerEmail.text,
+        'ownerPhone': _ownerPhone.text,
+        'ownerZip': _ownerZip.text,
+        'ownerAddress': _ownerAddress.text,
+        'ownerNeighborhood': _ownerNeighborhood.text,
+        'ownerCity': _ownerCity.text,
+        'ownerState': _ownerState,
+        'osName': _osName.text,
+        'osCpf': _osCpf.text,
+        'osProfession': _osProfession.text,
+        'osEmail': _osEmail.text,
+        'osPhone': _osPhone.text,
+        'osRg': _osRg,
+      };
+
+  Map<String, dynamic> _rascunhoData() => proposalDraftEncode(
+        campos: _camposRascunho(),
+        tab: _tabIndex,
+        linkedUserIds: _linkedUserIds,
+      );
+
+  /// Devolve à tela o estado de [_rascunhoData] (chamado no `initState`).
+  void _aplicarRascunho(Map<String, dynamic> raw) {
+    final d = proposalDraftDecode(raw);
+    String c(String k) => d.campo(k);
+    _proposalDate = d.data('proposalDate');
+    _validityDays.text = c('validityDays');
+    _proposedPrice.text = c('proposedPrice');
+    _commission.text = c('commission');
+    _downPayment.text = c('downPayment');
+    _downPaymentDays.text = c('downPaymentDays');
+    _deliveryDays.text = c('deliveryDays');
+    _monthlyPenalty.text = c('monthlyPenalty');
+    _paymentConditions.text = c('paymentConditions');
+    _teamId = c('teamId');
+    _saleUnit = c('saleUnit');
+    _captureUnit = c('captureUnit');
+    _observations = c('observations');
+    _buyerName.text = c('buyerName');
+    _buyerCpf.text = c('buyerCpf');
+    _buyerRg.text = c('buyerRg');
+    _buyerBirth = d.nascimento('buyerBirth');
+    _buyerNationality.text = c('buyerNationality');
+    _buyerMarital = c('buyerMarital');
+    _buyerRegime = c('buyerRegime');
+    _buyerProfession.text = c('buyerProfession');
+    _buyerEmail.text = c('buyerEmail');
+    _buyerPhone.text = c('buyerPhone');
+    _buyerZip.text = c('buyerZip');
+    _buyerAddress.text = c('buyerAddress');
+    _buyerNeighborhood.text = c('buyerNeighborhood');
+    _buyerCity.text = c('buyerCity');
+    _buyerState = c('buyerState');
+    _bsName.text = c('bsName');
+    _bsCpf.text = c('bsCpf');
+    _bsRg.text = c('bsRg');
+    _bsProfession.text = c('bsProfession');
+    _bsPhone.text = c('bsPhone');
+    _bsEmail.text = c('bsEmail');
+    _propCode.text = c('propCode');
+    _propRegistry.text = c('propRegistry');
+    _propNotary.text = c('propNotary');
+    _propZip.text = c('propZip');
+    _propAddress.text = c('propAddress');
+    _propNeighborhood.text = c('propNeighborhood');
+    _propCity.text = c('propCity');
+    _propState = c('propState');
+    _ownerName.text = c('ownerName');
+    _ownerCpf.text = c('ownerCpf');
+    _ownerRg.text = c('ownerRg');
+    _ownerBirth = d.nascimento('ownerBirth');
+    _ownerNationality.text = c('ownerNationality');
+    _ownerMarital = c('ownerMarital');
+    _ownerRegime = c('ownerRegime');
+    _ownerProfession.text = c('ownerProfession');
+    _ownerEmail.text = c('ownerEmail');
+    _ownerPhone.text = c('ownerPhone');
+    _ownerZip.text = c('ownerZip');
+    _ownerAddress.text = c('ownerAddress');
+    _ownerNeighborhood.text = c('ownerNeighborhood');
+    _ownerCity.text = c('ownerCity');
+    _ownerState = c('ownerState');
+    _osName.text = c('osName');
+    _osCpf.text = c('osCpf');
+    _osProfession.text = c('osProfession');
+    _osEmail.text = c('osEmail');
+    _osPhone.text = c('osPhone');
+    _osRg = c('osRg');
+    _linkedUserIds
+      ..clear()
+      ..addAll(d.linkedUserIds);
+    if (d.tab != 0) {
+      _tabIndex = d.tab;
+      _tabCtrl.index = d.tab;
+    }
+    _ultimoRascunho = jsonEncode(_rascunhoData());
+    _rascunhoGravado = true;
+  }
+
+  /// Grava se algo mudou; em branco não grava (e apaga o que havia). Um
+  /// formulário novo em branco não apaga o rascunho anterior: ele só é
+  /// substituído quando a proposta nova começa a ser preenchida (web).
+  Future<void> _salvarRascunho() async {
+    if (widget.isEditing || _criada || _saving) return;
+    final data = _rascunhoData();
+    final json = jsonEncode(data);
+    if (json == _ultimoRascunho) return;
+    _ultimoRascunho = json;
+    if (proposalDraftIsBlank(
+      _camposRascunho(),
+      linkedUserIds: _linkedUserIds,
+    )) {
+      if (_rascunhoGravado) {
+        _rascunhoGravado = false;
+        await FichaDraftStore.instance.limpar(kProposalDraftTipo);
+      }
+      return;
+    }
+    _rascunhoGravado = true;
+    await FichaDraftStore.instance.salvar(kProposalDraftTipo, data);
   }
 
   @override
   void dispose() {
+    _rascunhoTimer?.cancel();
+    // Saiu sem criar: guarda o último estado (o timer pode não ter rodado).
+    if (!widget.isEditing && !_criada) _salvarRascunho();
     _scroll.dispose();
     _tabCtrl.dispose();
     for (final c in _controllers) {
@@ -323,9 +573,22 @@ class _CreateProposalPageState extends State<CreateProposalPage>
       return;
     }
     final p = res.data!;
-    if (p.status == ProposalStatus.canceled) {
-      _toast('Proposta cancelada não pode ser editada.', info: true);
-      Navigator.of(context).maybePop();
+    // O back recusa o `PATCH` de excluída, finalizada e cancelada
+    // (`purchase-proposals.service.ts`, `update`): não abre o formulário
+    // (nem promete "reiniciar assinaturas" ao salvar).
+    final bloqueio =
+        proposalEdicaoBloqueada(status: p.status, deletedAt: p.deletedAt);
+    if (bloqueio != null) {
+      setState(() {
+        _bloqueio = bloqueio;
+        _bloqueadaExcluida = p.deletedAt != null;
+        _bloqueadaPdfEtapa =
+            p.status == ProposalStatus.finalized ? null : p.etapa.number;
+        _loadedStatus = p.status;
+        _proposalNumber =
+            p.proposalNumber.isNotEmpty ? p.proposalNumber : widget.proposalId!;
+        _loading = false;
+      });
       return;
     }
     setState(() {
@@ -353,7 +616,6 @@ class _CreateProposalPageState extends State<CreateProposalPage>
         ..addAll(p.linkedUserIds);
       _proposalNumber =
           p.proposalNumber.isNotEmpty ? p.proposalNumber : widget.proposalId!;
-      _avisoFinalizada = p.status == ProposalStatus.finalized;
       _loading = false;
     });
   }
@@ -537,38 +799,16 @@ class _CreateProposalPageState extends State<CreateProposalPage>
         'ownerSpousePhone': _dig(_osPhone.text),
       };
 
-  static bool _sameMap(Map<String, String> a, Map<String, String>? b) {
-    if (b == null || a.length != b.length) return false;
-    for (final e in a.entries) {
-      if (b[e.key] != e.value) return false;
-    }
-    return true;
-  }
-
-  /// `getReinicioDecision` do web.
-  ({bool needsReinicio, List<String> etapas}) _reinicioDecision() {
-    final finalized = _loadedStatus == ProposalStatus.finalized;
-    if (_loadedSnap1 == null) {
-      return (
-        needsReinicio: finalized,
-        etapas: finalized ? const ['Proposta finalizada'] : const <String>[],
+  /// `getReinicioDecision` do web (sem o ramo "proposta finalizada": a
+  /// edição dela está bloqueada, ver [proposalEdicaoBloqueada]).
+  ({bool needsReinicio, List<String> etapas}) _reinicioDecision() =>
+      proposalReinicioDecision(
+        atual1: _snapshot1(),
+        carregado1: _loadedSnap1,
+        atual2: _snapshot2(),
+        carregado2: _loadedSnap2,
+        concluidas: _concluidas,
       );
-    }
-    final alterou1 = !_sameMap(_snapshot1(), _loadedSnap1);
-    final alterou2 = !_sameMap(_snapshot2(), _loadedSnap2);
-    final any = alterou1 || alterou2;
-    final violou1 = alterou1 && (_concluidas[1] ?? false);
-    final violou2 = alterou2 && (_concluidas[2] ?? false);
-    final msgs = <String>[
-      if (violou1) 'Etapa 1 (comprador, proposta e imóvel)',
-      if (violou2) 'Etapa 2 (proprietário)',
-    ];
-    if (finalized && any && msgs.isEmpty) msgs.add('Proposta finalizada');
-    return (
-      needsReinicio: violou1 || violou2 || (finalized && any),
-      etapas: msgs,
-    );
-  }
 
   // ── Validação (só a etapa atual, igual ao web) ──────────────────────────
 
@@ -786,7 +1026,7 @@ class _CreateProposalPageState extends State<CreateProposalPage>
   Future<void> _submit() async {
     if (_saving) return;
     if (!_validate()) {
-      _toast('Revise os campos marcados em vermelho antes de continuar.',
+      _toast('Preencha os campos obrigatórios antes de continuar.',
           error: true);
       return;
     }
@@ -804,13 +1044,24 @@ class _CreateProposalPageState extends State<CreateProposalPage>
       return;
     }
     final created = res.data!;
+    // Web: `clearDraft()` depois de criar.
+    _criada = true;
+    _rascunhoTimer?.cancel();
+    await FichaDraftStore.instance.limpar(kProposalDraftTipo);
+    var falhaVinculo = false;
     if (created.id.isNotEmpty && _linkedUserIds.isNotEmpty) {
-      await PurchaseProposalsService.instance
+      final vinc = await PurchaseProposalsService.instance
           .addUsers(created.id, List.of(_linkedUserIds));
+      falhaVinculo = !vinc.success;
     }
     if (!mounted) return;
     setState(() => _saving = false);
-    _toast('Ficha de proposta criada com sucesso!');
+    // O web engole a falha do vínculo (console.warn); aqui avisa, como a
+    // ficha de venda do app (V15).
+    _toast(falhaVinculo
+        ? 'Ficha de proposta criada, mas não foi possível vincular os '
+            'usuários. Tente de novo em "Usuários vinculados".'
+        : 'Ficha de proposta criada com sucesso!');
     if (created.id.isNotEmpty) {
       await _openSignatures(
         id: created.id,
@@ -829,10 +1080,7 @@ class _CreateProposalPageState extends State<CreateProposalPage>
     final id = widget.proposalId!;
     final decision = _reinicioDecision();
     if (decision.needsReinicio && !confirmado) {
-      final ok = await _confirmReinicio(
-        decision.etapas,
-        _loadedStatus == ProposalStatus.finalized,
-      );
+      final ok = await _confirmReinicio(decision.etapas);
       if (ok == true) await _executeEditSave(true);
       return;
     }
@@ -846,11 +1094,16 @@ class _CreateProposalPageState extends State<CreateProposalPage>
           error: true);
       return;
     }
+    var falhaVinculo = false;
     if (_linkedUserIds.isNotEmpty) {
-      await svc.addUsers(id, List.of(_linkedUserIds));
+      final vinc = await svc.addUsers(id, List.of(_linkedUserIds));
+      falhaVinculo = !vinc.success;
     }
     if (!mounted) return;
-    _toast('Ficha de proposta atualizada com sucesso!');
+    _toast(falhaVinculo
+        ? 'Ficha de proposta atualizada, mas não foi possível vincular os '
+            'usuários.'
+        : 'Ficha de proposta atualizada com sucesso!');
     var etapaModal = _etapa;
     if (decision.needsReinicio && confirmado) {
       final rein = await svc.reiniciarFluxoAssinaturas(id);
@@ -877,7 +1130,7 @@ class _CreateProposalPageState extends State<CreateProposalPage>
     Navigator.of(context).pop(true);
   }
 
-  Future<bool?> _confirmReinicio(List<String> etapas, bool finalizada) {
+  Future<bool?> _confirmReinicio(List<String> etapas) {
     final muted = ThemeHelpers.textSecondaryColor(context);
     return showDialog<bool>(
       context: context,
@@ -893,17 +1146,12 @@ class _CreateProposalPageState extends State<CreateProposalPage>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                finalizada
-                    ? 'Há alterações em uma proposta finalizada. Ao continuar, '
-                        'todas as assinaturas digitais (e anexos aprovados) '
-                        'deixam de valer para esta ficha e será necessário '
-                        'enviar novamente para as etapas 1, 2 e 3.'
-                    : 'Você alterou dados de etapa(s) em que o fluxo já estava '
-                        'concluído (assinatura digital ou anexo aprovado):',
-                style: const TextStyle(height: 1.45),
+              const Text(
+                'Você alterou dados de etapa(s) em que o fluxo já estava '
+                'concluído (assinatura digital ou anexo aprovado):',
+                style: TextStyle(height: 1.45),
               ),
-              if (!finalizada && etapas.isNotEmpty) ...[
+              if (etapas.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 for (final e in etapas)
                   Padding(
@@ -1004,11 +1252,14 @@ class _CreateProposalPageState extends State<CreateProposalPage>
   bool get _canOpenSignatures =>
       widget.isEditing && _etapa <= _maxLiberada && _etapa < 3;
 
-  Future<void> _openSignaturesFromHeader() async {
+  String get _numeroOuId =>
+      _proposalNumber.isNotEmpty ? _proposalNumber : widget.proposalId!;
+
+  Future<void> _openSignaturesFromHeader([int? etapa]) async {
     await _openSignatures(
       id: widget.proposalId!,
-      number: _proposalNumber.isNotEmpty ? _proposalNumber : widget.proposalId!,
-      etapa: _etapa,
+      number: _numeroOuId,
+      etapa: etapa ?? _etapa,
     );
     if (!mounted) return;
     final hist = await PurchaseProposalsService.instance
@@ -1019,27 +1270,36 @@ class _CreateProposalPageState extends State<CreateProposalPage>
 
   // ── CEP / busca de imóvel ───────────────────────────────────────────────
 
+  /// `useCepAutofill` do web: [force] (a lupa) refaz o mesmo CEP; a busca
+  /// automática não repete o CEP — salvo depois de o campo ficar incompleto
+  /// ou de a busca falhar.
   Future<void> _buscarCep(
+    String key,
     String cep, {
     required void Function(bool) setLoading,
     required void Function(CepAddress) apply,
+    bool force = false,
   }) async {
-    final clean = ProposalRules.digits(cep);
-    if (clean.length != 8) return;
+    final gate = _cepGate(key);
+    final clean = gate.gatilho(cep, force: force);
+    if (clean == null) return;
     setState(() => setLoading(true));
     final addr = await CepService.instance.searchCep(clean);
     if (!mounted) return;
     setState(() => setLoading(false));
     if (addr == null) {
-      _toast('CEP não encontrado.', error: true);
+      gate.falhou();
+      _toast(kProposalCepErro, error: true);
       return;
     }
     setState(() => apply(addr));
     _toast('Endereço preenchido pelo CEP.');
   }
 
-  void _cepProponente() => _buscarCep(
+  void _cepProponente({bool force = false}) => _buscarCep(
+        'proponentZipCode',
         _buyerZip.text,
+        force: force,
         setLoading: (v) => _cepBuyer = v,
         apply: (a) {
           _buyerAddress.text = a.street ?? '';
@@ -1049,8 +1309,10 @@ class _CreateProposalPageState extends State<CreateProposalPage>
         },
       );
 
-  void _cepImovel() => _buscarCep(
+  void _cepImovel({bool force = false}) => _buscarCep(
+        'propertyZipCode',
         _propZip.text,
+        force: force,
         setLoading: (v) => _cepProp = v,
         apply: (a) {
           _propAddress.text = a.street ?? '';
@@ -1068,8 +1330,10 @@ class _CreateProposalPageState extends State<CreateProposalPage>
         },
       );
 
-  void _cepProprietario() => _buscarCep(
+  void _cepProprietario({bool force = false}) => _buscarCep(
+        'ownerZipCode',
         _ownerZip.text,
+        force: force,
         setLoading: (v) => _cepOwner = v,
         apply: (a) {
           _ownerAddress.text = a.street ?? '';
@@ -1279,6 +1543,7 @@ class _CreateProposalPageState extends State<CreateProposalPage>
   /// proposta ao editar). Fica à vista mesmo com o trilho fora da tela.
   String get _appBarSubtitle {
     if (_loading) return 'Carregando proposta…';
+    if (_bloqueio != null) return 'Somente leitura · nº $_numeroOuId';
     final hasNumber = widget.isEditing &&
         _proposalNumber.isNotEmpty &&
         _proposalNumber != widget.proposalId;
@@ -1330,10 +1595,91 @@ class _CreateProposalPageState extends State<CreateProposalPage>
         ),
         backgroundColor: ThemeHelpers.appBarBackgroundColor(context),
         actions: [
-          if (!_loading && _canOpenSignatures) _signaturesAction(),
+          if (!_loading && _bloqueio == null && _canOpenSignatures)
+            _signaturesAction(),
+          if (!_loading && _bloqueio == null && widget.isEditing)
+            _documentosMenu(),
         ],
       ),
-      body: _loading ? const _FormSkeleton() : _buildBody(),
+      body: _loading
+          ? const _FormSkeleton()
+          : _bloqueio != null
+              ? _EdicaoBloqueada(
+                  motivo: _bloqueio!,
+                  accent: _brand,
+                  onHistorico: _abrirHistoricoBloqueada,
+                  // Web: excluída não tem "Baixar PDF" no menu da linha.
+                  onPdf: _bloqueadaExcluida ? null : _baixarPdfBloqueada,
+                )
+              : _buildBody(),
+    );
+  }
+
+  /// Proposta que não edita: histórico (anexos + assinaturas) só leitura —
+  /// o mesmo destino do toque na linha da lista.
+  Future<void> _abrirHistoricoBloqueada() {
+    return showProposalSignaturesSheet(
+      context,
+      proposalId: widget.proposalId!,
+      proposalNumber: _numeroOuId,
+      initialHistorico: true,
+    );
+  }
+
+  /// O "Baixar PDF" do menu da linha: consolidado na finalizada, parcial da
+  /// etapa atual nas demais.
+  Future<void> _baixarPdfBloqueada() {
+    return showProposalPdfSheet(
+      context,
+      proposalId: widget.proposalId!,
+      numero: _numeroOuId,
+      etapa: _bloqueadaPdfEtapa,
+    );
+  }
+
+  /// Web (`CreatePurchaseProposalPage`, cabeçalho da edição): "Baixar PDF
+  /// (Etapa N)" nas TRÊS etapas — inclusive a 3 e as ainda travadas — e
+  /// "Assinaturas (Comprador/Proprietário)" nas etapas 1 e 2 já liberadas.
+  Widget _documentosMenu() {
+    return PopupMenuButton<String>(
+      tooltip: 'PDF e assinaturas por etapa',
+      icon: const Icon(LucideIcons.ellipsisVertical, size: 20),
+      enabled: !_saving,
+      onSelected: (v) {
+        final n = int.parse(v.substring(1));
+        if (v.startsWith('p')) {
+          showProposalPdfSheet(
+            context,
+            proposalId: widget.proposalId!,
+            numero: _numeroOuId,
+            etapa: n,
+          );
+        } else {
+          _openSignaturesFromHeader(n);
+        }
+      },
+      itemBuilder: (_) => [
+        for (final n in const [1, 2])
+          if (n <= _maxLiberada)
+            PopupMenuItem(
+              value: 's$n',
+              child: _MenuLinha(
+                icon: LucideIcons.signature,
+                text: n == 1
+                    ? 'Assinaturas (Comprador)'
+                    : 'Assinaturas (Proprietário)',
+              ),
+            ),
+        if (_maxLiberada >= 1) const PopupMenuDivider(),
+        for (final n in const [1, 2, 3])
+          PopupMenuItem(
+            value: 'p$n',
+            child: _MenuLinha(
+              icon: LucideIcons.fileDown,
+              text: 'Baixar PDF (Etapa $n)',
+            ),
+          ),
+      ],
     );
   }
 
@@ -1420,8 +1766,6 @@ class _CreateProposalPageState extends State<CreateProposalPage>
                       padding: EdgeInsets.fromLTRB(pad, 16, pad, 28),
                       sliver: SliverList.list(
                         children: [
-                          if (widget.isEditing && _avisoFinalizada)
-                            const _FinalizadaNote(),
                           ..._errorSummary(),
                           ..._content(),
                         ],
@@ -1490,7 +1834,6 @@ class _CreateProposalPageState extends State<CreateProposalPage>
       _ => null,
     };
     final concluded = widget.isEditing &&
-        !_avisoFinalizada &&
         _etapa < 3 &&
         (_concluidas[_etapa] ?? false);
     return [
@@ -1878,7 +2221,7 @@ class _CreateProposalPageState extends State<CreateProposalPage>
     String key,
     TextEditingController c, {
     required bool loading,
-    required VoidCallback onSearch,
+    required void Function({bool force}) onSearch,
   }) {
     return _text(
       key,
@@ -1891,17 +2234,15 @@ class _CreateProposalPageState extends State<CreateProposalPage>
         loading: loading,
         tooltip: 'Buscar CEP',
         enabled: ProposalRules.digits(c.text).length == 8,
-        onTap: onSearch,
+        // A lupa força a busca mesmo com o mesmo CEP (web `force: true`).
+        onTap: () => onSearch(force: true),
       ),
       onChanged: (v) {
         setState(() {});
-        // `useCepAutofill`: dispara sozinho ao completar 8 dígitos, sem
-        // refazer a busca do mesmo CEP (a lupa força).
-        final d = ProposalRules.digits(v);
-        if (d.length == 8 && _lastAutoCep[key] != d) {
-          _lastAutoCep[key] = d;
-          onSearch();
-        }
+        // `useCepAutofill`: dispara sozinho ao completar 8 dígitos; o
+        // gatilho ([ProposalCepGate]) não repete o mesmo CEP, mas libera
+        // depois de apagar/redigitar ou de uma falha.
+        onSearch();
       },
     );
   }
@@ -1970,8 +2311,9 @@ class _CreateProposalPageState extends State<CreateProposalPage>
         _teamId,
         teamOptions,
         (v) => _teamId = v,
-        // Obrigatória só ao criar (regra do web): o asterisco acompanha.
-        required: !widget.isEditing,
+        // Web: o asterisco aparece sempre (`Label className='required'`),
+        // embora a validação só cobre ao criar.
+        required: true,
         hint: _loadingTeams
             ? 'Carregando equipes…'
             : _teams.isEmpty
@@ -2776,44 +3118,126 @@ class _JumpChip extends StatelessWidget {
 
 // ─── Avisos ─────────────────────────────────────────────────────────────────
 
-class _FinalizadaNote extends StatelessWidget {
-  const _FinalizadaNote();
+/// Proposta que o back não deixa editar (finalizada, cancelada, excluída):
+/// no lugar do formulário, o motivo e o que dá para fazer — ver o histórico
+/// e baixar o PDF. Vale para qualquer entrada (lista, rota, deep link).
+class _EdicaoBloqueada extends StatelessWidget {
+  const _EdicaoBloqueada({
+    required this.motivo,
+    required this.accent,
+    required this.onHistorico,
+    this.onPdf,
+  });
+
+  final String motivo;
+  final Color accent;
+  final VoidCallback onHistorico;
+  final VoidCallback? onPdf;
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    // Filete no âmbar de aviso; ícone no tom de texto do aviso (o âmbar puro
-    // some sobre o branco).
-    final line =
-        isDark ? AppColors.status.warningDarkMode : AppColors.status.warning;
-    final ink = isDark
-        ? AppColors.message.warningTextDarkMode
-        : AppColors.message.warningText;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(
-        border: Border(left: BorderSide(color: line, width: 3)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(LucideIcons.triangleAlert, size: 16, color: ink),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Esta proposta está finalizada. Se você alterar dados e salvar, '
-              'será pedida confirmação e o fluxo de assinaturas será '
-              'reiniciado (etapas 1, 2 e 3).',
-              style: TextStyle(
-                fontSize: 12.5,
-                height: 1.4,
-                color: ThemeHelpers.textColor(context),
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: muted.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: muted.withValues(alpha: 0.22)),
+                ),
+                child: Icon(LucideIcons.fileLock, size: 25, color: muted),
               ),
-            ),
+              const SizedBox(height: 16),
+              Text(
+                motivo,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                  color: ThemeHelpers.textColor(context),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Os dados ficam como foram registrados. Você ainda pode ver '
+                'o histórico das assinaturas e baixar o PDF.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13.5, height: 1.45, color: muted),
+              ),
+              const SizedBox(height: 18),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  FilledButton.icon(
+                    onPressed: onHistorico,
+                    icon: const Icon(LucideIcons.history, size: 17),
+                    label: const Text('Ver histórico'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: accent,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                  if (onPdf != null)
+                    OutlinedButton.icon(
+                      onPressed: onPdf,
+                      icon: const Icon(LucideIcons.fileDown, size: 17),
+                      label: const Text('Baixar PDF'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: ThemeHelpers.textColor(context),
+                        side: BorderSide(
+                          color: ThemeHelpers.borderColor(context),
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        textStyle:
+                            const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                ],
+              ),
+            ],
           ),
-        ],
+        ),
       ),
+    );
+  }
+}
+
+/// Linha do menu "PDF e assinaturas por etapa" da edição.
+class _MenuLinha extends StatelessWidget {
+  const _MenuLinha({required this.icon, required this.text});
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 18, color: ThemeHelpers.textSecondaryColor(context)),
+        const SizedBox(width: 12),
+        Flexible(
+          child: Text(
+            text,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+      ],
     );
   }
 }

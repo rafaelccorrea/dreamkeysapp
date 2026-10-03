@@ -64,7 +64,9 @@ class CpfInputFormatter extends TextInputFormatter {
   }
 }
 
-/// Formatter para CNPJ
+/// Formatter para CNPJ — aceita o CNPJ alfanumérico (letras nos 12
+/// primeiros caracteres, DVs numéricos), como o `maskCNPJ` do web. Use com
+/// `keyboardType: TextInputType.text` para permitir digitar letras.
 class CnpjInputFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -72,15 +74,13 @@ class CnpjInputFormatter extends TextInputFormatter {
     TextEditingValue newValue,
   ) {
     final text = newValue.text;
-    
+
     if (text.isEmpty) {
       return newValue;
     }
 
-    final digits = text.replaceAll(RegExp(r'[^0-9]'), '');
-    final limitedDigits = digits.length > 14 ? digits.substring(0, 14) : digits;
-    final masked = Masks.cnpj(limitedDigits);
-    
+    final masked = Masks.cnpj(text);
+
     return TextEditingValue(
       text: masked,
       selection: TextSelection.collapsed(offset: masked.length),
@@ -96,12 +96,18 @@ class PhoneInputFormatter extends TextInputFormatter {
     TextEditingValue newValue,
   ) {
     final text = newValue.text;
-    
+
     if (text.isEmpty) {
       return newValue;
     }
 
-    final digits = text.replaceAll(RegExp(r'[^0-9]'), '');
+    final rawDigits = text.replaceAll(RegExp(r'[^0-9]'), '');
+    final oldDigits = oldValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    // Número completo com DDI 55 (colado/autopreenchido): tira o DDI em vez
+    // de cortar o fim (transv-20). Quem já tinha 11 dígitos e digitou mais
+    // um continua só truncado — não reinterpreta o DDD 55 como DDI.
+    final digits =
+        oldDigits.length == 11 ? rawDigits : Masks.brPhoneDigits(rawDigits);
     final limitedDigits = digits.length > 11 ? digits.substring(0, 11) : digits;
     final masked = Masks.phone(limitedDigits);
     

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../../core/constants/api_constants.dart';
+import '../../features/finance/core/finance_config.dart';
 import 'api_service.dart';
 
 // ════════════════════════════════════════════════════════════════════════
@@ -32,13 +33,9 @@ const String _kCategoriesPath = '/user-preferences/notification-categories';
 /// Rota do microserviço financeiro (fora do PIN — `ROTAS_SEM_PIN`).
 const String _kFinancePreferencesPath = '/notifications/preferences';
 
-/// Base do microserviço financeiro (mesmo valor do `VITE_FINANCEIRO_API_URL`
-/// de produção do imobx-front). Pode ser trocada por
-/// `--dart-define=FINANCE_API_BASE_URL=...`.
-const String _kFinanceBaseUrl = String.fromEnvironment(
-  'FINANCE_API_BASE_URL',
-  defaultValue: 'https://api.financeiro.intellisysbr.com/api/v1',
-);
+/// Base do microserviço financeiro — fonte única em `FinanceConfig`
+/// (`--dart-define=FINANCE_API_BASE_URL=...`).
+const String _kFinanceBaseUrl = FinanceConfig.baseUrl;
 
 Map<String, dynamic> _asMap(dynamic v) {
   if (v is Map<String, dynamic>) return v;

@@ -9,6 +9,7 @@ import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/tag_service.dart';
 import '../../../shared/utils/input_formatters.dart';
+import '../../../shared/utils/masks.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
@@ -249,7 +250,8 @@ class _CreateUserPageState extends State<CreateUserPage> {
 
     final name = _name.text.trim();
     final email = _email.text.trim();
-    final documentDigits = _document.text.replaceAll(RegExp(r'\D'), '');
+    // Letras + números: o CNPJ alfanumérico perde as letras com `\D`.
+    final documentDigits = Masks.unmaskCnpj(_document.text);
     final phoneDigits = _phone.text.replaceAll(RegExp(r'\D'), '');
 
     setState(() => _saving = true);

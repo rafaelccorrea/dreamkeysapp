@@ -206,6 +206,34 @@ class SaleFormsOverviewScopeUi {
     required this.scopeTier,
   });
 
+  /// Padrão do web (`DEFAULT_SCOPE_UI`) enquanto o `scope-ui` não chega.
+  static const SaleFormsOverviewScopeUi defaults = SaleFormsOverviewScopeUi(
+    showUserFilter: true,
+    showTeamFilter: true,
+    showUnitFilter: true,
+    showBrokerRanking: true,
+    showTeamRanking: true,
+    showUnitSection: true,
+    scopeTier: 'all',
+  );
+
+  SaleFormsOverviewScopeUi copyWith({
+    bool? showUserFilter,
+    bool? showTeamFilter,
+    bool? showUnitFilter,
+    bool? showBrokerRanking,
+    bool? showTeamRanking,
+    bool? showUnitSection,
+  }) => SaleFormsOverviewScopeUi(
+    showUserFilter: showUserFilter ?? this.showUserFilter,
+    showTeamFilter: showTeamFilter ?? this.showTeamFilter,
+    showUnitFilter: showUnitFilter ?? this.showUnitFilter,
+    showBrokerRanking: showBrokerRanking ?? this.showBrokerRanking,
+    showTeamRanking: showTeamRanking ?? this.showTeamRanking,
+    showUnitSection: showUnitSection ?? this.showUnitSection,
+    scopeTier: scopeTier,
+  );
+
   factory SaleFormsOverviewScopeUi.fromJson(Map<String, dynamic> j) {
     bool b(dynamic v) => v == true || v?.toString() == 'true';
     return SaleFormsOverviewScopeUi(
@@ -250,25 +278,159 @@ class SaleFormsOverview {
     Map<String, dynamic> m(dynamic v) =>
         v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
     List<T> l<T>(dynamic v, T Function(Map<String, dynamic>) f) => v is List
-        ? v.whereType<Map>().map((e) => f(Map<String, dynamic>.from(e))).toList()
+        ? v
+              .whereType<Map>()
+              .map((e) => f(Map<String, dynamic>.from(e)))
+              .toList()
         : <T>[];
     return SaleFormsOverview(
       kpis: SaleFormsOverviewKpis.fromJson(m(j['kpis'])),
-      kpisCompartilhadas:
-          SaleFormsOverviewSharedKpis.fromJson(m(j['kpisCompartilhadas'])),
+      kpisCompartilhadas: SaleFormsOverviewSharedKpis.fromJson(
+        m(j['kpisCompartilhadas']),
+      ),
       deltas: SaleFormsOverviewDeltas.fromJson(m(j['deltas'])),
       porStatus: l(j['porStatus'], SaleFormsOverviewStatusSlice.fromJson),
-      timeseries:
-          l(j['timeseries'], SaleFormsOverviewTimeseriesPoint.fromJson),
-      rankingCorretores:
-          l(j['rankingCorretores'], SaleFormsOverviewRankingItem.fromJson),
-      rankingEquipes:
-          l(j['rankingEquipes'], SaleFormsOverviewRankingItem.fromJson),
-      rankingUnidades:
-          l(j['rankingUnidades'], SaleFormsOverviewRankingItem.fromJson),
+      timeseries: l(j['timeseries'], SaleFormsOverviewTimeseriesPoint.fromJson),
+      rankingCorretores: l(
+        j['rankingCorretores'],
+        SaleFormsOverviewRankingItem.fromJson,
+      ),
+      rankingEquipes: l(
+        j['rankingEquipes'],
+        SaleFormsOverviewRankingItem.fromJson,
+      ),
+      rankingUnidades: l(
+        j['rankingUnidades'],
+        SaleFormsOverviewRankingItem.fromJson,
+      ),
       scopeUi: SaleFormsOverviewScopeUi.fromJson(m(j['scopeUi'])),
     );
   }
+}
+
+/// Filtros do painel — espelho de `SaleFormsOverviewFilters` /
+/// `OverviewFilterState` do web e do `SaleFormsOverviewFiltersDto` do back.
+/// Datas em `YYYY-MM-DD` (dia local). Listas vão separadas por vírgula numa
+/// chave só (o `toStringArrayQuery` do DTO faz o `split(',')`), igual ao web.
+class SaleFormsOverviewFilters {
+  final String? dateFrom;
+  final String? dateTo;
+
+  /// day | week | month (o back aceita também quarter | year).
+  final String granularity;
+  final List<String> userIds;
+  final List<String> teamIds;
+  final List<String> unitIds;
+
+  /// finalized | waiting_for_signature | processing.
+  final List<String> status;
+
+  const SaleFormsOverviewFilters({
+    this.dateFrom,
+    this.dateTo,
+    this.granularity = 'day',
+    this.userIds = const [],
+    this.teamIds = const [],
+    this.unitIds = const [],
+    this.status = const [],
+  });
+
+  /// Quantos recortes além do período (corretor, equipe, unidade, status).
+  int get dimensionCount =>
+      (userIds.isNotEmpty ? 1 : 0) +
+      (teamIds.isNotEmpty ? 1 : 0) +
+      (unitIds.isNotEmpty ? 1 : 0) +
+      (status.isNotEmpty ? 1 : 0);
+
+  /// Query do `GET /painel` — `buildParams` do web. [limit] = rankings
+  /// (o web manda 10).
+  Map<String, String> toQuery({int? limit = 10}) {
+    final qp = <String, String>{};
+    if (dateFrom != null && dateFrom!.isNotEmpty) qp['dateFrom'] = dateFrom!;
+    if (dateTo != null && dateTo!.isNotEmpty) qp['dateTo'] = dateTo!;
+    if (granularity.isNotEmpty) qp['granularity'] = granularity;
+    if (userIds.isNotEmpty) qp['userIds'] = userIds.join(',');
+    if (teamIds.isNotEmpty) qp['teamIds'] = teamIds.join(',');
+    if (unitIds.isNotEmpty) qp['unitIds'] = unitIds.join(',');
+    if (status.isNotEmpty) qp['status'] = status.join(',');
+    if (limit != null) qp['limit'] = '$limit';
+    return qp;
+  }
+
+  /// Mesmo formato que o web grava no `localStorage`.
+  Map<String, dynamic> toJson() => {
+    'granularity': granularity,
+    'dateFrom': dateFrom,
+    'dateTo': dateTo,
+    'userIds': userIds,
+    'teamIds': teamIds,
+    'unitIds': unitIds,
+    'status': status,
+  };
+
+  SaleFormsOverviewFilters copyWith({
+    String? dateFrom,
+    String? dateTo,
+    String? granularity,
+    List<String>? userIds,
+    List<String>? teamIds,
+    List<String>? unitIds,
+    List<String>? status,
+  }) => SaleFormsOverviewFilters(
+    dateFrom: dateFrom ?? this.dateFrom,
+    dateTo: dateTo ?? this.dateTo,
+    granularity: granularity ?? this.granularity,
+    userIds: userIds ?? this.userIds,
+    teamIds: teamIds ?? this.teamIds,
+    unitIds: unitIds ?? this.unitIds,
+    status: status ?? this.status,
+  );
+
+  static bool _sameSet(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    final sa = [...a]..sort();
+    final sb = [...b]..sort();
+    for (var i = 0; i < sa.length; i++) {
+      if (sa[i] != sb[i]) return false;
+    }
+    return true;
+  }
+
+  /// `panelFiltersEqual` do web (listas comparadas sem ordem).
+  @override
+  bool operator ==(Object other) =>
+      other is SaleFormsOverviewFilters &&
+      other.dateFrom == dateFrom &&
+      other.dateTo == dateTo &&
+      other.granularity == granularity &&
+      _sameSet(other.status, status) &&
+      _sameSet(other.userIds, userIds) &&
+      _sameSet(other.teamIds, teamIds) &&
+      _sameSet(other.unitIds, unitIds);
+
+  @override
+  int get hashCode => Object.hash(
+    dateFrom,
+    dateTo,
+    granularity,
+    Object.hashAllUnordered(status),
+    Object.hashAllUnordered(userIds),
+    Object.hashAllUnordered(teamIds),
+    Object.hashAllUnordered(unitIds),
+  );
+}
+
+/// Opção dos filtros do painel (`PickOption` do web).
+class SaleFormsOverviewPickOption {
+  final String id;
+  final String label;
+  final String? avatar;
+
+  const SaleFormsOverviewPickOption({
+    required this.id,
+    required this.label,
+    this.avatar,
+  });
 }
 
 class SaleFormOverviewService {
@@ -279,23 +441,19 @@ class SaleFormOverviewService {
 
   static const String _base = '/sistema/fichas-venda/painel';
 
-  /// `dateFrom`/`dateTo` em `YYYY-MM-DD`; `granularity` day|week|month|quarter|year.
-  Future<ApiResponse<SaleFormsOverview>> getOverview({
-    String? dateFrom,
-    String? dateTo,
-    String? granularity,
-    List<String>? status,
+  static dynamic _unwrap(dynamic raw) =>
+      raw is Map && raw['data'] != null && raw['kpis'] == null
+      ? raw['data']
+      : raw;
+
+  /// `GET /painel` com os filtros do painel (período, corretores, equipes,
+  /// unidades e status).
+  Future<ApiResponse<SaleFormsOverview>> getOverview(
+    SaleFormsOverviewFilters filters, {
+    int? limit = 10,
   }) async {
     try {
-      final qp = <String, String>{};
-      if (dateFrom != null && dateFrom.isNotEmpty) qp['dateFrom'] = dateFrom;
-      if (dateTo != null && dateTo.isNotEmpty) qp['dateTo'] = dateTo;
-      if (granularity != null && granularity.isNotEmpty) {
-        qp['granularity'] = granularity;
-      }
-      if (status != null && status.isNotEmpty) {
-        qp['status'] = status.join(',');
-      }
+      final qp = filters.toQuery(limit: limit);
       final res = await _api.get<Map<String, dynamic>>(
         _base,
         queryParameters: qp.isEmpty ? null : qp,
@@ -315,4 +473,84 @@ class SaleFormOverviewService {
       return ApiResponse.error(message: e.toString(), statusCode: 0);
     }
   }
+
+  /// `GET /painel/scope-ui` — o que o papel enxerga antes do 1º overview.
+  Future<ApiResponse<SaleFormsOverviewScopeUi>> getScopeUi() async {
+    try {
+      final res = await _api.get<dynamic>('$_base/scope-ui');
+      final body = _unwrap(res.data);
+      if (!res.success || body is! Map) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao carregar o escopo do painel',
+          statusCode: res.statusCode,
+        );
+      }
+      return ApiResponse.success(
+        data: SaleFormsOverviewScopeUi.fromJson(
+          Map<String, dynamic>.from(body),
+        ),
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [SALE_FORMS_PAINEL] getScopeUi: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+
+  /// `GET /painel/available-users?limit=300` (o web pede 300).
+  Future<ApiResponse<List<SaleFormsOverviewPickOption>>> getAvailableUsers({
+    int limit = 300,
+  }) => _options(
+    '$_base/available-users',
+    query: {'limit': '$limit'},
+    what: 'corretores',
+  );
+
+  /// `GET /painel/available-teams`.
+  Future<ApiResponse<List<SaleFormsOverviewPickOption>>> getAvailableTeams() =>
+      _options('$_base/available-teams', what: 'equipes');
+
+  /// `GET /painel/available-units`.
+  Future<ApiResponse<List<SaleFormsOverviewPickOption>>> getAvailableUnits() =>
+      _options('$_base/available-units', what: 'unidades');
+
+  Future<ApiResponse<List<SaleFormsOverviewPickOption>>> _options(
+    String path, {
+    Map<String, String>? query,
+    required String what,
+  }) async {
+    try {
+      final res = await _api.get<dynamic>(path, queryParameters: query);
+      final body = _unwrap(res.data);
+      if (!res.success || body is! List) {
+        return ApiResponse.error(
+          message: res.message ?? 'Erro ao carregar $what',
+          statusCode: res.statusCode,
+        );
+      }
+      return ApiResponse.success(
+        data: parseOverviewPickOptions(body),
+        statusCode: res.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [SALE_FORMS_PAINEL] $path: $e');
+      return ApiResponse.error(message: e.toString(), statusCode: 0);
+    }
+  }
+}
+
+/// `[{id, name, avatar?}]` → opções (sem id = descartada).
+List<SaleFormsOverviewPickOption> parseOverviewPickOptions(dynamic raw) {
+  if (raw is! List) return const [];
+  return raw
+      .whereType<Map>()
+      .map(
+        (m) => SaleFormsOverviewPickOption(
+          id: m['id']?.toString() ?? '',
+          label: (m['name'] ?? m['label'])?.toString().trim() ?? '',
+          avatar: m['avatar']?.toString(),
+        ),
+      )
+      .where((o) => o.id.isNotEmpty)
+      .toList();
 }

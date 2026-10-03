@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/module_access_service.dart';
 import '../models/property_activity_models.dart';
 import '../models/property_change_request.dart';
 import '../services/property_activity_service.dart';
@@ -804,7 +805,14 @@ class ApprovalVoteResult {
   final bool approved;
   final String comment;
 
-  const ApprovalVoteResult({required this.approved, required this.comment});
+  /// A pessoa já tinha votado — o registro vai por `PUT` (mudar o voto).
+  final bool isUpdate;
+
+  const ApprovalVoteResult({
+    required this.approved,
+    required this.comment,
+    this.isUpdate = false,
+  });
 }
 
 /// Sheet de **voto** na fila (quando o multi-aprovadores está ligado). Mostra
@@ -871,13 +879,27 @@ class _ApprovalVoteSheetState extends State<_ApprovalVoteSheet> {
     super.dispose();
   }
 
+  /// Voto que o usuário logado já registrou nesta fila (se houver).
+  ApprovalVoteEntry? _myVote;
+
   Future<void> _load() async {
     final res = await PropertyApprovalService.instance
         .getVotingStatus(widget.propertyId, type: widget.queue);
     if (!mounted) return;
     setState(() {
       _loading = false;
-      if (res.success && res.data != null) _status = res.data!;
+      if (res.success && res.data != null) {
+        _status = res.data!;
+        _myVote = _status.voteOf(ModuleAccessService.instance.userId);
+        final mine = _myVote;
+        if (mine != null) {
+          // Abre com o voto atual marcado: confirmar = mudar o voto.
+          _approved = mine.approved;
+          if (_comment.text.isEmpty && mine.comment != null) {
+            _comment.text = mine.comment!;
+          }
+        }
+      }
     });
   }
 
@@ -957,6 +979,36 @@ class _ApprovalVoteSheetState extends State<_ApprovalVoteSheet> {
                         ),
                       ],
                     ),
+                  if (!_loading && _status.votes.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      'VOTOS REGISTRADOS',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: secondary,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.4,
+                        fontSize: 10,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    for (final v in _status.votes)
+                      _VoteRow(
+                        vote: v,
+                        isMine: v.userId == _myVote?.userId,
+                        approveTone: kApprovalGreen,
+                        rejectTone: danger,
+                      ),
+                  ],
+                  if (_myVote != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'Você já votou. Escolha de novo para mudar o seu voto.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: secondary,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 18),
                   Row(
                     children: [
@@ -1028,18 +1080,99 @@ class _ApprovalVoteSheetState extends State<_ApprovalVoteSheet> {
             ),
           ),
           ApprovalSheetFooter(
-            confirmLabel: 'Registrar voto',
+            confirmLabel: _myVote != null ? 'Alterar voto' : 'Registrar voto',
             confirmIcon: LucideIcons.vote,
             confirmColor: _approved == false ? danger : kApprovalGreen,
             submitting: false,
-            onConfirm: _approved == null
+            onConfirm: _approved == null || _loading
                 ? null
                 : () => Navigator.of(context).pop(
                       ApprovalVoteResult(
                         approved: _approved!,
                         comment: _comment.text.trim(),
+                        isUpdate: _myVote != null,
                       ),
                     ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Linha "Fulano — Aprovou · comentário" da lista de votos.
+class _VoteRow extends StatelessWidget {
+  final ApprovalVoteEntry vote;
+  final bool isMine;
+  final Color approveTone;
+  final Color rejectTone;
+
+  const _VoteRow({
+    required this.vote,
+    required this.isMine,
+    required this.approveTone,
+    required this.rejectTone,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final tone = vote.approved ? approveTone : rejectTone;
+    final secondary = ThemeHelpers.textSecondaryColor(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(
+              vote.approved ? LucideIcons.checkCircle2 : LucideIcons.xCircle,
+              size: 15,
+              color: tone,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: isMine ? '${vote.userName} (você)' : vote.userName,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      TextSpan(
+                        text: vote.approved ? ' · aprovou' : ' · recusou',
+                        style: TextStyle(
+                          color: tone,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (vote.at != null)
+                        TextSpan(
+                          text: ' · ${_fmtDateTime(vote.at)}',
+                          style: TextStyle(color: secondary),
+                        ),
+                    ],
+                  ),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: ThemeHelpers.textColor(context),
+                    height: 1.35,
+                  ),
+                ),
+                if (vote.comment != null)
+                  Text(
+                    vote.comment!,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: secondary,
+                      height: 1.35,
+                    ),
+                  ),
+              ],
+            ),
           ),
         ],
       ),

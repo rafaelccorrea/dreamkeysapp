@@ -13,12 +13,14 @@ import '../../../core/constants/api_constants.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/api_service.dart';
+import '../../../shared/services/autentique_status_service.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/purchase_proposals_service.dart';
 import '../../../shared/services/sale_forms_service.dart'
     show saleFormLinkAbrivel, saleFormSignerExcluido;
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import '../utils/proposal_signature_rules.dart';
 import 'proposal_row_actions.dart' show showProposalPdfSheet;
 
 /// Bottom sheet de assinaturas da PROPOSTA — paridade com
@@ -111,6 +113,12 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
   bool _pdfLoading = false;
   String? _linkBusyId;
 
+  /// Integração Autentique inativa → envio travado (web: `AutentiqueSendGate`).
+  bool _autentiqueBlocked = false;
+
+  /// Reenvio pelo WhatsApp da empresa: só aparece com `canResend`.
+  ProposalWhatsappEnvio? _waEnvio;
+
   final ImagePicker _imagePicker = ImagePicker();
 
   late int _etapa;
@@ -172,12 +180,20 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
     final sigsFut = _listarAssinaturas();
     final propFut =
         _proposta == null ? svc.getById(widget.proposalId) : null;
+    // Web: `useAutentiqueStatus` (trava o envio) e, no app, a
+    // disponibilidade do reenvio pelo WhatsApp da empresa.
+    final autFut = AutentiqueStatusService.instance.isBlocked();
+    final waFut = svc.getWhatsappEnvio(widget.proposalId);
     final histRes = await histFut;
     final sigs = await sigsFut;
     final propRes = await propFut;
+    final autBlocked = await autFut;
+    final wa = await waFut;
     if (!mounted) return;
     setState(() {
       _loading = false;
+      _autentiqueBlocked = autBlocked;
+      _waEnvio = wa;
       if (histRes.success && histRes.data != null) {
         _historico = histRes.data;
       } else {
@@ -283,6 +299,16 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
     }
     return out;
   }
+
+  /// Aprovar/rejeitar anexo: no web só existe no modal de Anexos, que só
+  /// abre com alguma etapa disponível para anexo
+  /// (`ProposalSignaturesModalPrivate.tsx`, `mostrarBotaoAnexarFisica`;
+  /// `PropostaAnexosModalPrivate.tsx`, `pending_approval && isGestor`).
+  bool _podeDecidirAnexo(ProposalAttachment a) => proposalPodeDecidirAnexo(
+        isGestor: _isGestor,
+        status: a.status,
+        etapasDisponiveis: _etapasDisponiveis,
+      );
 
   String _etapaLabel(int etapa) => switch (etapa) {
         1 => 'Comprador',
@@ -393,6 +419,10 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
   }
 
   Future<void> _enviar() async {
+    if (_autentiqueBlocked) {
+      _snack(kAutentiqueInactiveMessage);
+      return;
+    }
     final nome = _docName.text.trim();
     setState(() => _docNameTouched = true);
     if (nome.isEmpty) {
@@ -451,10 +481,26 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
     if (!mounted) return;
     setState(() => _sending = false);
     if (res.success) {
-      _snack(_porEmail
-          ? 'Proposta enviada para assinatura.'
-          : 'Envio criado. Use Copiar link ou WhatsApp para cada signatário '
-              'na lista.');
+      if (_porEmail) {
+        // Web (`onSent`): envio por e-mail fecha a folha e recarrega a lista
+        // — o retorno aparece no mensageiro da página, que fica à vista.
+        final pageMessenger = ScaffoldMessenger.maybeOf(context);
+        widget.onChanged?.call();
+        Navigator.of(context).pop();
+        pageMessenger
+          ?..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text('Proposta enviada para assinatura.'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        return;
+      }
+      // Só link (web `onEtapaLiberada`): a folha fica aberta para copiar ou
+      // mandar cada link, e a lista recarrega por trás.
+      _snack('Envio criado. Use Copiar link ou WhatsApp para cada signatário '
+          'na lista.');
       widget.onChanged?.call();
       _load();
     } else {
@@ -464,16 +510,25 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
 
   /// PDF da etapa pela folha de arquivo do app (Compartilhar / Salvar no
   /// aparelho) — `Uri.file` não abre no Android nem no iOS.
-  Future<void> _abrirPdf() async {
+  Future<void> _abrirPdf({bool comAssinado = false}) async {
     setState(() => _pdfLoading = true);
     await showProposalPdfSheet(
       context,
       proposalId: widget.proposalId,
       numero: _proposalNumber,
       etapa: _etapa,
+      incluirAutentique: comAssinado,
     );
     if (mounted) setState(() => _pdfLoading = false);
   }
+
+  /// Etapa atual com documento assinado no Autentique: aí o "PDF + assinado"
+  /// (ZIP do back, `incluirAutentique`) faz sentido.
+  bool get _etapaTemAssinado => proposalTemAssinado(
+        (_historico?.signatures ?? _signatures)
+            .where((s) => s.etapa == _etapa)
+            .map((s) => s.status),
+      );
 
   /// Usa o link já existente; só pede `POST /link` quando não há.
   Future<String?> _resolveLink(ProposalSignature sig) async {
@@ -537,12 +592,17 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
         : res.message ?? 'Erro ao reenviar e-mail.');
   }
 
+  /// Reenvio pelo WhatsApp da empresa — só oferecido com `canResend`
+  /// (`GET …/whatsapp-envio`); o retorno diz quantas saíram de fato
+  /// (`{sent, skippedNoPhone, failed}`), nunca "iniciado" no escuro.
   Future<void> _reenviarWhatsapp(ProposalSignature sig) async {
+    setState(() => _linkBusyId = sig.id);
     final res = await PurchaseProposalsService.instance
         .reenviarUmWhatsapp(widget.proposalId, sig.id);
     if (!mounted) return;
+    setState(() => _linkBusyId = null);
     _snack(res.success
-        ? 'Reenvio pelo WhatsApp iniciado.'
+        ? proposalWhatsappResumo(res.data)
         : res.message ?? 'Erro ao reenviar pelo WhatsApp.');
   }
 
@@ -604,9 +664,10 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
     setState(() => _uploading = false);
     if (res.success && res.data != null) {
       final approved = res.data!.status.toLowerCase() == 'approved';
+      // Web: anuncia a PRÓXIMA etapa liberada (`PropostaAnexosModalPrivate`).
       _snack(approved
-          ? 'Ficha anexada. Etapa ${_etapaLabel(etapa)} liberada.'
-          : 'Ficha anexada. Aguardando aprovação do gestor.');
+          ? proposalAnexoAprovadoMsg(etapa, noUpload: true)
+          : 'Anexo enviado. Aguardando aprovação do gestor.');
       widget.onChanged?.call();
       _load();
     } else {
@@ -718,7 +779,7 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
         .aprovarAnexo(widget.proposalId, att.id);
     if (!mounted) return;
     if (res.success) {
-      _snack('Anexo aprovado.');
+      _snack(proposalAnexoAprovadoMsg(att.etapa));
       widget.onChanged?.call();
       _load();
     } else {
@@ -974,8 +1035,17 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
               icon: LucideIcons.fileText,
               label: _pdfLoading ? 'Carregando PDF…' : 'PDF da proposta',
               busy: _pdfLoading,
-              onTap: _pdfLoading ? null : _abrirPdf,
+              onTap: _pdfLoading ? null : () => _abrirPdf(),
             ),
+            // PDF gerado + o(s) assinado(s) do Autentique num .zip (o web
+            // entrega isso no download; padrão `incluirAutentique` do back).
+            if (_etapaTemAssinado)
+              _AcaoTexto(
+                icon: LucideIcons.fileArchive,
+                label: 'PDF + assinado (.zip)',
+                busy: _pdfLoading,
+                onTap: _pdfLoading ? null : () => _abrirPdf(comAssinado: true),
+              ),
             if (_alreadySent)
               _AcaoTexto(
                 icon: LucideIcons.refreshCw,
@@ -1043,8 +1113,11 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
                         (s.signerEmail?.trim().isNotEmpty ?? false)
                     ? () => _reenviarEmail(s)
                     : null,
-                onResendWhatsapp:
-                    canUpdate ? () => _reenviarWhatsapp(s) : null,
+                onResendWhatsapp: canUpdate &&
+                        (_waEnvio?.canResend ?? false) &&
+                        _urls.containsKey(s.id)
+                    ? () => _reenviarWhatsapp(s)
+                    : null,
               ),
         ],
         if (mostrarForm) ...[
@@ -1112,8 +1185,19 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
             ),
           ),
           const SizedBox(height: 12),
+          // Web: `AutentiqueSendGate` — integração inativa trava o envio
+          // e diz o porquê.
+          if (_autentiqueBlocked)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _InfoLine(
+                icon: LucideIcons.lock,
+                color: _red,
+                text: kAutentiqueInactiveMessage,
+              ),
+            ),
           FilledButton.icon(
-            onPressed: _sending ? null : _enviar,
+            onPressed: _sending || _autentiqueBlocked ? null : _enviar,
             icon: _sending
                 ? const _Spin(color: Colors.white)
                 : Icon(
@@ -1218,15 +1302,29 @@ class _ProposalSignaturesSheetState extends State<_ProposalSignaturesSheet>
                 green: _green,
                 red: _red,
                 warn: _warnText,
-                onApprove:
-                    _isGestor && a.status.toLowerCase() == 'pending_approval'
-                        ? () => _aprovarAnexo(a)
-                        : null,
-                onReject:
-                    _isGestor && a.status.toLowerCase() == 'pending_approval'
-                        ? () => _rejeitarAnexo(a)
-                        : null,
+                onApprove: _podeDecidirAnexo(a) ? () => _aprovarAnexo(a) : null,
+                onReject: _podeDecidirAnexo(a) ? () => _rejeitarAnexo(a) : null,
               ),
+          // Web: no histórico, cada etapa lista as assinaturas com o status
+          // (e o motivo da recusa) — `ProposalSignaturesModalPrivate:616`.
+          for (final etapaNum in const [1, 2, 3])
+            if (h.signatures.any((s) => s.etapa == etapaNum)) ...[
+              const SizedBox(height: 20),
+              _SectionLabel(
+                'ASSINATURAS · ETAPA $etapaNum · '
+                '${_etapaLabel(etapaNum).toUpperCase()}',
+                accent: _accent,
+              ),
+              const SizedBox(height: 4),
+              for (final s in h.signatures.where((s) => s.etapa == etapaNum))
+                _HistSignatureRow(
+                  signature: s,
+                  green: _green,
+                  red: _red,
+                  warn: _warnText,
+                  blue: _blue,
+                ),
+            ],
           const SizedBox(height: 20),
           _SectionLabel('EVENTOS', accent: _accent),
           const SizedBox(height: 4),
@@ -1636,23 +1734,8 @@ class _SignatureRow extends StatelessWidget {
     }
   }
 
-  String get _label {
-    switch (_st) {
-      case 'signed':
-        return 'Assinado';
-      case 'rejected':
-        return 'Rejeitado';
-      case 'viewed':
-        return 'Visualizado';
-      case 'approved':
-        return 'Aprovado';
-      case 'cancelled':
-      case 'canceled':
-        return 'Cancelado';
-      default:
-        return 'Pendente';
-    }
-  }
+  /// Rótulo do web (uma fonte só: `ProposalSignature.statusLabel`).
+  String get _label => signature.statusLabel;
 
   /// Quando: assinatura > visualização > envio (o que houver).
   String? get _quando {
@@ -2189,6 +2272,102 @@ class _AttachmentRow extends StatelessWidget {
               ],
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Assinatura no histórico: quem, status (rótulo do web), quando e o motivo
+/// da recusa.
+class _HistSignatureRow extends StatelessWidget {
+  const _HistSignatureRow({
+    required this.signature,
+    required this.green,
+    required this.red,
+    required this.warn,
+    required this.blue,
+  });
+
+  final ProposalSignature signature;
+  final Color green;
+  final Color red;
+  final Color warn;
+  final Color blue;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final st = signature.status.trim().toLowerCase();
+    final (Color tone, IconData icon) = switch (st) {
+      'signed' || 'approved' => (green, LucideIcons.circleCheck),
+      'rejected' => (red, LucideIcons.circleX),
+      'viewed' => (blue, LucideIcons.eye),
+      'cancelled' || 'canceled' => (muted, LucideIcons.ban),
+      _ => (warn, LucideIcons.clock),
+    };
+    final nome = (signature.signerName?.trim().isNotEmpty ?? false)
+        ? signature.signerName!.trim()
+        : (signature.signerEmail?.trim().isNotEmpty ?? false)
+            ? signature.signerEmail!.trim()
+            : '—';
+    final email = signature.signerEmail?.trim() ?? '';
+    final quando = signature.signedAt ?? signature.createdAt;
+    final motivo = signature.rejectionReason?.trim() ?? '';
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: ThemeHelpers.borderLightColor(context)),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            nome,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: t.bodyMedium?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          if (email.isNotEmpty && email != nome)
+            Text(
+              email,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: t.bodySmall?.copyWith(color: muted),
+            ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _SignerStatusPill(
+                label: signature.statusLabel,
+                icon: icon,
+                tone: tone,
+              ),
+              if (quando != null)
+                Text(
+                  DateFormat('dd/MM/yyyy HH:mm', 'pt_BR')
+                      .format(quando.toLocal()),
+                  style: t.labelSmall?.copyWith(
+                    color: muted,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+            ],
+          ),
+          if (st == 'rejected' && motivo.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Motivo da recusa: $motivo',
+                style: t.bodySmall?.copyWith(color: red),
+              ),
+            ),
         ],
       ),
     );

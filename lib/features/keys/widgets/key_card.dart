@@ -159,7 +159,14 @@ class KeyCard extends StatelessWidget {
                         onPressed: onCheckout,
                       ),
                     ),
-                  // Menu de ações
+                  // Menu de ações (some quando nenhuma ação é permitida —
+                  // chaves-01: as ações chegam nulas sem a permissão key:*).
+                  if ((keyData.status == key_models.KeyStatus.available &&
+                          onCheckout != null) ||
+                      (keyData.status == key_models.KeyStatus.inUse &&
+                          onReturn != null) ||
+                      onEdit != null ||
+                      onDelete != null)
                   PopupMenuButton<String>(
                     icon: const Icon(Icons.more_vert),
                     onSelected: (value) {

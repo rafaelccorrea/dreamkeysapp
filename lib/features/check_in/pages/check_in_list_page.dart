@@ -4,15 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import '../../../core/constants/app_permissions.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/check_in_service.dart';
-import '../../../shared/services/module_access_service.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import '../utils/check_in_access.dart';
 
 /// Histórico de check-ins — visão editorial sem caixas centrais. Conteúdo
 /// flui nas margens, com paleta emerald/teal/slate/indigo (zero vermelho
@@ -54,12 +53,9 @@ class _CheckInListPageState extends State<CheckInListPage> {
   Timer? _ticker;
 
   /// Pode AGIR sobre o check-in de outra pessoa (desfazer, liberar, bloquear).
-  bool get _canManage {
-    final access = ModuleAccessService.instance;
-    final role = access.userRole?.toLowerCase().trim() ?? '';
-    if (role == 'master' || role == 'admin' || role == 'manager') return true;
-    return access.hasPermission(AppPermissions.checkInManageSettings);
-  }
+  /// checkin-05: gestor (`manager`) não tem bypass no back — só
+  /// admin/master ou `check_in:manage_settings`, como no web.
+  bool get _canManage => CheckInAccess.canManage;
 
   /// Enxerga mais gente do que só a si. Enquanto o escopo do servidor não
   /// chega, cai na permissão local para a tela não piscar sem o seletor.
@@ -72,9 +68,16 @@ class _CheckInListPageState extends State<CheckInListPage> {
       _closedByFilter != null ||
       _userFilter != null;
 
+  /// Trava própria da tela (03/10/2026): por deep link ou push ela abria sem
+  /// passar pelo menu, e quem não tem `check_in:view` (ou a empresa sem o
+  /// módulo) via o 403 cru do back.
+  bool get _semAcesso =>
+      !CheckInAccess.moduleAvailable || !CheckInAccess.canViewHistory;
+
   @override
   void initState() {
     super.initState();
+    if (_semAcesso) return;
     _scrollController.addListener(_onScroll);
     _bootstrap();
     _ticker = Timer.periodic(const Duration(seconds: 30), (_) {
@@ -419,6 +422,23 @@ class _CheckInListPageState extends State<CheckInListPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_semAcesso) {
+      return AppScaffold(
+        title: 'Histórico de check-ins',
+        showBottomNavigation: false,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              CheckInAccess.moduleAvailable
+                  ? 'Você não tem permissão para ver o histórico de check-ins.'
+                  : 'O check-in não está disponível no plano da sua empresa.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
     return AppScaffold(
       title: 'Histórico de check-ins',
       showBottomNavigation: false,

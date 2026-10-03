@@ -24,6 +24,10 @@ class SecureStorageService {
   static const String _keyFcmRegisteredToken = 'fcm_registered_token';
   static const String _keyKanbanLastProjectIdPrefix = 'kanban_last_project_id';
 
+  /// Token do PIN do Financeiro (`FinancePinStore`). Mora aqui para ser
+  /// apagado junto com os tokens da sessão (logout e sessão vencida).
+  static const String financePinSessionKey = 'finance_pin_session';
+
   /// Salva as credenciais do usuário
   Future<void> saveCredentials({
     required String email,
@@ -180,6 +184,8 @@ class SecureStorageService {
     try {
       await _storage.delete(key: _keyAccessToken);
       await _storage.delete(key: _keyRefreshToken);
+      // O desbloqueio do Financeiro é da pessoa que saiu.
+      await _storage.delete(key: financePinSessionKey);
       debugPrint('✅ [SECURE_STORAGE] Tokens removidos');
     } catch (e) {
       debugPrint('⚠️ [SECURE_STORAGE] Erro ao limpar tokens: $e');

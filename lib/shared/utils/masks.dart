@@ -21,30 +21,71 @@ class Masks {
     return value.replaceAll(RegExp(r'[^0-9]'), '');
   }
 
-  /// Aplica máscara de CNPJ: 00.000.000/0000-00
+  /// Aplica máscara de CNPJ: XX.XXX.XXX/XXXX-XX.
+  ///
+  /// Aceita o CNPJ ALFANUMÉRICO (Receita/SERPRO, 2026): os 12 primeiros
+  /// caracteres podem ser letras ou números e os 2 últimos (DV) são sempre
+  /// números. Letras são postas em maiúsculas — paridade com `maskCNPJ` do
+  /// web (`masks.ts`). CNPJ só numérico continua igual.
   static String cnpj(String value) {
-    final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digits.length <= 2) {
-      return digits;
-    } else if (digits.length <= 5) {
-      return '${digits.substring(0, 2)}.${digits.substring(2)}';
-    } else if (digits.length <= 8) {
-      return '${digits.substring(0, 2)}.${digits.substring(2, 5)}.${digits.substring(5)}';
-    } else if (digits.length <= 12) {
-      return '${digits.substring(0, 2)}.${digits.substring(2, 5)}.${digits.substring(5, 8)}/${digits.substring(8)}';
-    } else {
-      return '${digits.substring(0, 2)}.${digits.substring(2, 5)}.${digits.substring(5, 8)}/${digits.substring(8, 12)}-${digits.substring(12, 14)}';
+    final raw = unmaskCnpj(value);
+    // Na posição dos DVs (13º e 14º) só entram dígitos.
+    final b = StringBuffer();
+    var count = 0;
+    for (var i = 0; i < raw.length && count < 14; i++) {
+      final ch = raw[i];
+      final isDigit = ch.codeUnitAt(0) >= 48 && ch.codeUnitAt(0) <= 57;
+      if (count >= 12 && !isDigit) continue;
+      if (count == 2 || count == 5) b.write('.');
+      if (count == 8) b.write('/');
+      if (count == 12) b.write('-');
+      b.write(ch);
+      count++;
     }
+    return b.toString();
   }
 
-  /// Remove máscara de CNPJ, retornando apenas números
+  /// Remove a máscara do CNPJ: só letras (maiúsculas) e números — o CNPJ
+  /// alfanumérico perde as letras se a limpeza for só por dígitos.
   static String unmaskCnpj(String value) {
-    return value.replaceAll(RegExp(r'[^0-9]'), '');
+    return value.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+  }
+
+  /// `true` quando o documento digitado é CPF: só dígitos e até 11. Com
+  /// letra (CNPJ alfanumérico) ou mais de 11 caracteres, é CNPJ — mesma
+  /// regra do `formatDocument` do web.
+  static bool isCpfDocument(String value) {
+    final clean = unmaskCnpj(value);
+    if (RegExp(r'[A-Z]').hasMatch(clean)) return false;
+    return clean.length <= 11;
+  }
+
+  /// Máscara dinâmica CPF ↔ CNPJ (aceita CNPJ alfanumérico).
+  static String cpfOrCnpj(String value) {
+    return isCpfDocument(value) ? cpf(value) : cnpj(value);
+  }
+
+  /// Dígitos de um telefone brasileiro SEM o DDI 55.
+  ///
+  /// Número colado/preenchido com DDI (`+55 11 98765-4321`, `5511987654321`)
+  /// tem 12 ou 13 dígitos começando por 55; sem tirar o DDI, a máscara de 11
+  /// dígitos cortava o FIM do número e gravava "(55) 11987-6543" (transv-20).
+  /// Mesma regra do web (`whatsappAiPreAtendimento.ts`/`whatsappBusca.ts`):
+  /// só remove quando sobram 10 ou 11 dígitos — um número de 11 dígitos com
+  /// DDD 55 (RS) fica intacto.
+  static String brPhoneDigits(String value) {
+    final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    if ((digits.length == 12 || digits.length == 13) &&
+        digits.startsWith('55')) {
+      return digits.substring(2);
+    }
+    return digits;
   }
 
   /// Aplica máscara de telefone: (00) 0000-0000 ou (00) 00000-0000
+  /// (remove o DDI 55 de números completos — ver [brPhoneDigits]).
   static String phone(String value) {
-    final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    final digits = brPhoneDigits(value);
     if (digits.length <= 2) {
       return digits.isEmpty ? '' : '($digits';
     } else if (digits.length <= 6) {
@@ -57,9 +98,10 @@ class Masks {
     }
   }
 
-  /// Remove máscara de telefone, retornando apenas números
+  /// Remove máscara de telefone, retornando apenas números (sem o DDI 55
+  /// de um número completo — ver [brPhoneDigits]).
   static String unmaskPhone(String value) {
-    return value.replaceAll(RegExp(r'[^0-9]'), '');
+    return brPhoneDigits(value);
   }
 
   /// Aplica máscara de CEP: 00000-000

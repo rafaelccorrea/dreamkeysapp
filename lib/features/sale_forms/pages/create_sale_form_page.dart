@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -11,41 +14,25 @@ import '../../../features/organization/services/unit_service.dart';
 import '../../../features/workspace/models/admin_user_model.dart';
 import '../../../features/workspace/services/admin_users_service.dart';
 import '../../../shared/services/cep_service.dart';
+import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/purchase_proposals_service.dart'
     show PurchaseProposal;
 import '../../../shared/services/sale_forms_service.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import '../ficha_draft_store.dart';
+import '../sale_form_list_display.dart';
+import 'sale_form_detail_page.dart';
+import '../sale_form_media_sources.dart';
+import '../sale_form_property_link.dart';
 import '../sale_form_rules.dart';
 import '../services/sale_form_lookup_service.dart';
+import '../services/sale_form_members_service.dart';
 import '../services/sale_form_proposal_link_service.dart';
 import '../widgets/proposal_picker_sheet.dart';
+import '../widgets/sale_form_signature_lock_sheet.dart';
 import '../widgets/sale_form_type_modal.dart';
-
-/// Mídias de origem oficiais (espelha `midiasOrigemFichaVenda.ts` do web).
-const List<String> _kMediaSources = [
-  'REMARKETING',
-  'PAP',
-  'RELACIONAMENTO',
-  'ANUNCIO PAGO',
-  'INDICAÇÃO',
-  'PLANTAO EXTERNO/INTERNO',
-  'CHAVES NA MAO',
-  'SITE',
-  'GRUPO ZAP',
-  'FEIRAS E EVENTOS',
-  'LISTA FRIA',
-  'ANUNCIO PAGO (CAMPANHA PESSOAL)',
-  'ANUNCIO PAGO (CAMPANHA DE CONVERSA)',
-  'INSTAGRAM PESSOAL',
-  'CHATPRO - LEAD ORGANICO',
-  'TELEFONE IMOBILIARIA',
-  'DISPAROS',
-  'PLACA',
-  'INSTAGRAM ORGANICO',
-  'GOOGLE ADS',
-];
 
 const List<String> _kUfs = [
   'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS',
@@ -222,6 +209,27 @@ class _Participant {
   /// Corretor/captador/outros pagos em valor fixo (R$) em vez de %.
   bool fixo = false;
   bool emitirNota = false;
+
+  /// `nivel` gravado na ficha (só gerências carregadas na edição).
+  int? nivelOriginal;
+
+  /// Linha lida da ficha (edição): o nome é resolvido pela lista de membros
+  /// (o `GET :id` não traz o nome dos corretores). Escolher outro usuário
+  /// desliga.
+  bool carregado = false;
+
+  /// `nome` gravado na linha (gerência grava; corretor em geral não).
+  String? nomeGravado;
+
+  /// Gerência antiga sem `gestorId` que não casou pelo nome: o web salva a
+  /// linha mesmo assim (só com `nome`), então não barra o salvar.
+  bool legadoSemId = false;
+
+  /// `captadores[]`/`captador` aninhados no corretor (fichas antigas): o web
+  /// preserva no salvar e soma os captadores na trava de corretores.
+  Object? captadores;
+  Object? captador;
+
   void dispose() {
     percent.dispose();
     valorFixo.dispose();
@@ -333,6 +341,9 @@ class _Pessoa {
   String? state;
   final birth = _DateSlot();
 
+  /// Foco do campo Profissão (sugestões `PROFISSOES_COMUNS`).
+  final professionFocus = FocusNode();
+
   List<TextEditingController> get _ctrls => [
         name, cpf, rg, email, phone, profession, zip, street, number,
         complement, neighborhood, city,
@@ -342,6 +353,7 @@ class _Pessoa {
     for (final c in _ctrls) {
       c.dispose();
     }
+    professionFocus.dispose();
   }
 
   void clear() {
@@ -426,6 +438,14 @@ class _Pessoa {
   }
 }
 
+/// Ficha recém-criada (resultado do `pop` da criação): a lista abre as
+/// assinaturas dela, como o web.
+class SaleFormCreatedResult {
+  const SaleFormCreatedResult({required this.id, this.formNumber});
+  final String id;
+  final String? formNumber;
+}
+
 /// Formulário de criação/edição de ficha de venda — mesmas abas, campos e
 /// regras do web (`CreateSaleFormPage.tsx`). Quase tudo é "obrigatório ou
 /// Não aplicável": na tela o botão diz "Não se aplica" (chip no campo, opção
@@ -434,27 +454,68 @@ class _Pessoa {
 /// Editar: passe [saleFormId] (tipo/equipe vêm da ficha carregada).
 /// Criar a partir de uma proposta: passe também [prefillProposalId] (o
 /// `?propostaId=` do web, usado pelo aviso "proposta finalizada").
+///
+/// Resultado do `pop`: `true` ao editar; [SaleFormCreatedResult] ao criar.
 class CreateSaleFormPage extends StatefulWidget {
   const CreateSaleFormPage({
     super.key,
     this.choice,
     this.saleFormId,
     this.prefillProposalId,
-  }) : assert(choice != null || saleFormId != null,
-            'Informe choice (criar) ou saleFormId (editar).');
+    this.rascunho,
+  }) : assert(choice != null || saleFormId != null || rascunho != null,
+            'Informe choice (criar), saleFormId (editar) ou rascunho.');
   final SaleFormTypeChoice? choice;
   final String? saleFormId;
   final String? prefillProposalId;
+
+  /// "Retomar rascunho": estado salvo no aparelho (tipo e equipe inclusos).
+  final Map<String, dynamic>? rascunho;
 
   @override
   State<CreateSaleFormPage> createState() => _CreateSaleFormPageState();
 }
 
 class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Web: a trava não abre nas telas `/fichas-venda…`.
+    SignatureLockWatcher.instance.marcarTelaDeFicha(context);
+  }
+
   // Tipo/equipe — de `choice` (criar) ou da ficha carregada (editar).
   late SaleFormType _type;
   String _teamId = '';
   String _teamName = '';
+
+  /// Status da ficha na edição (`null` na criação).
+  SaleFormStatus? _statusAtual;
+
+  /// Web `canChangeSaleFormType`: fora de processamento/finalizada.
+  bool get _podeAlterarTipo =>
+      _statusAtual != SaleFormStatus.processing &&
+      _statusAtual != SaleFormStatus.finalized;
+
+  /// "Alterar tipo da ficha" (web: `SaleFormTypeModal` em `changeMode`):
+  /// troca tipo e/ou equipe sem perder o que já foi preenchido.
+  Future<void> _alterarTipo() async {
+    final out = await showSaleFormTypeModal(
+      context,
+      initial: SaleFormTypeChoice(
+        type: _type,
+        teamId: _teamId,
+        teamName: _teamName,
+      ),
+    );
+    if (out == null || !mounted) return;
+    setState(() {
+      _type = out.type;
+      _teamId = out.teamId;
+      _teamName = out.teamName;
+      _errors.remove('teamId');
+    });
+  }
 
   // Stepper.
   final PageController _pageCtrl = PageController();
@@ -484,6 +545,12 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
 
   // Unidades (filiais): dona da ficha + compartilhadas.
   List<OrgUnit> _units = const [];
+
+  /// A lista de unidades já respondeu (para o aviso "nenhuma unidade").
+  bool _unidadesCarregadas = false;
+
+  /// Unidades de venda configuradas (`sale_units`) — só para `saleUnitId`.
+  List<SaleFormSaleUnit> _saleUnitsCfg = const [];
   final List<String> _sharedUnitIds = [];
 
   /// Edição: só envia `sharedUnitIds` depois de ler o que está gravado.
@@ -506,6 +573,14 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
   final _propNeighborhood = TextEditingController();
   final _propCity = TextEditingController();
   String? _propState;
+
+  /// Vínculo oficial com o imóvel do cadastro (`propertyId` do web): vem da
+  /// busca pelo código e cai ao editar o código à mão. Com ele, o back marca
+  /// o imóvel como Vendido ao concluir as assinaturas.
+  String? _propertyId;
+  String? _propertyStatus;
+  bool _propertyStatusLoading = false;
+  bool _buscandoImovel = false;
 
   // Empreendimento
   final _empIncorporadora = TextEditingController();
@@ -543,6 +618,9 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
 
   // Comissões
   final List<_Participant> _participants = [];
+
+  /// Gerências que a ficha tinha ao abrir (edição) — base do `nivel`.
+  int _gerenciasCarregadas = 0;
   // Travas de comissão da empresa: decidem quais funções aparecem (Diretor,
   // Gestor SDR), a % fixa do diretor e as somas máximas de cada grupo.
   SaleFormCommissionRules _rules = SaleFormCommissionRules.padrao;
@@ -652,9 +730,24 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     _gestoresFuture = SaleFormLookupService.instance.gestores();
     _loadRules();
     _loadUnits();
-    if (_isEdit) _loadExisting();
+    if (_isEdit) {
+      _loadExisting();
+      _loadMembros();
+    }
+    if (!_isEdit) {
+      final r = widget.rascunho;
+      if (r != null) _aplicarRascunho(r);
+      // Autosave do rascunho (web: `useFormDraft`, só na criação).
+      _rascunhoTimer = Timer.periodic(
+        const Duration(seconds: 2),
+        (_) => _salvarRascunho(),
+      );
+    }
     final pid = widget.prefillProposalId?.trim() ?? '';
-    if (!_isEdit && pid.isNotEmpty) {
+    // Web: o rascunho restaurado da MESMA proposta já a traz aplicada (e o
+    // que foi corrigido depois); aplicar de novo apagaria as correções.
+    final daMesma = (widget.rascunho?['propostaId'] ?? '').toString() == pid;
+    if (!_isEdit && pid.isNotEmpty && !daMesma) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _aplicarProposta(pid);
       });
@@ -676,9 +769,36 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
   /// Unidades (filiais) ativas — select "Unidade responsável" e
   /// "Compartilhar com outras unidades" (mesma fonte do web).
   Future<void> _loadUnits() async {
+    SaleFormLookupService.instance.unidadesDeVenda().then((cfg) {
+      if (mounted) _saleUnitsCfg = cfg;
+    });
     final res = await UnitService.instance.list(activeOnly: true);
-    if (!mounted || !res.success || res.data == null) return;
-    setState(() => _units = res.data!);
+    if (!mounted) return;
+    if (!res.success || res.data == null) {
+      setState(() => _unidadesCarregadas = true);
+      return;
+    }
+    setState(() {
+      _unidadesCarregadas = true;
+      _units = res.data!;
+      _sugerirUnidadeDaEquipe();
+    });
+  }
+
+  /// Web: ao escolher a equipe, sugere a unidade da equipe — só quando ainda
+  /// não há unidade escolhida (continua editável).
+  void _sugerirUnidadeDaEquipe() {
+    if (_isEdit || _saleUnit.text.trim().isNotEmpty) return;
+    final uid = widget.choice?.teamUnitId?.trim() ?? '';
+    if (uid.isEmpty) return;
+    for (final u in _units) {
+      if (u.id == uid) {
+        _saleUnit.text = u.name;
+        _errors.remove('saleUnit');
+        _sharedUnitIds.remove(u.id);
+        return;
+      }
+    }
   }
 
   /// Diretor tem percentual fixo pelas regras da empresa — o campo só reflete.
@@ -703,6 +823,23 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     });
     final res = await SaleFormsService.instance.getById(widget.saleFormId!);
     if (!mounted) return;
+    // Web: ao abrir `/editar` confere o status atual (a linha da lista pode
+    // estar velha) — finalizada/cancelada volta ao detalhe; em processamento
+    // fica só leitura.
+    final bloqueio =
+        res.success && res.data != null ? saleFormEdicaoBloqueada(res.data!) : null;
+    if (bloqueio != null) {
+      final nav = Navigator.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(bloqueio), behavior: SnackBarBehavior.floating),
+      );
+      nav.pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => SaleFormDetailPage(saleFormId: widget.saleFormId!),
+        ),
+      );
+      return;
+    }
     setState(() {
       _loadingExisting = false;
       if (res.success && res.data != null) {
@@ -738,11 +875,12 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     _type = f.saleFormType;
     _teamId = f.teamId ?? '';
     _teamName = f.teamName ?? '';
+    _statusAtual = f.status;
 
     // Dados gerais
     _saleDate.prefill(r['saleDate']);
-    final ms = f.mediaSource;
-    if (ms != null && _kMediaSources.contains(ms)) _mediaSource = ms;
+    // Como o web: mantém o valor gravado mesmo fora da lista (legado).
+    _mediaSource = saleFormStoredMediaSource(f.mediaSource);
     _saleUnit.text = sv('saleUnit');
     final sp = sv('secretaryPresent');
     if (sp == kSaleFormNa) {
@@ -779,6 +917,13 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     _propState = pUf == kSaleFormNa.toUpperCase()
         ? kSaleFormNa
         : (_kUfs.contains(pUf) ? pUf : null);
+    final pid = (r['propertyId'] ?? r['property_id'] ?? '').toString().trim();
+    _propertyId = pid.isEmpty || pid == 'undefined' ? null : pid;
+    if (_propertyId != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _carregarStatusImovel();
+      });
+    }
 
     // Empreendimento
     final emp = f.empreendimentoData;
@@ -864,9 +1009,12 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     if (cd != null) {
       for (final c in (cd['corretores'] as List? ?? const [])) {
         if (c is! Map) continue;
-        final p = _Participant();
+        final p = _Participant()..carregado = true;
         p.userId = c['id']?.toString();
-        p.userName = (c['nome'] ?? c['name'] ?? 'Participante').toString();
+        final ng = (c['nome'] ?? c['name'] ?? '').toString().trim();
+        p.nomeGravado = ng.isEmpty ? null : ng;
+        p.captadores = c['captadores'];
+        p.captador = c['captador'];
         p.funcao = _parseFuncao(c['funcao']?.toString());
         p.emitirNota = c['emitirNota'] == true;
         final vf = c['valorFixo'];
@@ -883,18 +1031,87 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
       }
       for (final g in (cd['gerencias'] as List? ?? const [])) {
         if (g is! Map) continue;
-        final p = _Participant();
+        final p = _Participant()..carregado = true;
         p.funcao = switch (g['papel']?.toString()) {
           'diretor' => _Funcao.diretor,
           'gestor_sdr' => _Funcao.gestorSdr,
           _ => _Funcao.gerencia,
         };
-        p.userId = g['gestorId']?.toString();
-        p.userName = (g['nome'] ?? p.funcao.label).toString();
+        final gid = (g['gestorId'] ?? '').toString().trim();
+        p.userId = gid.isEmpty ? null : gid;
+        final ng = (g['nome'] ?? '').toString().trim();
+        p.nomeGravado = ng.isEmpty ? null : ng;
         final pc = g['porcentagem'];
         p.percent.text = pc is num ? _pctText(pc) : '';
         p.emitirNota = g['emitirNota'] == true;
+        final nv = g['nivel'];
+        p.nivelOriginal = nv is num ? nv.toInt() : int.tryParse('${nv ?? ''}');
+        _gerenciasCarregadas++;
         _participants.add(p);
+      }
+    }
+    _resolverParticipantes();
+  }
+
+  /// Membros da empresa (id → nome) — só na edição, para os nomes da
+  /// comissão (web: `companyMembersApi.getMembers` junto do `getById`).
+  Map<String, String> _membros = const {};
+
+  Future<void> _loadMembros() async {
+    final m = await SaleFormMembersService.instance.nomesPorId();
+    if (!mounted || m.isEmpty) return;
+    setState(() {
+      _membros = m;
+      _resolverParticipantes();
+    });
+  }
+
+  /// Nomes conhecidos: membros da empresa + usuários vinculados da ficha.
+  Map<String, String> get _nomesConhecidos => {
+        for (final u in _linkedUsers)
+          if (u.name.trim().isNotEmpty && u.name != 'Usuário') u.id: u.name,
+        ..._membros,
+      };
+
+  /// Linhas lidas da ficha: dá nome a quem está na comissão (o web resolve
+  /// pela lista de membros) e casa pelo nome a gerência antiga sem
+  /// `gestorId`, entre os vinculados (você + usuários vinculados), como o
+  /// web. Sem `setState`: quem chama decide.
+  void _resolverParticipantes() {
+    final nomes = _nomesConhecidos;
+    // Vinculados sem nome (o back não mandou `user`): nome dos membros.
+    for (var i = 0; i < _linkedUsers.length; i++) {
+      final u = _linkedUsers[i];
+      final n = _membros[u.id];
+      if (u.name == 'Usuário' && n != null && n.isNotEmpty) {
+        _linkedUsers[i] = SaleFormPessoa(id: u.id, name: n, email: u.email);
+      }
+    }
+    final eu = ModuleAccessService.instance.userId?.trim() ?? '';
+    final vinculados = <({String id, String name})>[
+      if (eu.isNotEmpty && (nomes[eu] ?? '').isNotEmpty)
+        (id: eu, name: nomes[eu]!),
+      for (final u in _linkedUsers) (id: u.id, name: u.name),
+    ];
+    for (final p in _participants) {
+      if (!p.carregado) continue;
+      if (p.funcao.ehGerencia) {
+        p.userId ??= saleFormGestorIdPorNome(p.nomeGravado, vinculados);
+        p.legadoSemId = p.userId == null;
+        p.userName = saleFormNomeParticipante(
+              id: p.userId,
+              nomeGravado: p.nomeGravado,
+              nomesPorId: nomes,
+              preferirGravado: true,
+            ) ??
+            '';
+      } else {
+        p.userName = saleFormNomeParticipante(
+              id: p.userId,
+              nomeGravado: p.nomeGravado,
+              nomesPorId: nomes,
+            ) ??
+            'Participante';
       }
     }
   }
@@ -954,6 +1171,80 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
   /// Remove só o vínculo (web: `setPropostaSelecionadaId('')`); o que foi
   /// preenchido fica.
   void _removerProposta() => setState(() => _proposta = null);
+
+  // ── Imóvel do cadastro (vínculo oficial) ────────────────────────────────
+
+  /// Sem `setState`: quem chama decide (pode estar dentro de um).
+  void _limparVinculoImovel() {
+    _propertyId = null;
+    _propertyStatus = null;
+    _propertyStatusLoading = false;
+  }
+
+  /// `getPropertyById` do web: status atual do imóvel para o aviso.
+  Future<void> _carregarStatusImovel() async {
+    final pid = _propertyId;
+    if (pid == null) return;
+    setState(() => _propertyStatusLoading = true);
+    final st = await SaleFormLookupService.instance.statusDoImovel(pid);
+    if (!mounted || _propertyId != pid) return;
+    setState(() {
+      _propertyStatus = st;
+      _propertyStatusLoading = false;
+    });
+  }
+
+  /// `buscarPropriedadesPorCodigo` + `selecionarPropriedade` do web.
+  Future<void> _buscarImovelPorCodigo() async {
+    final code = _propCode.text.trim();
+    if (code.isEmpty || isSaleFormNa(code)) {
+      _toast('Digite o código do imóvel para buscar.', error: true);
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    setState(() => _buscandoImovel = true);
+    final res = await SaleFormLookupService.instance.buscarImoveisPorCodigo(code);
+    if (!mounted) return;
+    setState(() => _buscandoImovel = false);
+    if (!res.success) {
+      _toast('Erro ao buscar imóveis. Tente novamente.', error: true);
+      return;
+    }
+    final hits = res.data ?? const <SaleFormPropertyHit>[];
+    if (hits.isEmpty) {
+      _toast('Nenhum imóvel encontrado com esse código.');
+      return;
+    }
+    final picked = await showModalBottomSheet<SaleFormPropertyHit>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ImovelHitsSheet(hits: hits, code: code, accent: _accent),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _propertyId = picked.id;
+      _propertyStatus = picked.status;
+      _propCode.text = picked.code;
+      _propZip.text = saleFormApplyMask(SaleFormMask.cep, picked.zipCode);
+      _propAddress.text = picked.address;
+      _propNumber.text = picked.number;
+      _propComplement.text = picked.complement;
+      _propNeighborhood.text = picked.neighborhood;
+      _propCity.text = picked.city;
+      _propState = _kUfs.contains(picked.state) ? picked.state : null;
+      _lastCep['property'] = picked.zipCode;
+      for (final k in const [
+        'propertyCode', 'propertyZipCode', 'propertyAddress', 'propertyNumber',
+        'propertyNeighborhood', 'propertyCity', 'propertyState',
+      ]) {
+        _errors.remove(k);
+      }
+    });
+    _toast('Imóvel preenchido com os dados da propriedade.');
+    // O status da busca pode estar defasado; confere no cadastro.
+    _carregarStatusImovel();
+  }
 
   /// `mapPurchaseProposalToFormData` + merge do web: Proponente → Comprador,
   /// Proprietário → Vendedor, imóvel, data, unidade, valor e comissão. Só
@@ -1023,7 +1314,7 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
       String k(String s) => '${pe.p}$s';
       texto(pe.name, k('Name'), name);
       texto(pe.cpf, k('Cpf'), cpf, mask: docMask);
-      texto(pe.rg, k('Rg'), rg);
+      texto(pe.rg, k('Rg'), rg, mask: SaleFormMask.rg); // web `toMaskedRg`
       data(pe.birth, k('BirthDate'), birth);
       texto(pe.email, k('Email'), email);
       texto(pe.phone, k('Phone'), phone, mask: SaleFormMask.phone);
@@ -1136,8 +1427,11 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
       _propState = pUf;
       _errors.remove('propertyState');
     }
+    final codigoAntes = _propCode.text;
     texto(_propCode, 'propertyCode',
         primeiro([p.propertyCode, p.propertyRegistry]));
+    // Código trocado = vínculo com o imóvel desfeito (como no web).
+    if (_propCode.text != codigoAntes) _limparVinculoImovel();
 
     // `inferHas*SpouseFromForm`: o interruptor segue o que ficou preenchido.
     _hasBuyerSpouse = _buyerSpouse.temDado;
@@ -1150,8 +1444,271 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     }
   }
 
+  // ── Rascunho local ("Retomar rascunho", só na criação) ─────────────────
+
+  Timer? _rascunhoTimer;
+  String? _ultimoRascunho;
+  bool _rascunhoGravado = false;
+
+  /// Ficha criada: não regrava o rascunho (já foi apagado).
+  bool _criada = false;
+
+  /// Estado inteiro da tela. `campos` = o que o usuário preencheu (decide se
+  /// o rascunho está em branco); o resto é contexto (tipo, equipe, passo).
+  Map<String, dynamic> _rascunhoData() {
+    Map<String, dynamic> slot(_DateSlot s) =>
+        {'v': s.value == null ? null : _iso(s.value!), 'na': s.na};
+    Map<String, dynamic> pessoa(_Pessoa pe) => {
+          for (final e in {
+            'name': pe.name, 'cpf': pe.cpf, 'rg': pe.rg, 'email': pe.email,
+            'phone': pe.phone, 'profession': pe.profession, 'zip': pe.zip,
+            'street': pe.street, 'number': pe.number,
+            'complement': pe.complement, 'neighborhood': pe.neighborhood,
+            'city': pe.city,
+          }.entries)
+            e.key: e.value.text,
+          'state': pe.state,
+          'birth': slot(pe.birth),
+        };
+    return {
+      'type': _type.apiValue,
+      'teamId': _teamId,
+      'teamName': _teamName,
+      'step': _step,
+      'propostaId': _proposta?.id,
+      'campos': {
+        'saleDate': slot(_saleDate),
+        'mediaSource': _mediaSource,
+        'saleUnit': _saleUnit.text,
+        'secretaryPresent': _secretaryPresent,
+        'generalGroup': _generalGroup,
+        'managerName': _managerName,
+        'externalBrokerName': _externalBrokerName.text,
+        'description': _description.text,
+        'notes': _notes.text,
+        'sharedUnitIds': List<String>.from(_sharedUnitIds),
+        'buyer': pessoa(_buyer),
+        'buyerSpouse': pessoa(_buyerSpouse),
+        'seller': pessoa(_seller),
+        'sellerSpouse': pessoa(_sellerSpouse),
+        'hasBuyerSpouse': _hasBuyerSpouse,
+        'hasSellerSpouse': _hasSellerSpouse,
+        'propCode': _propCode.text,
+        'propZip': _propZip.text,
+        'propAddress': _propAddress.text,
+        'propNumber': _propNumber.text,
+        'propComplement': _propComplement.text,
+        'propNeighborhood': _propNeighborhood.text,
+        'propCity': _propCity.text,
+        'propState': _propState,
+        'propertyId': _propertyId,
+        'empIncorporadora': _empIncorporadora.text,
+        'empNome': _empNome.text,
+        'empUnidade': _empUnidade.text,
+        'empValorEntrada': _empValorEntrada.text,
+        'empFormaPagamento': _empFormaPagamento.text,
+        'empDataEntrada': slot(_empDataEntrada),
+        'saleValue': _saleValue.text,
+        'totalCommission': _totalCommission.text,
+        'goalValue': _goalValue.text,
+        'debtConfession': _debtConfession,
+        'debtConfessionValue': _debtConfessionValue.text,
+        'fullFinancing': _fullFinancing,
+        // Gravados como "o usuário mudou o padrão" (true = mexeu).
+        'comissaoNaoAplicavel':
+            _commissionModel == CommissionPaymentModel.naoAplicavel,
+        'commissionDesc': _commissionDesc.text,
+        'parcelado': _parcelado,
+        'parcelasQtd': _parcelasQtd.text,
+        'parcelasDiferentes': !_parcelasIguais,
+        'parcelas': [for (final c in _parcelas) c.text],
+        'preAtendimento': _preAtendimento,
+        'centralCaptacao': _centralCaptacao,
+        'participants': [
+          for (final p in _participants)
+            {
+              'userId': p.userId,
+              'userName': p.userName,
+              'funcao': p.funcao.api,
+              'percent': p.percent.text,
+              'valorFixo': p.valorFixo.text,
+              'fixo': p.fixo,
+              'emitirNota': p.emitirNota,
+            },
+        ],
+        'linkedUsers': [
+          for (final u in _linkedUsers)
+            {'id': u.id, 'name': u.name, 'email': u.email},
+        ],
+      },
+    };
+  }
+
+  /// Devolve à tela o estado de [_rascunhoData] (chamado no `initState`).
+  void _aplicarRascunho(Map<String, dynamic> d) {
+    String s(dynamic v) => v?.toString() ?? '';
+    String? sn(dynamic v) {
+      final t = s(v);
+      return t.isEmpty ? null : t;
+    }
+
+    void slot(_DateSlot sl, dynamic raw) {
+      if (raw is! Map) return;
+      sl.na = raw['na'] == true;
+      sl.value = sl.na ? null : _parseD(raw['v']);
+    }
+
+    void pessoa(_Pessoa pe, dynamic raw) {
+      if (raw is! Map) return;
+      pe.name.text = s(raw['name']);
+      pe.cpf.text = s(raw['cpf']);
+      pe.rg.text = s(raw['rg']);
+      pe.email.text = s(raw['email']);
+      pe.phone.text = s(raw['phone']);
+      pe.profession.text = s(raw['profession']);
+      pe.zip.text = s(raw['zip']);
+      pe.street.text = s(raw['street']);
+      pe.number.text = s(raw['number']);
+      pe.complement.text = s(raw['complement']);
+      pe.neighborhood.text = s(raw['neighborhood']);
+      pe.city.text = s(raw['city']);
+      pe.state = sn(raw['state']);
+      slot(pe.birth, raw['birth']);
+    }
+
+    _type = parseSaleFormType(d['type']);
+    _teamId = s(d['teamId']);
+    _teamName = s(d['teamName']);
+    final c = d['campos'] is Map
+        ? Map<String, dynamic>.from(d['campos'] as Map)
+        : <String, dynamic>{};
+    slot(_saleDate, c['saleDate']);
+    _mediaSource = saleFormStoredMediaSource(sn(c['mediaSource']));
+    _saleUnit.text = s(c['saleUnit']);
+    _secretaryPresent = sn(c['secretaryPresent']);
+    _generalGroup = c['generalGroup'] == true;
+    _managerName = s(c['managerName']);
+    _externalBrokerName.text = s(c['externalBrokerName']);
+    _description.text = s(c['description']);
+    _notes.text = s(c['notes']);
+    final shared = c['sharedUnitIds'];
+    if (shared is List) _sharedUnitIds.addAll(shared.map(s));
+    pessoa(_buyer, c['buyer']);
+    pessoa(_buyerSpouse, c['buyerSpouse']);
+    pessoa(_seller, c['seller']);
+    pessoa(_sellerSpouse, c['sellerSpouse']);
+    _hasBuyerSpouse = c['hasBuyerSpouse'] == true;
+    _hasSellerSpouse = c['hasSellerSpouse'] == true;
+    _propCode.text = s(c['propCode']);
+    _propZip.text = s(c['propZip']);
+    _propAddress.text = s(c['propAddress']);
+    _propNumber.text = s(c['propNumber']);
+    _propComplement.text = s(c['propComplement']);
+    _propNeighborhood.text = s(c['propNeighborhood']);
+    _propCity.text = s(c['propCity']);
+    _propState = sn(c['propState']);
+    _propertyId = sn(c['propertyId']);
+    _empIncorporadora.text = s(c['empIncorporadora']);
+    _empNome.text = s(c['empNome']);
+    _empUnidade.text = s(c['empUnidade']);
+    _empValorEntrada.text = s(c['empValorEntrada']);
+    _empFormaPagamento.text = s(c['empFormaPagamento']);
+    slot(_empDataEntrada, c['empDataEntrada']);
+    _saleValue.text = s(c['saleValue']);
+    _totalCommission.text = s(c['totalCommission']);
+    _goalValue.text = s(c['goalValue']);
+    _debtConfession =
+        c['debtConfession'] is bool ? c['debtConfession'] as bool : null;
+    _debtConfessionValue.text = s(c['debtConfessionValue']);
+    _fullFinancing =
+        c['fullFinancing'] is bool ? c['fullFinancing'] as bool : null;
+    _commissionModel = c['comissaoNaoAplicavel'] == true
+        ? CommissionPaymentModel.naoAplicavel
+        : CommissionPaymentModel.obrigatorio;
+    _commissionDesc.text = s(c['commissionDesc']);
+    _parcelado = c['parcelado'] == true;
+    _parcelasQtd.text = s(c['parcelasQtd']);
+    _parcelasIguais = c['parcelasDiferentes'] != true;
+    final parc = c['parcelas'];
+    if (parc is List) {
+      for (final v in parc) {
+        _parcelas.add(TextEditingController(text: s(v)));
+      }
+    }
+    _syncParcelas();
+    _preAtendimento = s(c['preAtendimento']);
+    _centralCaptacao = s(c['centralCaptacao']);
+    final parts = c['participants'];
+    if (parts is List) {
+      for (final m in parts.whereType<Map>()) {
+        final p = _Participant()
+          ..userId = sn(m['userId'])
+          ..userName = s(m['userName'])
+          ..funcao = _parseFuncao(sn(m['funcao']))
+          ..fixo = m['fixo'] == true
+          ..emitirNota = m['emitirNota'] == true;
+        p.percent.text = s(m['percent']);
+        p.valorFixo.text = s(m['valorFixo']);
+        _participants.add(p);
+      }
+    }
+    final linked = c['linkedUsers'];
+    if (linked is List) {
+      for (final m in linked.whereType<Map>()) {
+        final id = s(m['id']);
+        if (id.isEmpty) continue;
+        _linkedUsers.add(SaleFormPessoa(
+          id: id,
+          name: s(m['name']),
+          email: s(m['email']),
+        ));
+      }
+    }
+    final step = d['step'];
+    final propostaId = sn(d['propostaId']);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      if (step is int && step > 0 && step < _tabIds.length) {
+        setState(() => _step = step);
+        if (_pageCtrl.hasClients) _pageCtrl.jumpToPage(step);
+      }
+      if (_propertyId != null) _carregarStatusImovel();
+      // Proposta de origem: só o vínculo (os campos já vieram do rascunho).
+      if (propostaId != null && _proposta == null) {
+        final res =
+            await SaleFormProposalLinkService.instance.carregar(propostaId);
+        if (mounted && res.success && res.data != null) {
+          setState(() => _proposta = res.data);
+        }
+      }
+    });
+    _ultimoRascunho = jsonEncode(_rascunhoData());
+    _rascunhoGravado = true;
+  }
+
+  /// Grava se algo mudou; em branco não grava (e apaga o que havia).
+  Future<void> _salvarRascunho() async {
+    if (_isEdit || _criada || _saving || _loadingExisting) return;
+    final data = _rascunhoData();
+    final json = jsonEncode(data);
+    if (json == _ultimoRascunho) return;
+    _ultimoRascunho = json;
+    if (fichaDraftIsBlank(data['campos'])) {
+      if (_rascunhoGravado) {
+        _rascunhoGravado = false;
+        await FichaDraftStore.instance.limpar('venda');
+      }
+      return;
+    }
+    _rascunhoGravado = true;
+    await FichaDraftStore.instance.salvar('venda', data);
+  }
+
   @override
   void dispose() {
+    _rascunhoTimer?.cancel();
+    // Saiu sem criar: guarda o último estado (o timer pode não ter rodado).
+    if (!_isEdit && !_criada) _salvarRascunho();
     _pageCtrl.dispose();
     for (final c in [
       _saleUnit, _externalBrokerName, _description, _notes,
@@ -1279,11 +1836,18 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     );
   }
 
+  /// Gerência antiga sem usuário (só `nome`): vale como linha, como no web.
+  bool _gerenciaLegada(_Participant p) =>
+      saleFormLinhaSemUsuarioPermitida(
+        ehGerencia: p.funcao.ehGerencia,
+        legadoSemId: p.legadoSemId,
+      );
+
   /// `hasValidCommissions` do web: com modelo ≠ Não aplicável, ao menos uma
   /// linha de comissão válida (% > 0, valor fixo > 0 ou SDR).
   bool _hasValidCommissions() {
     for (final p in _participants) {
-      if (p.userId == null) continue;
+      if (p.userId == null && !_gerenciaLegada(p)) continue;
       if (p.funcao == _Funcao.sdr) {
         if ((_money(p.valorFixo.text) ?? _kSdrValorFixo) > 0) return true;
       } else if (p.funcao == _Funcao.diretor) {
@@ -1303,13 +1867,14 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
   /// pessoa (como o web impede), comissão válida e travas da empresa.
   String? _commissionError() {
     for (final p in _participants) {
-      if (p.userId == null) {
+      if (p.userId == null && !_gerenciaLegada(p)) {
         return 'Selecione o usuário de cada participante da comissão.';
       }
     }
     final corretores = <String>{};
     final gerencias = <String>{};
     for (final p in _participants) {
+      if (p.userId == null) continue;
       final grupo = p.funcao.ehGerencia ? gerencias : corretores;
       if (!grupo.add(p.userId!)) {
         return p.funcao.ehGerencia
@@ -1335,7 +1900,8 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
       switch (p.funcao) {
         case _Funcao.corretor:
         case _Funcao.captador:
-          corretores += v;
+          // Captadores aninhados também contam (web `saleFormCommissionRules`).
+          corretores += v + saleFormCaptadoresSoma(p.captadores);
         case _Funcao.gerencia:
           gerencia += v;
         case _Funcao.gestorSdr:
@@ -1386,6 +1952,8 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
 
     final unitId = _ownerUnit?.id;
     put('unitId', unitId);
+    // Web: `saleUnitId` = unidade de venda configurada com o mesmo nome.
+    put('saleUnitId', saleFormSaleUnitIdFor(_saleUnit.text, _saleUnitsCfg));
     if (!_isEdit || _sharedUnitsReady) {
       body['sharedUnitIds'] =
           _sharedUnitIds.where((id) => id != unitId).toList();
@@ -1433,6 +2001,11 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
       put('propertyCity', _optText(_propCity.text));
       put('propertyState', _optText(_propState ?? ''));
     }
+    // Vínculo oficial (web): ao criar só com vínculo; ao editar sempre
+    // (`null` desfaz). `sale-form-auth.dto.ts`: `propertyId?: string | null`.
+    final (incluirPid, pid) =
+        saleFormPropertyIdPayload(isEdit: _isEdit, propertyId: _propertyId);
+    if (incluirPid) body['propertyId'] = pid;
 
     // Financeiro
     put('saleValue', _optMoney(_saleValue.text));
@@ -1476,22 +2049,30 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     // Comissões — corretores sem usuário e gerências sem % não vão (web).
     final corretores = <Map<String, dynamic>>[];
     final gerencias = <Map<String, dynamic>>[];
-    var nivel = 0;
+    // `nivel` como o web: o gravado na ficha, ou 1..n entre TODAS as
+    // gerências quando alguma entrou/saiu (as sem % saem sem renumerar).
+    final linhasGerencia = [
+      for (final p in _participants)
+        if (p.funcao.ehGerencia) p,
+    ];
+    final niveis = saleFormGerenciaNiveis(
+      [for (final p in linhasGerencia) p.nivelOriginal],
+      _gerenciasCarregadas,
+    );
     for (final p in _participants) {
       if (p.funcao.ehGerencia) {
         final pct = p.funcao == _Funcao.diretor
             ? (_rules.diretorPercent ?? _pct(p.percent.text) ?? 0)
             : (_pct(p.percent.text) ?? 0);
         if (pct <= 0) continue;
-        nivel++;
-        gerencias.add({
-          'nivel': nivel,
-          'porcentagem': pct,
-          'nome': p.userName,
-          if (p.userId != null) 'gestorId': p.userId,
-          if (p.funcao.papel != null) 'papel': p.funcao.papel,
-          'emitirNota': p.emitirNota,
-        });
+        gerencias.add(saleFormGerenciaLinha(
+          nivel: niveis[linhasGerencia.indexOf(p)],
+          porcentagem: pct,
+          nome: p.userName,
+          gestorId: p.userId,
+          papel: p.funcao.papel,
+          emitirNota: p.emitirNota,
+        ));
       } else {
         if (p.userId == null) continue;
         final m = <String, dynamic>{
@@ -1499,6 +2080,10 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
           'funcao': p.funcao.api,
           'emitirNota': p.emitirNota,
         };
+        // Web: preserva os captadores aninhados (fichas antigas).
+        final caps = saleFormCaptadoresPayload(p.captadores);
+        if (caps != null) m['captadores'] = caps;
+        if (p.captador != null) m['captador'] = p.captador;
         if (p.funcao == _Funcao.sdr) {
           m['porcentagem'] = 0;
           m['valorFixo'] = _money(p.valorFixo.text) ?? _kSdrValorFixo;
@@ -1555,6 +2140,18 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
       _toast(ce, error: true);
       return;
     }
+    // Web: comissão só com usuários vinculados, no máximo 10. No app os
+    // participantes entram vinculados, então o teto vale para a soma.
+    final ve = saleFormVinculadosErro(
+      [for (final u in _linkedUsers) u.id],
+      [for (final p in _participants) p.userId],
+      max: _kMaxVinculados,
+    );
+    if (ve != null) {
+      _goTo(_tabIds.indexOf(6));
+      _toast(ve, error: true);
+      return;
+    }
 
     setState(() => _saving = true);
     final payload = _buildPayload();
@@ -1563,7 +2160,25 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         : await SaleFormsService.instance.create(payload);
     if (!mounted) return;
     if (!res.success || res.data == null) {
-      setState(() => _saving = false);
+      // Web (`parseApiValidationErrors`): o 400 do back marca os campos; o
+      // app também abre o passo do primeiro campo marcado.
+      final apiErros = saleFormApiValidationErrors(res.error);
+      int? abaErro;
+      setState(() {
+        _saving = false;
+        if (apiErros.isNotEmpty) {
+          _errors.clear();
+          for (final e in apiErros) {
+            final campo = saleFormCampoDoErroApi(e.campo);
+            _errors.putIfAbsent(campo, () => e.mensagem);
+            final aba = saleFormAbaDoCampo(campo);
+            if (abaErro == null && aba != null && _tabIds.contains(aba)) {
+              abaErro = aba;
+            }
+          }
+        }
+      });
+      if (abaErro != null) _goTo(_tabIds.indexOf(abaErro!));
       _toast(
         res.message ??
             (_isEdit ? 'Falha ao salvar ficha.' : 'Falha ao criar ficha de venda.'),
@@ -1579,7 +2194,16 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         if (p.userId != null) p.userId!,
     }.toList();
     if (ids.isNotEmpty) {
-      await SaleFormsService.instance.addUsers(res.data!.id, ids);
+      final vinc = await SaleFormsService.instance.addUsers(res.data!.id, ids);
+      // Web: avisa (não bloqueia) quando os vínculos não gravam.
+      if (mounted && !vinc.success) {
+        _toast(
+          'A ficha foi salva, mas não foi possível gravar os usuários '
+          'vinculados. Convide-os de novo na edição da ficha (aba Vincular '
+          'usuários).',
+          error: true,
+        );
+      }
     }
     // Web: criada a partir de uma proposta → vincula a proposta à ficha nova
     // (depois dos usuários). Não bloqueia o sucesso; o web só loga a falha,
@@ -1599,8 +2223,22 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
       }
     }
     if (!mounted) return;
+    if (!_isEdit) {
+      // Web: `clearDraft()` depois de criar.
+      _criada = true;
+      _rascunhoTimer?.cancel();
+      await FichaDraftStore.instance.limpar('venda');
+      if (!mounted) return;
+    }
     setState(() => _saving = false);
-    Navigator.of(context).pop(true);
+    // Web: criada → volta à lista e abre o modal de assinaturas da nova
+    // (`openSignaturesFormId`). Editada → só volta (não abre: evita reenviar
+    // sem querer e o back cancelar assinaturas pendentes).
+    Navigator.of(context).pop(
+      _isEdit || novaId.isEmpty
+          ? true
+          : SaleFormCreatedResult(id: novaId, formNumber: res.data!.formNumber),
+    );
   }
 
   void _toast(String msg, {bool error = false}) {
@@ -1617,13 +2255,18 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
   }
 
   Future<void> _pickDate(ValueChanged<DateTime> onPick, DateTime? initial,
-      {DateTime? first}) async {
+      {DateTime? first, DateTime? last}) async {
     final now = DateTime.now();
+    final fim = last ?? DateTime(now.year + 10);
+    final ini = first ?? DateTime(now.year - 100);
+    var inicial = initial ?? now;
+    if (inicial.isAfter(fim)) inicial = fim;
+    if (inicial.isBefore(ini)) inicial = ini;
     final d = await showDatePicker(
       context: context,
-      initialDate: initial ?? now,
-      firstDate: first ?? DateTime(now.year - 100),
-      lastDate: DateTime(now.year + 10),
+      initialDate: inicial,
+      firstDate: ini,
+      lastDate: fim,
     );
     if (d != null) onPick(d);
   }
@@ -2103,10 +2746,12 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     String? hint,
     String? helper,
     ValueChanged<String>? onChanged,
+    FocusNode? focusNode,
   }) =>
       _Field(
         label: label,
         controller: c,
+        focusNode: focusNode,
         required: req,
         allowNa: na,
         mask: mask,
@@ -2124,7 +2769,7 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
       );
 
   Widget _dateField(String key, String label, _DateSlot slot,
-          {DateTime? first}) =>
+          {DateTime? first, DateTime? last}) =>
       _DateField(
         label: label,
         required: true,
@@ -2139,6 +2784,7 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
           }),
           slot.value,
           first: first,
+          last: last,
         ),
         onNa: () => setState(() {
           slot.na = !slot.na;
@@ -2206,25 +2852,22 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
   String? _displayNa(String v) =>
       v.trim().isEmpty ? null : (isSaleFormNa(v) ? kSaleFormNa : v);
 
+  /// Web: só as unidades (filiais) ativas — sem "Não se aplica" e sem texto
+  /// livre. O valor gravado fora da lista (inclusive "Não aplicável" de
+  /// ficha antiga) continua como opção "(indisponível)": nada se perde.
   Widget _unidadeField() {
-    // Sem unidades cadastradas (ou sem acesso): texto livre, como era.
-    if (_units.isEmpty) {
-      return _tf('saleUnit', 'Unidade responsável', _saleUnit);
-    }
     final atual = _saleUnit.text.trim();
-    final nomes = _units.map((u) => u.name).toList();
-    final labels = <String, String>{};
-    if (atual.isNotEmpty && !isSaleFormNa(atual) && !nomes.contains(atual)) {
-      nomes.add(atual);
-      labels[atual] = '$atual (indisponível)';
-    }
-    return _Dropdown(
+    final op = saleFormUnidadeOpcoes(
+      _units.map((u) => u.name).toList(),
+      atual,
+    );
+    final semUnidades = _units.isEmpty && _errors['saleUnit'] == null;
+    final campo = _Dropdown(
       label: 'Unidade responsável',
       required: true,
-      allowNa: true,
-      value: atual.isEmpty ? null : (isSaleFormNa(atual) ? kSaleFormNa : atual),
-      options: nomes,
-      labels: labels,
+      value: atual.isEmpty ? null : atual,
+      options: op.opcoes,
+      labels: op.rotulos,
       errorText: _errors['saleUnit'],
       onChanged: (v) => setState(() {
         _saleUnit.text = v ?? '';
@@ -2233,6 +2876,18 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         final dona = _ownerUnit?.id;
         if (dona != null) _sharedUnitIds.remove(dona);
       }),
+    );
+    if (!semUnidades || !_unidadesCarregadas) return campo;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        campo,
+        const _Helper(
+          'Nenhuma unidade (filial) ativa encontrada. Cadastre em Unidades ou '
+          'peça ao administrador para configurar as filiais da empresa.',
+        ),
+      ],
     );
   }
 
@@ -2244,6 +2899,15 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         if (_sharedUnitIds.contains(u.id)) u.name,
     ];
     return [
+      if (_podeAlterarTipo) ...[
+        _AlterarTipoBar(
+          accent: _accent,
+          tipo: _type.label,
+          equipe: _teamName,
+          onTap: _alterarTipo,
+        ),
+        const SizedBox(height: 8),
+      ],
       // Web: "Preencher a partir de uma proposta" (só ao criar).
       if (!_isEdit)
         SaleFormProposalPrefillBar(
@@ -2285,7 +2949,11 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         label: 'Mídia de origem',
         required: true,
         value: _mediaSource,
-        options: _kMediaSources,
+        options: saleFormMediaSourceOptions(_mediaSource),
+        labels: {
+          for (final m in saleFormMediaSourceOptions(_mediaSource))
+            m: saleFormMediaSourceLabel(m),
+        },
         errorText: _errors['mediaSource'],
         onChanged: (v) => setState(() {
           _mediaSource = v;
@@ -2328,6 +2996,59 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
     ];
   }
 
+  /// Profissão com as sugestões do web (`PROFISSOES_COMUNS`, `datalist`):
+  /// escolhe uma da lista ou digita outra.
+  Widget _profissaoField(String key, _Pessoa pe) => LayoutBuilder(
+        builder: (context, box) => RawAutocomplete<String>(
+          textEditingController: pe.profession,
+          focusNode: pe.professionFocus,
+          optionsBuilder: (v) => isSaleFormNa(v.text)
+              ? const <String>[]
+              : saleFormProfissoesSugeridas(v.text),
+          onSelected: (_) => _clearErr(key),
+          fieldViewBuilder: (context, controller, focusNode, onSubmit) => _tf(
+            key,
+            'Profissão',
+            controller,
+            focusNode: focusNode,
+            hint: 'Selecione ou digite',
+          ),
+          optionsViewBuilder: (context, onSelected, options) => Align(
+            alignment: Alignment.topLeft,
+            child: Material(
+              elevation: 6,
+              color: ThemeHelpers.cardBackgroundColor(context),
+              borderRadius: BorderRadius.circular(14),
+              clipBehavior: Clip.antiAlias,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: 240,
+                  maxWidth: box.maxWidth.isFinite ? box.maxWidth : 320,
+                ),
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  shrinkWrap: true,
+                  children: [
+                    for (final o in options)
+                      InkWell(
+                        onTap: () => onSelected(o),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 11),
+                          child: Text(
+                            o,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
   List<Widget> _camposPessoa(_Pessoa pe,
       {required String docLabel, required SaleFormMask docMask}) {
     String k(String s) => '${pe.p}$s';
@@ -2336,13 +3057,24 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
       _tf(k('Name'), 'Nome completo', pe.name, keyboard: TextInputType.name),
       _Row2(
         minRight: 120,
+        // Limites e máscaras do web: CPF/CNPJ 18 (cônjuge: CPF 14); RG só
+        // dígitos `00.000.000-0`, campo de 50.
         left: _tf(k('Cpf'), docLabel, pe.cpf,
-            mask: docMask, keyboard: TextInputType.number),
-        right: _tf(k('Rg'), 'RG', pe.rg),
+            mask: docMask,
+            keyboard: TextInputType.number,
+            maxLength: docMask == SaleFormMask.cpf ? 14 : 18),
+        right: _tf(k('Rg'), 'RG', pe.rg,
+            mask: SaleFormMask.rg,
+            keyboard: TextInputType.number,
+            hint: '00.000.000-0',
+            maxLength: 50),
       ),
       _Row2(
-        left: _dateField(k('BirthDate'), 'Nascimento', pe.birth),
-        right: _tf(k('Profession'), 'Profissão', pe.profession),
+        // Nascimento não vai além de hoje (a regra também barra o que vier
+        // pré-preenchido no futuro).
+        left: _dateField(k('BirthDate'), 'Nascimento', pe.birth,
+            last: DateTime.now()),
+        right: _profissaoField(k('Profession'), pe),
       ),
       _Band('CONTATO', LucideIcons.phone),
       _Row2(
@@ -2351,7 +3083,9 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         left: _tf(k('Email'), 'E-mail', pe.email,
             mask: SaleFormMask.email, keyboard: TextInputType.emailAddress),
         right: _tf(k('Phone'), 'Celular', pe.phone,
-            mask: SaleFormMask.phone, keyboard: TextInputType.phone),
+            mask: SaleFormMask.phone,
+            keyboard: TextInputType.phone,
+            maxLength: 16),
       ),
       _Band('ENDEREÇO', LucideIcons.mapPin),
       _Row2(
@@ -2362,6 +3096,7 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         left: _tf(k('ZipCode'), 'CEP', pe.zip,
             mask: SaleFormMask.cep,
             keyboard: TextInputType.number,
+            maxLength: 9,
             onChanged: (v) => _autoCepPessoa(pe, v)),
         right: _tf(k('Neighborhood'), 'Bairro', pe.neighborhood),
       ),
@@ -2371,7 +3106,7 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
         rightFlex: 3,
         minLeft: 90,
         minRight: 120,
-        left: _tf(k('Number'), 'Número', pe.number),
+        left: _tf(k('Number'), 'Número', pe.number, maxLength: 50),
         right: _tf('', 'Complemento', pe.complement, req: false, na: false),
       ),
       _Row2(
@@ -2433,9 +3168,14 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
           rightFlex: 2,
           minLeft: 120,
           minRight: 90,
-          left: _tf('propertyCode', 'Código do imóvel', _propCode),
+          left: _tf('propertyCode', 'Código do imóvel', _propCode,
+              onChanged: (_) {
+                // Web: mexer no código desfaz o vínculo com o imóvel.
+                if (_propertyId != null) setState(_limparVinculoImovel);
+              }),
           right: _tf('propertyZipCode', 'CEP', _propZip,
               mask: SaleFormMask.cep,
+              maxLength: 9,
               keyboard: TextInputType.number,
               onChanged: (v) => _autoCep(
                     'property',
@@ -2450,13 +3190,26 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
                     ],
                   )),
         ),
+        _ImovelVinculo(
+          accent: _accent,
+          linked: _propertyId != null,
+          buscando: _buscandoImovel,
+          notice: _propertyId == null
+              ? null
+              : saleFormLinkedPropertyNotice(
+                  status: _propertyStatus,
+                  loading: _propertyStatusLoading,
+                ),
+          onBuscar: _buscarImovelPorCodigo,
+          onDesvincular: () => setState(_limparVinculoImovel),
+        ),
         _tf('propertyAddress', 'Endereço', _propAddress),
         _Row2(
           leftFlex: 2,
           rightFlex: 3,
           minLeft: 90,
           minRight: 120,
-          left: _tf('propertyNumber', 'Número', _propNumber),
+          left: _tf('propertyNumber', 'Número', _propNumber, maxLength: 50),
           right: _tf('', 'Complemento', _propComplement, req: false, na: false),
         ),
         _tf('propertyNeighborhood', 'Bairro', _propNeighborhood),
@@ -2821,7 +3574,7 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
       switch (p.funcao) {
         case _Funcao.corretor:
         case _Funcao.captador:
-          corretores += v;
+          corretores += v + saleFormCaptadoresSoma(p.captadores);
         case _Funcao.gerencia:
           gerencia += v;
         case _Funcao.gestorSdr:
@@ -2926,6 +3679,8 @@ class _CreateSaleFormPageState extends State<CreateSaleFormPage> {
       setState(() {
         p.userId = u.id;
         p.userName = u.name;
+        p.carregado = false;
+        p.legadoSemId = false;
       });
     }
   }
@@ -3653,9 +4408,11 @@ class _Field extends StatelessWidget {
     this.helper,
     this.errorText,
     this.onChanged,
+    this.focusNode,
   });
   final String label;
   final TextEditingController controller;
+  final FocusNode? focusNode;
   final bool required;
   final bool allowNa;
   final int maxLines;
@@ -3686,17 +4443,20 @@ class _Field extends StatelessWidget {
               final showChip = allowNa && (value.text.isEmpty || isNa);
               return TextField(
                 controller: controller,
+                focusNode: focusNode,
                 readOnly: isNa && allowNa,
                 minLines: 1,
                 maxLines: maxLines,
-                maxLength: maxLength,
+                // Texto: o limite fica no formatter (não corta o "Não
+                // aplicável", que é maior que o CEP de 9).
+                maxLength: money || digitsOnly ? maxLength : null,
                 keyboardType:
                     money || digitsOnly ? TextInputType.number : keyboard,
                 inputFormatters: money
                     ? [CurrencyInputFormatter()]
                     : digitsOnly
                         ? [FilteringTextInputFormatter.digitsOnly]
-                        : [SaleFormFieldFormatter(mask)],
+                        : [SaleFormFieldFormatter(mask, maxLength: maxLength)],
                 onChanged: onChanged,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w600,
@@ -4311,7 +5071,15 @@ class _ParticipantCard extends StatelessWidget {
           _PickerField(
             label: 'Usuário',
             required: true,
-            value: p.userId == null ? null : p.userName,
+            // Gerência antiga sem usuário: mostra o nome gravado (o web a
+            // salva assim); toque para escolher o usuário.
+            value: p.userId == null
+                ? (p.legadoSemId && p.funcao.ehGerencia
+                    ? (p.userName.isNotEmpty
+                        ? p.userName
+                        : '${p.funcao.label} (sem usuário)')
+                    : null)
+                : p.userName,
             placeholder: 'Selecionar quem recebe',
             onTap: onPickUser,
           ),
@@ -5391,6 +6159,352 @@ class _LinhaRevisao extends StatelessWidget {
             const SizedBox(width: 2),
             Icon(LucideIcons.chevronRight, size: 16, color: muted),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Vínculo com o imóvel do cadastro, logo abaixo do código: botão "Buscar
+/// pelo código" e, vinculado, o aviso do web sobre virar Vendido ao concluir.
+class _ImovelVinculo extends StatelessWidget {
+  const _ImovelVinculo({
+    required this.accent,
+    required this.linked,
+    required this.buscando,
+    required this.notice,
+    required this.onBuscar,
+    required this.onDesvincular,
+  });
+
+  final Color accent;
+  final bool linked;
+  final bool buscando;
+  final SaleFormLinkedNotice? notice;
+  final VoidCallback onBuscar;
+  final VoidCallback onDesvincular;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final warn = notice?.tone == SaleFormLinkedNoticeTone.warn;
+    final tone = !linked
+        ? muted
+        : (warn ? AppColors.status.warning : AppColors.status.success);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+        decoration: BoxDecoration(
+          color: linked
+              ? tone.withValues(alpha: isDark ? 0.14 : 0.08)
+              : accent.withValues(alpha: isDark ? 0.10 : 0.05),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: (linked ? tone : accent).withValues(alpha: 0.28),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  linked ? LucideIcons.link : LucideIcons.search,
+                  size: 16,
+                  color: linked ? tone : accent,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    linked
+                        ? 'Vinculada ao imóvel do cadastro'
+                        : 'Busque pelo código para vincular ao cadastro',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      color: ThemeHelpers.textColor(context),
+                    ),
+                  ),
+                ),
+                if (buscando)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: accent),
+                    ),
+                  )
+                else ...[
+                  TextButton(
+                    onPressed: onBuscar,
+                    style: TextButton.styleFrom(
+                      foregroundColor: accent,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: Text(linked ? 'Trocar' : 'Buscar',
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                  if (linked)
+                    IconButton(
+                      tooltip: 'Desvincular imóvel',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: onDesvincular,
+                      icon: Icon(LucideIcons.x, size: 16, color: muted),
+                    ),
+                ],
+              ],
+            ),
+            if (linked && notice != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Quando todas as partes concluírem as assinaturas e a ficha '
+                'ficar finalizada, o sistema tenta marcar o imóvel como '
+                'Vendido.',
+                style: TextStyle(fontSize: 12.5, height: 1.35, color: muted),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                notice!.situacao,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  height: 1.35,
+                  fontWeight: FontWeight.w600,
+                  color: warn ? tone : ThemeHelpers.textColor(context),
+                ),
+              ),
+            ] else if (!linked)
+              Padding(
+                padding: const EdgeInsets.only(top: 4, right: 4),
+                child: Text(
+                  'Com o vínculo, o imóvel vira Vendido ao concluir as '
+                  'assinaturas. Sem vínculo, a ficha segue só com o endereço.',
+                  style: TextStyle(fontSize: 12, height: 1.35, color: muted),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Resultado da busca por código (`propriedadesBusca` do web): toque para
+/// vincular e preencher o endereço.
+class _ImovelHitsSheet extends StatelessWidget {
+  const _ImovelHitsSheet({
+    required this.hits,
+    required this.code,
+    required this.accent,
+  });
+
+  final List<SaleFormPropertyHit> hits;
+  final String code;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    final n = hits.length;
+    return SafeArea(
+      top: false,
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.75,
+        ),
+        decoration: BoxDecoration(
+          color: ThemeHelpers.cardBackgroundColor(context),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        ),
+        padding: const EdgeInsets.fromLTRB(18, 10, 18, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 38,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: muted.withValues(alpha: 0.35),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Imóveis encontrados',
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 17,
+                color: ThemeHelpers.textColor(context),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              n == 1
+                  ? '1 imóvel com o código “$code”. Toque para vincular.'
+                  : '$n imóveis com o código “$code”. Toque no certo para '
+                      'vincular.',
+              style: TextStyle(fontSize: 13, color: muted),
+            ),
+            const SizedBox(height: 8),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                padding: EdgeInsets.zero,
+                itemCount: n,
+                itemBuilder: (context, i) {
+                  final h = hits[i];
+                  final titulo = h.code.isEmpty || h.code == h.id
+                      ? 'Imóvel sem código'
+                      : h.code;
+                  final st = h.status == null
+                      ? null
+                      : saleFormPropertyStatusLabel(h.status);
+                  return InkWell(
+                    onTap: () => Navigator.of(context).pop(h),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(
+                              color: ThemeHelpers.borderLightColor(context)),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 38,
+                            height: 38,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: accent.withValues(
+                                  alpha: isDark ? 0.18 : 0.10),
+                              borderRadius: BorderRadius.circular(11),
+                            ),
+                            child: Icon(LucideIcons.house,
+                                size: 18, color: accent),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  titulo,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 14.5,
+                                    color: ThemeHelpers.textColor(context),
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  h.resumo.isEmpty
+                                      ? 'Endereço não informado'
+                                      : h.resumo,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontSize: 12.5,
+                                      height: 1.3,
+                                      color: muted),
+                                ),
+                                if (st != null && st.isNotEmpty) ...[
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    st,
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: accent,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          Icon(LucideIcons.chevronRight,
+                              size: 16, color: muted),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// "Alterar tipo da ficha" (web `HeroActionBtn` → `SaleFormTypeModal` em
+/// `changeMode`): mostra tipo e equipe atuais e abre o modal para trocar.
+class _AlterarTipoBar extends StatelessWidget {
+  const _AlterarTipoBar({
+    required this.accent,
+    required this.tipo,
+    required this.equipe,
+    required this.onTap,
+  });
+  final Color accent;
+  final String tipo;
+  final String equipe;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = ThemeHelpers.textSecondaryColor(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: ThemeHelpers.borderColor(context)),
+          ),
+          child: Row(
+            children: [
+              Icon(LucideIcons.layers, size: 18, color: accent),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  [tipo, if (equipe.trim().isNotEmpty) equipe.trim()]
+                      .join(' · '),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: muted,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(LucideIcons.pencil, size: 14, color: accent),
+              const SizedBox(width: 4),
+              Text(
+                'Alterar tipo',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  color: accent,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -24,8 +24,20 @@ import '../services/property_local_draft_storage.dart';
 import '../../../../core/routes/app_routes.dart';
 import '../models/property_wizard_pop_result.dart';
 import '../utils/property_edit_permissions.dart';
+import '../utils/property_price_display.dart';
+import '../utils/property_publish_rules.dart';
 import '../utils/property_status_visual.dart';
 import '../utils/property_type_visual.dart';
+import '../widgets/details/property_activation_sheet.dart';
+import '../widgets/details/property_status_change_sheet.dart';
+import '../services/property_list_signals_service.dart';
+import '../utils/property_list_signals.dart';
+import '../widgets/predictive_analysis_sheet.dart';
+import '../widgets/stale_properties_sheet.dart';
+import 'recent_deals_page.dart';
+import 'properties_map_page.dart';
+import 'captures_report_page.dart';
+import 'property_settings_hub_page.dart';
 
 // Formatter de moeda
 final _currencyFormatter = NumberFormat.currency(
@@ -128,6 +140,10 @@ class _PropertiesPageState extends State<PropertiesPage> {
   Object? _errorDetail;
   bool _errorFromException = false;
   PropertyFilters? _filters;
+
+  /// Contagem por aba (`portfolio-counts`) sob os filtros atuais.
+  PropertyPortfolioCounts? _portfolioCounts;
+  int _portfolioCountsTicket = 0;
   String _searchQuery = '';
   /// Tópico escolhido na sugestão (condomínio, rua, bairro). Vale só enquanto
   /// a busca for exatamente o rótulo dele — apagar ou redigitar o texto volta
@@ -150,6 +166,10 @@ class _PropertiesPageState extends State<PropertiesPage> {
 
   int _localDraftCount = 0;
 
+  /// Imóveis com alteração de campos protegidos aguardando aprovação (selo
+  /// "Edição pendente" do card, web `pendingEditPropertyIds`).
+  Set<String> _pendingEditPropertyIds = <String>{};
+
   /// Chave usada para guardar/restaurar estado desta tela quando o usuário
   /// sai e volta em curto prazo (filtros + termo de busca).
   static const String _stateCacheKey = 'properties:list';
@@ -161,6 +181,43 @@ class _PropertiesPageState extends State<PropertiesPage> {
     _loadProperties();
     _refreshLocalDraftCount();
     _scrollController.addListener(_onScroll);
+    unawaited(_loadPendingEditIds());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_maybeShowStaleReminder());
+    });
+  }
+
+  /// `GET /property-change-requests/pending-property-ids` — falha = vazio.
+  Future<void> _loadPendingEditIds() async {
+    final ids =
+        await PropertyListSignalsService.instance.getPendingEditPropertyIds();
+    if (!mounted) return;
+    setState(() => _pendingEditPropertyIds = ids);
+  }
+
+  /// Lembrete de imóveis parados (`stale-for-user`). No web ele abre no
+  /// `Layout` (qualquer tela, logo após o login), uma vez por sessão do
+  /// navegador, para empresas com o módulo de imóveis. O app não tem um
+  /// "layout" equivalente fora de dashboard/drawer/login (que não são desta
+  /// tarefa), então o gatilho é a primeira abertura da lista de imóveis na
+  /// execução do app — mesma frequência (1x por sessão) e o mesmo controle
+  /// de "lembrar depois" (12h), "abrir" (24h) e "adiar" (7 dias).
+  Future<void> _maybeShowStaleReminder() async {
+    if (PropertyListSignalsService.staleReminderHandledThisSession) return;
+    final access = ModuleAccessService.instance;
+    if (!access.isModuleAvailableForCompany('property_management')) return;
+    PropertyListSignalsService.staleReminderHandledThisSession = true;
+    final items =
+        await PropertyListSignalsService.instance.getStalePropertiesToShow();
+    if (!mounted || items.isEmpty) return;
+    await showStalePropertiesReminder(
+      context,
+      items: items,
+      onOpenUpdates: (id) {
+        if (!mounted) return;
+        Navigator.of(context).pushNamed('/properties/$id?tab=updates');
+      },
+    );
   }
 
   @override
@@ -189,7 +246,14 @@ class _PropertiesPageState extends State<PropertiesPage> {
       _searchController.text = cachedSearch;
     }
     if (cachedFilters is PropertyFilters) {
-      _filters = cachedFilters;
+      // Estado guardado pela versão antiga do "Apenas inativos"
+      // (`isActive=false`, que o back ignora) vira a aba Inativos.
+      _filters = cachedFilters.isActive == false
+          ? cachedFilters.copyWithNullable(
+              portfolioScope: PortfolioScope.inactive,
+              resetIsActive: true,
+            )
+          : cachedFilters;
     }
   }
 
@@ -213,6 +277,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
     if (!mounted || result == null) return;
 
     await _reloadList();
+    if (!mounted) return;
     if (result is PropertyWizardPopResult) {
       final r = result;
       if (r.showApprovalShortcut &&
@@ -368,7 +433,12 @@ class _PropertiesPageState extends State<PropertiesPage> {
         f.responsibleUserId == null &&
         f.onlyMyData != true &&
         f.portfolioScope == null &&
-        f.includeInactive != true;
+        f.includeInactive != true &&
+        f.finalidade == null &&
+        (f.code ?? '').isEmpty &&
+        f.sortBy == null &&
+        !f.hasExtendedListFilters &&
+        f.listDeletedOnly != true;
   }
 
   Future<void> _loadProperties({
@@ -399,6 +469,9 @@ class _PropertiesPageState extends State<PropertiesPage> {
 
     try {
       final filters = _buildRequestFilters();
+      // Contagem das abas com os mesmos filtros/busca (sem a aba) — em
+      // paralelo, não segura a lista.
+      unawaited(_loadPortfolioCounts(filters));
 
       final response = await _propertyService.getProperties(
         page: _currentPage,
@@ -468,6 +541,24 @@ class _PropertiesPageState extends State<PropertiesPage> {
     }
   }
 
+  /// `GET /properties/portfolio-counts` — números das abas da carteira. Só a
+  /// resposta da última chamada vale; falha some com os números (as abas
+  /// continuam funcionando sem eles).
+  Future<void> _loadPortfolioCounts(PropertyFilters? filters) async {
+    final ticket = ++_portfolioCountsTicket;
+    try {
+      final res = await _propertyService.getPortfolioCounts(filters: filters);
+      if (!mounted || ticket != _portfolioCountsTicket) return;
+      setState(() {
+        _portfolioCounts = res.success ? res.data : null;
+      });
+    } catch (_) {
+      if (mounted && ticket == _portfolioCountsTicket) {
+        setState(() => _portfolioCounts = null);
+      }
+    }
+  }
+
   /// Atualiza lista/KPIs; em busca silenciosa adia o `setState` para o próximo
   /// frame para não invalidar semantics do `CustomScrollView` durante digitação.
   void _applyPropertiesListState(VoidCallback apply, {required bool defer}) {
@@ -484,6 +575,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
 
   /// Recarrega a listagem mantendo header/hero quando já houve carga inicial.
   Future<void> _reloadList({bool refreshStats = true}) {
+    unawaited(_loadPendingEditIds());
     return _loadProperties(
       refresh: true,
       silent: _hasLoadedOnce,
@@ -580,7 +672,35 @@ class _PropertiesPageState extends State<PropertiesPage> {
       case 'portfolio_metrics':
         _showPortfolioOverflowMetricsSheet(context);
         break;
+      case 'recent_deals':
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const RecentDealsPage()),
+        );
+        break;
+      // Mapa da carteira: abre com os filtros atuais da lista (o web lê os
+      // mesmos filtros salvos da listagem).
+      case 'portfolio_map':
+        final mapFilters = _buildRequestFilters();
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => PropertiesMapPage(initialFilters: mapFilters),
+          ),
+        );
+        break;
+      case 'captures_report':
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const CapturesReportPage()),
+        );
+        break;
+      case 'property_settings':
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => const PropertySettingsHubPage(),
+          ),
+        );
+        break;
       case 'export_import':
+        final exportFilters = _buildRequestFilters();
         showModalBottomSheet(
           context: context,
           isScrollControlled: true,
@@ -592,7 +712,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
             ),
           ),
           clipBehavior: Clip.antiAlias,
-          builder: (context) => const ExportImportDialog(),
+          builder: (context) => ExportImportDialog(filters: exportFilters),
         ).then((success) {
           if (success == true) {
             _reloadList();
@@ -632,19 +752,51 @@ class _PropertiesPageState extends State<PropertiesPage> {
 
   PortfolioScope? get _activeScope => _filters?.portfolioScope;
 
-  /// "Apenas inativos" — verdadeiro filtro: backend recebe `isActive=false`
-  /// e devolve SÓ cadastros desativados. (O antigo `includeInactive` apenas
-  /// _incluía_ inativos junto com ativos, o que confundia o corretor.)
-  bool get _onlyInactive => _filters?.isActive == false;
+  /// "Apenas inativos" = aba **Inativos** do web (`portfolioScope=inactive`).
+  /// O `GET /properties` não lê `isActive`; mandar `isActive=false` (como
+  /// antes) não filtrava nada.
+  bool get _onlyInactive => _activeScope == PortfolioScope.inactive;
 
   bool get _onlyMyProperties => _filters?.onlyMyData == true;
+
+  /// "Somente excluídos" (soft delete) — web: quem pode excluir imóveis
+  /// (`property:delete` ou gestão da empresa).
+  bool get _canAuditDeletedProperties {
+    final access = ModuleAccessService.instance;
+    final role = access.userRole?.toLowerCase() ?? '';
+    return role == 'master' ||
+        role == 'admin' ||
+        role == 'manager' ||
+        access.hasPermission('property:delete');
+  }
+
+  bool get _showDeletedOnly => _filters?.listDeletedOnly == true;
+
+  /// Liga/desliga a lista de excluídos. Como no web, ligar volta para a aba
+  /// "Todos" (a aba não vale nesse modo).
+  void _toggleShowDeletedOnly() {
+    final base = _filters ?? PropertyFilters();
+    final next = !_showDeletedOnly;
+    setState(() {
+      _filters = base.copyWithNullable(
+        listDeletedOnly: next,
+        resetListDeletedOnly: !next,
+        resetPortfolioScope: next,
+      );
+    });
+    _persistState();
+    _reloadList();
+  }
 
   void _setPortfolioScope(PortfolioScope? scope) {
     final base = _filters ?? PropertyFilters();
     setState(() {
+      // Escolher uma aba sai do modo "só excluídos" (no web as abas ficam
+      // travadas nesse modo; aqui o toque já resolve).
       _filters = base.copyWithNullable(
         portfolioScope: scope,
         resetPortfolioScope: scope == null,
+        resetListDeletedOnly: true,
       );
     });
     _persistState();
@@ -652,19 +804,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
   }
 
   void _toggleOnlyInactive() {
-    final base = _filters ?? PropertyFilters();
-    final next = !_onlyInactive;
-    setState(() {
-      _filters = base.copyWithNullable(
-        isActive: next ? false : null,
-        resetIsActive: !next,
-        // Limpamos `includeInactive` antigo para não conflitar com a nova
-        // semântica baseada em `isActive`.
-        resetIncludeInactive: true,
-      );
-    });
-    _persistState();
-    _reloadList();
+    _setPortfolioScope(_onlyInactive ? null : PortfolioScope.inactive);
   }
 
   void _toggleOnlyMyProperties() {
@@ -699,9 +839,10 @@ class _PropertiesPageState extends State<PropertiesPage> {
     final isDark = theme.brightness == Brightness.dark;
     final accent = _portfolioAccentColor(context);
 
+    // "Apenas inativos" é a própria aba Inativos — conta uma vez só.
     final activeCount = (_activeScope != null ? 1 : 0) +
         (_onlyMyProperties ? 1 : 0) +
-        (_onlyInactive ? 1 : 0);
+        (_showDeletedOnly ? 1 : 0);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -771,6 +912,22 @@ class _PropertiesPageState extends State<PropertiesPage> {
           tone: const Color(0xFF6366F1),
           onTap: _toggleOnlyInactive,
         ),
+        if (_canAuditDeletedProperties) ...[
+          const SizedBox(height: 4),
+          _FlatToggleRow(
+            icon: Icons.delete_rounded,
+            inactiveIcon: Icons.delete_outline_rounded,
+            label: _showDeletedOnly
+                ? 'Mostrando só excluídos'
+                : 'Somente excluídos',
+            hint: _showDeletedOnly
+                ? 'Fichas excluídas abrem só para consulta'
+                : 'Auditoria de imóveis excluídos',
+            active: _showDeletedOnly,
+            tone: const Color(0xFFE11D48),
+            onTap: _toggleShowDeletedOnly,
+          ),
+        ],
         const SizedBox(height: 12),
         _buildPortfolioScopeStrip(context),
       ],
@@ -785,47 +942,92 @@ class _PropertiesPageState extends State<PropertiesPage> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
+    final counts = _portfolioCounts;
+    _ScopeChipData scope(
+      PortfolioScope? s, {
+      required String label,
+      required IconData icon,
+      required Color tone,
+    }) {
+      return _ScopeChipData(
+        label: label,
+        icon: icon,
+        active: _activeScope == s,
+        tone: tone,
+        count: counts == null ? null : (s == null ? counts.total : counts.of(s)),
+        onTap: () => _setPortfolioScope(s),
+      );
+    }
+
+    // Mesmas abas e ordem do web (`PROPERTY_PORTFOLIO_SCOPES`), com a
+    // contagem de `portfolio-counts` sob os filtros atuais.
     final chips = <_ScopeChipData>[
-      _ScopeChipData(
+      scope(
+        null,
         label: 'Todos',
         icon: Icons.apps_rounded,
-        active: _activeScope == null,
         tone: theme.colorScheme.primary,
-        onTap: () => _setPortfolioScope(null),
       ),
-      _ScopeChipData(
+      scope(
+        PortfolioScope.available,
         label: 'Disponíveis',
         icon: Icons.check_circle_rounded,
-        active: _activeScope == PortfolioScope.available,
         tone: PropertyStatusVisual.of(
           PropertyStatus.available,
           dark: isDark,
         ).color,
-        onTap: () => _setPortfolioScope(PortfolioScope.available),
       ),
-      _ScopeChipData(
+      scope(
+        PortfolioScope.negotiation,
+        label: 'Em negociação',
+        icon: Icons.handshake_rounded,
+        tone: PropertyStatusVisual.of(
+          PropertyStatus.inNegotiation,
+          dark: isDark,
+        ).color,
+      ),
+      scope(
+        PortfolioScope.sold,
         label: 'Vendidos',
         icon: Icons.sell_rounded,
-        active: _activeScope == PortfolioScope.sold,
         tone: PropertyStatusVisual.of(PropertyStatus.sold, dark: isDark).color,
-        onTap: () => _setPortfolioScope(PortfolioScope.sold),
       ),
-      _ScopeChipData(
+      scope(
+        PortfolioScope.rented,
+        label: 'Locados',
+        icon: Icons.key_rounded,
+        tone:
+            PropertyStatusVisual.of(PropertyStatus.rented, dark: isDark).color,
+      ),
+      scope(
+        PortfolioScope.pending,
         label: 'Pendentes',
         icon: Icons.schedule_rounded,
-        active: _activeScope == PortfolioScope.pending,
         tone: PropertyStatusVisual.of(
           PropertyStatus.pendingApproval,
           dark: isDark,
         ).color,
-        onTap: () => _setPortfolioScope(PortfolioScope.pending),
       ),
-      _ScopeChipData(
+      scope(
+        PortfolioScope.rejected,
         label: 'Recusados',
         icon: Icons.cancel_rounded,
-        active: _activeScope == PortfolioScope.rejected,
         tone: isDark ? AppColors.status.errorDarkMode : AppColors.status.error,
-        onTap: () => _setPortfolioScope(PortfolioScope.rejected),
+      ),
+      scope(
+        PortfolioScope.others,
+        label: 'Outros',
+        icon: Icons.more_horiz_rounded,
+        tone: PropertyStatusVisual.of(
+          PropertyStatus.maintenance,
+          dark: isDark,
+        ).color,
+      ),
+      scope(
+        PortfolioScope.inactive,
+        label: 'Inativos',
+        icon: Icons.archive_rounded,
+        tone: const Color(0xFF6366F1),
       ),
     ];
 
@@ -858,6 +1060,7 @@ class _PropertiesPageState extends State<PropertiesPage> {
                           icon: rows[r][c]!.icon,
                           active: rows[r][c]!.active,
                           tone: rows[r][c]!.tone,
+                          count: rows[r][c]!.count,
                           isDark: isDark,
                           onTap: rows[r][c]!.onTap,
                         ),
@@ -1210,11 +1413,12 @@ class _PropertiesPageState extends State<PropertiesPage> {
           if (p.statusIsKnown && p.status.isRentalFunnel) inRentalFunnel++;
           break;
       }
-      if (p.salePrice != null) {
+      // "0.00" = não se aplica: não entra na média.
+      if (hasApplicablePrice(p.salePrice)) {
         sumSale += p.salePrice!;
         countSale++;
       }
-      if (p.rentPrice != null) {
+      if (hasApplicablePrice(p.rentPrice)) {
         sumRent += p.rentPrice!;
         countRent++;
       }
@@ -1863,7 +2067,15 @@ class _PropertiesPageState extends State<PropertiesPage> {
         _filters!.minPrice != null ||
         _filters!.maxPrice != null ||
         _filters!.minArea != null ||
-        _filters!.maxArea != null;
+        _filters!.maxArea != null ||
+        _filters!.state != null ||
+        _filters!.bedrooms != null ||
+        _filters!.bathrooms != null ||
+        _filters!.parkingSpaces != null ||
+        _filters!.finalidade != null ||
+        (_filters!.code ?? '').isNotEmpty ||
+        _filters!.sortBy != null ||
+        _filters!.hasExtendedListFilters;
   }
 
   void _performSearch(String query) {
@@ -2544,6 +2756,25 @@ class _PropertiesPageState extends State<PropertiesPage> {
                                       property.isAvailableForSite ?? false,
                                   dense: true,
                                 ),
+                                if (property.isDeleted)
+                                  const _CardSignalChip(
+                                    icon: Icons.delete_outline_rounded,
+                                    label: 'Excluído',
+                                    tone: Color(0xFFE11D48),
+                                  ),
+                                // Selo do web: alteração de campos protegidos
+                                // aguardando aprovação (ainda não aplicada).
+                                if (_pendingEditPropertyIds
+                                    .contains(property.id))
+                                  const Tooltip(
+                                    message:
+                                        'Alteração de campos protegidos aguardando aprovação. As mudanças ainda não foram aplicadas.',
+                                    child: _CardSignalChip(
+                                      icon: Icons.schedule_rounded,
+                                      label: 'Edição pendente',
+                                      tone: Color(0xFF4F46E5),
+                                    ),
+                                  ),
                               ],
                             ),
                           ),
@@ -2744,6 +2975,35 @@ class _PropertiesPageState extends State<PropertiesPage> {
                           ],
                         ],
                       ),
+                      // L7: última atividade do histórico (web ~2907).
+                      if (property.lastActivity != null) ...[
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.history_rounded,
+                              size: 12,
+                              color: secondaryColor,
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                propertyLastActivityLine(
+                                  property.lastActivity!,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: secondaryColor,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 10.5,
+                                  height: 1.2,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -3093,7 +3353,36 @@ class _PropertiesPageState extends State<PropertiesPage> {
         access.hasPermission('match:view') &&
         access.isModuleAvailableForCompany('match_system');
 
+    // Atalhos que o web tem no menu do card (PropertiesPage.tsx ~3261-3431):
+    // alterar status (inclui vendido/locado), ativar/desativar e publicar/
+    // ocultar do site. Reaproveitam as folhas do detalhe.
+    final role = access.userRole?.toLowerCase() ?? '';
+    final elevated = role == 'master' || role == 'admin' || role == 'manager';
+    final deleted = property.isDeleted;
+    final canToggleActive = elevated && canEdit && !deleted;
+    final canPublishToggle = !deleted &&
+        canEdit &&
+        (role == 'master' ||
+            role == 'admin' ||
+            access.hasPermission('property:approve_publication')) &&
+        property.statusRaw == PropertyStatus.available.value;
+    final onSite = property.isAvailableForSite == true;
+    final publishBlock = canPublishToggle && !onSite
+        ? sitePublishBlockReason(property)
+        : null;
+    // "Análise preditiva" do web: módulo de IA e imóvel Disponível.
+    final canPredict = !deleted &&
+        access.isModuleAvailableForCompany('ai_assistant') &&
+        property.statusRaw == PropertyStatus.available.value;
+
     final parentContext = context;
+
+    void afterSheet(Future<void> Function() action) {
+      Future.microtask(() async {
+        if (!mounted || !parentContext.mounted) return;
+        await action();
+      });
+    }
 
     await showModalBottomSheet<void>(
       context: context,
@@ -3103,9 +3392,21 @@ class _PropertiesPageState extends State<PropertiesPage> {
       barrierColor: Colors.black54,
       builder: (sheetContext) => _PropertyQuickActionsSheet(
         property: property,
-        canMatches: canMatches,
-        canEdit: canEdit,
-        canDelete: canDelete,
+        canMatches: canMatches && !deleted,
+        // Excluído abre só para consulta: sem editar/excluir de novo.
+        canEdit: canEdit && !deleted,
+        canDelete: canDelete && !deleted,
+        onPredictiveAnalysis: canPredict
+            ? () {
+                Navigator.of(sheetContext).pop();
+                afterSheet(
+                  () => showPredictiveAnalysisSheet(
+                    parentContext,
+                    propertyId: property.id,
+                  ),
+                );
+              }
+            : null,
         compactLocation: _compactLocationLine(property),
         priceLine: _formatMainPrice(property).value,
         onOpenDetails: () {
@@ -3152,6 +3453,97 @@ class _PropertiesPageState extends State<PropertiesPage> {
                 });
               }
             : null,
+        onChangeStatus: deleted
+            ? null
+            : () {
+                Navigator.of(sheetContext).pop();
+                afterSheet(() async {
+                  final changed = await showPropertyStatusChangeSheet(
+                    context: parentContext,
+                    property: property,
+                    canRentOutKeepSale: elevated,
+                    lockedReason: canEdit
+                        ? null
+                        : evaluatePropertyEditPermission(
+                            property: property,
+                            currentUserId: access.userId,
+                            userRole: access.userRole,
+                            hasPermission: access.hasPermission,
+                          ).reasonMessage,
+                  );
+                  if (changed && mounted) _reloadList();
+                });
+              },
+        onToggleActive: canToggleActive
+            ? () {
+                Navigator.of(sheetContext).pop();
+                afterSheet(() async {
+                  final changed = await showPropertyActivationSheet(
+                    context: parentContext,
+                    property: property,
+                    canToggle: true,
+                  );
+                  if (changed && mounted) _reloadList();
+                });
+              }
+            : null,
+        publishBlockReason: publishBlock,
+        onTogglePublish: canPublishToggle
+            ? () {
+                Navigator.of(sheetContext).pop();
+                afterSheet(() => _toggleSitePublication(property));
+              }
+            : null,
+      ),
+    );
+  }
+
+  /// Publicar/Ocultar do site pelo menu do card — `PATCH /properties/:id
+  /// { isAvailableForSite }`, exatamente como o `handleTogglePublicSite` do
+  /// web (só essa chave).
+  Future<void> _toggleSitePublication(Property property) async {
+    final publish = property.isAvailableForSite != true;
+    if (publish && sitePublishBlockReason(property) != null) return;
+    final res = await _propertyService.updateProperty(property.id, {
+      'isAvailableForSite': publish,
+    });
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    if (res.success) {
+      final pending = res.data?.pendingChangeRequest != null;
+      messenger.showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor:
+              pending ? AppColors.status.info : AppColors.status.success,
+          content: Text(
+            pending
+                ? 'A mudança foi enviada para aprovação.'
+                : publish
+                    ? 'Imóvel publicado no site.'
+                    : 'Imóvel removido do site.',
+          ),
+        ),
+      );
+      _reloadList();
+      return;
+    }
+    final raw = (res.message ?? '').trim();
+    final lower = raw.toLowerCase();
+    final String message;
+    if (res.statusCode == 403 && lower.contains('seu plano não permite')) {
+      message = 'Seu plano não permite disponibilizar imóveis no site.';
+    } else if (res.statusCode == 403 &&
+        lower.contains('limite de propriedades públicas')) {
+      message = 'Limite de imóveis no site atingido.';
+    } else {
+      message = raw.isEmpty ? 'Não foi possível atualizar o site.' : raw;
+    }
+    messenger.showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: AppColors.status.error,
+        content: Text(message),
       ),
     );
   }
@@ -3417,33 +3809,14 @@ class _PropertiesPageState extends State<PropertiesPage> {
     );
   }
 
-  ({String label, String value}) _formatMainPrice(Property property) {
-    if (property.salePrice != null && property.rentPrice != null) {
-      return (
-        label: 'VENDA E LOCAÇÃO',
-        value: '${_formatCompactCurrency(property.salePrice!)} · ${_formatCompactCurrency(property.rentPrice!)}/mês',
+  /// Preço "0.00" é "não se aplica" (o lado que a finalidade não anuncia),
+  /// nunca "R$ 0": venda + locação só aparecem juntos quando os dois valem.
+  ({String label, String value}) _formatMainPrice(Property property) =>
+      propertyListPriceLine(
+        salePrice: property.salePrice,
+        rentPrice: property.rentPrice,
       );
-    }
-    if (property.salePrice != null) {
-      return (label: 'VALOR DE VENDA', value: _currencyFormatter.format(property.salePrice));
-    }
-    if (property.rentPrice != null) {
-      return (label: 'VALOR DE ALUGUEL', value: '${_currencyFormatter.format(property.rentPrice)}/mês');
-    }
-    return (label: 'VALOR', value: 'Sob consulta');
-  }
 
-  String _formatCompactCurrency(double value) {
-    if (value >= 1000000) {
-      final compact = value / 1000000;
-      return 'R\$ ${compact.toStringAsFixed(compact >= 10 ? 0 : 1)}M';
-    }
-    if (value >= 1000) {
-      final compact = value / 1000;
-      return 'R\$ ${compact.toStringAsFixed(compact >= 100 ? 0 : 1)}k';
-    }
-    return _currencyFormatter.format(value);
-  }
 
   String _formatPropertyLocation(Property property) {
     if (property.address.trim().isNotEmpty) {
@@ -3720,7 +4093,11 @@ class _PropertiesOverflowSheet extends StatelessWidget {
                 ),
               ),
               // ── Tiles ────────────────────────────────────────────────
-              Padding(
+              // Rolável: com mapa/relatório/configurações a lista pode
+              // passar da altura em telas pequenas.
+              Flexible(
+              child: SingleChildScrollView(
+              child: Padding(
                 padding: EdgeInsets.fromLTRB(
                   8,
                   10,
@@ -3755,14 +4132,69 @@ class _PropertiesOverflowSheet extends StatelessWidget {
                     ),
                     const _OverflowHairline(),
                     _OverflowTile(
-                      icon: Icons.import_export_rounded,
-                      label: 'Exportar / Importar',
-                      subtitle: 'Backup em planilha e carga em massa',
-                      color: const Color(0xFF14B8A6),
-                      onTap: () => Navigator.of(context).pop('export_import'),
+                      icon: Icons.verified_rounded,
+                      label: 'Vendidos e locados',
+                      subtitle: 'Negócios fechados recentemente',
+                      color: const Color(0xFF16A34A),
+                      onTap: () => Navigator.of(context).pop('recent_deals'),
                     ),
+                    // Mapa da carteira (web `/properties/map`, gate
+                    // `property:view` — o mesmo desta lista).
+                    if (ModuleAccessService.instance
+                        .hasPermission('property:view')) ...[
+                      const _OverflowHairline(),
+                      _OverflowTile(
+                        icon: Icons.map_rounded,
+                        label: 'Mapa da carteira',
+                        subtitle: 'Imóveis no mapa com os filtros da lista',
+                        color: const Color(0xFF2563EB),
+                        onTap: () =>
+                            Navigator.of(context).pop('portfolio_map'),
+                      ),
+                    ],
+                    // Relatório de captações (web: gestão OU criar/editar/
+                    // excluir imóveis — `hasPropertyManagePermission`).
+                    if (CapturesReportPage.canOpen()) ...[
+                      const _OverflowHairline(),
+                      _OverflowTile(
+                        icon: Icons.leaderboard_rounded,
+                        label: 'Relatório de captações',
+                        subtitle: 'Captações por período, equipe e corretor',
+                        color: const Color(0xFF0EA5E9),
+                        onTap: () =>
+                            Navigator.of(context).pop('captures_report'),
+                      ),
+                    ],
+                    // Mesmo gate do back: `property:export` / `property:import`.
+                    if (ExportImportDialog.isAvailable()) ...[
+                      const _OverflowHairline(),
+                      _OverflowTile(
+                        icon: Icons.import_export_rounded,
+                        label: 'Exportar / Importar',
+                        subtitle: 'Planilha com os filtros da lista',
+                        color: const Color(0xFF14B8A6),
+                        onTap: () =>
+                            Navigator.of(context).pop('export_import'),
+                      ),
+                    ],
+                    // Configurações de imóveis — no web ficam no menu
+                    // Configurações (drawer, fora do alcance desta tela);
+                    // aqui só para quem abre ao menos uma delas.
+                    if (PropertySettingsHubPage.isAvailable()) ...[
+                      const _OverflowHairline(),
+                      _OverflowTile(
+                        icon: Icons.tune_rounded,
+                        label: 'Configurações de imóveis',
+                        subtitle: 'Cadastro, aprovações e dados do proprietário',
+                        color: const Color(0xFF64748B),
+                        onTap: () =>
+                            Navigator.of(context).pop('property_settings'),
+                      ),
+                    ],
                   ],
                 ),
+              ),
+              ),
               ),
             ],
           ),
@@ -4729,6 +5161,21 @@ class _PropertyQuickActionsSheet extends StatelessWidget {
   /// Compartilhar link público — null quando o imóvel não está no site.
   final VoidCallback? onShare;
 
+  /// "Alterar status" (inclui vendido/locado) — null em imóvel excluído.
+  final VoidCallback? onChangeStatus;
+
+  /// Ativar/Desativar — null para quem não é gestão.
+  final VoidCallback? onToggleActive;
+
+  /// Publicar/Ocultar do site — null sem a permissão ou fora de Disponível.
+  final VoidCallback? onTogglePublish;
+
+  /// Por que não dá para publicar agora (ex.: menos de 5 fotos).
+  final String? publishBlockReason;
+
+  /// "Análise preditiva" (IA) — null sem o módulo ou fora de Disponível.
+  final VoidCallback? onPredictiveAnalysis;
+
   const _PropertyQuickActionsSheet({
     required this.property,
     required this.canMatches,
@@ -4741,6 +5188,11 @@ class _PropertyQuickActionsSheet extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     this.onShare,
+    this.onChangeStatus,
+    this.onToggleActive,
+    this.onTogglePublish,
+    this.publishBlockReason,
+    this.onPredictiveAnalysis,
   });
 
   @override
@@ -4972,6 +5424,57 @@ class _PropertyQuickActionsSheet extends StatelessWidget {
                           color: const Color(0xFF6366F1), // indigo
                           onTap: onEdit,
                         ),
+                      if (onChangeStatus != null)
+                        _PropertyQuickActionTile(
+                          icon: LucideIcons.arrowLeftRight,
+                          label: 'Alterar status',
+                          subtitle: property.hasPendingFinancialApproval == true
+                              ? 'Vendido/alugado aguardam a aprovação financeira'
+                              : 'Vendido, alugado, funil de locação e mais',
+                          color: const Color(0xFF2563EB), // azul
+                          onTap: onChangeStatus!,
+                        ),
+                      if (onTogglePublish != null)
+                        _PropertyQuickActionTile(
+                          icon: property.isAvailableForSite == true
+                              ? LucideIcons.eyeOff
+                              : LucideIcons.globe,
+                          label: property.isAvailableForSite == true
+                              ? 'Ocultar do site'
+                              : 'Publicar no site',
+                          subtitle: property.isAvailableForSite == true
+                              ? 'Some do site público na hora'
+                              : (publishBlockReason != null
+                                  ? 'Não dá pra publicar: $publishBlockReason'
+                                  : 'Passa a aparecer no site público'),
+                          color: const Color(0xFF16A34A), // verde
+                          enabled: property.isAvailableForSite == true ||
+                              publishBlockReason == null,
+                          onTap: onTogglePublish!,
+                        ),
+                      if (onToggleActive != null)
+                        _PropertyQuickActionTile(
+                          icon: property.isActive
+                              ? LucideIcons.toggleRight
+                              : LucideIcons.toggleLeft,
+                          label: property.isActive
+                              ? 'Desativar imóvel'
+                              : 'Ativar imóvel',
+                          subtitle: property.isActive
+                              ? 'Continua no cadastro, sai de circulação'
+                              : 'Volta a ser tratado como ativo',
+                          color: const Color(0xFF64748B), // ardósia
+                          onTap: onToggleActive!,
+                        ),
+                      if (onPredictiveAnalysis != null)
+                        _PropertyQuickActionTile(
+                          icon: LucideIcons.sparkles,
+                          label: 'Análise preditiva',
+                          subtitle:
+                              'Valor, tempo de venda e recomendações da IA',
+                          color: const Color(0xFFD946EF), // fúcsia (IA)
+                          onTap: onPredictiveAnalysis!,
+                        ),
                       if (canDelete)
                         _PropertyQuickActionTile(
                           icon: LucideIcons.trash2,
@@ -5007,6 +5510,9 @@ class _PropertyQuickActionTile extends StatelessWidget {
   final VoidCallback onTap;
   final bool isDestructive;
 
+  /// `false` mostra a ação esmaecida e sem toque (o motivo vai no subtítulo).
+  final bool enabled;
+
   const _PropertyQuickActionTile({
     required this.icon,
     required this.label,
@@ -5014,6 +5520,7 @@ class _PropertyQuickActionTile extends StatelessWidget {
     required this.color,
     required this.onTap,
     this.isDestructive = false,
+    this.enabled = true,
   });
 
   @override
@@ -5022,10 +5529,12 @@ class _PropertyQuickActionTile extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final muted = ThemeHelpers.textSecondaryColor(context);
 
-    return Material(
+    return Opacity(
+      opacity: enabled ? 1 : 0.5,
+      child: Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: onTap,
+        onTap: enabled ? onTap : null,
         borderRadius: BorderRadius.circular(14),
         splashColor: color.withValues(alpha: 0.16),
         highlightColor: color.withValues(alpha: 0.08),
@@ -5067,7 +5576,8 @@ class _PropertyQuickActionTile extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
-                      maxLines: 1,
+                      // Ação travada explica o motivo — cabe em 2 linhas.
+                      maxLines: enabled ? 1 : 2,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
                         fontWeight: FontWeight.w500,
@@ -5082,6 +5592,7 @@ class _PropertyQuickActionTile extends StatelessWidget {
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -5098,12 +5609,16 @@ class _ScopeChipData {
     required this.active,
     required this.tone,
     required this.onTap,
+    this.count,
   });
   final String label;
   final IconData icon;
   final bool active;
   final Color tone;
   final VoidCallback onTap;
+
+  /// Quantos imóveis a aba abre (`portfolio-counts`); `null` = sem número.
+  final int? count;
 }
 
 class _PortfolioScopeChip extends StatelessWidget {
@@ -5117,6 +5632,7 @@ class _PortfolioScopeChip extends StatelessWidget {
     required this.tone,
     required this.isDark,
     required this.onTap,
+    this.count,
   });
 
   final String label;
@@ -5125,6 +5641,7 @@ class _PortfolioScopeChip extends StatelessWidget {
   final Color tone;
   final bool isDark;
   final VoidCallback onTap;
+  final int? count;
 
   @override
   Widget build(BuildContext context) {
@@ -5163,8 +5680,25 @@ class _PortfolioScopeChip extends StatelessWidget {
               Flexible(
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
-                  child: Text(
-                    label,
+                  child: Text.rich(
+                    TextSpan(
+                      text: label,
+                      children: [
+                        if (count != null)
+                          TextSpan(
+                            text: '  ${_compactIntFormatter.format(count)}',
+                            style: TextStyle(
+                              color: active
+                                  ? tone
+                                  : ThemeHelpers.textSecondaryColor(context),
+                              fontWeight: FontWeight.w700,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
                     maxLines: 1,
                     softWrap: false,
                     style: TextStyle(
@@ -5190,6 +5724,50 @@ class _SpecBit {
   const _SpecBit({required this.icon, required this.label});
   final IconData icon;
   final String label;
+}
+
+/// Pílula de sinal do card ("Edição pendente", "Excluído") — mesma altura
+/// das pílulas densas de status/situação ao lado.
+class _CardSignalChip extends StatelessWidget {
+  const _CardSignalChip({
+    required this.icon,
+    required this.label,
+    required this.tone,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final fg = isDark ? Color.lerp(tone, Colors.white, 0.35)! : tone;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: isDark ? 0.22 : 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: tone.withValues(alpha: 0.32)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 11, color: fg),
+          const SizedBox(width: 3),
+          Text(
+            label,
+            style: TextStyle(
+              color: fg,
+              fontWeight: FontWeight.w800,
+              fontSize: 10,
+              height: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// Thumbnail do row CRM — 92×92 com borda fina e fallback gracioso quando
@@ -5281,6 +5859,48 @@ class _BrokerRowThumbnail extends StatelessWidget {
                   Icons.image_not_supported_rounded,
                   size: 14,
                   color: Colors.white70,
+                ),
+              ),
+            // Galeria com vídeo (`hasVideo`).
+            if (property.hasVideo == true)
+              Positioned(
+                left: 4,
+                bottom: 4,
+                child: Tooltip(
+                  message: 'Tem vídeo na galeria',
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.2),
+                      ),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.play_circle_fill_rounded,
+                          size: 10,
+                          color: Colors.white,
+                        ),
+                        SizedBox(width: 3),
+                        Text(
+                          'Vídeo',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 9.5,
+                            height: 1,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
           ],

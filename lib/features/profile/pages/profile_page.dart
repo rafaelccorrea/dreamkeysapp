@@ -16,6 +16,7 @@ import '../../../../shared/widgets/app_error_state.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/brand_wordmark_logo.dart';
 import '../../../../shared/widgets/skeleton_box.dart';
+import '../../finance/pin/widgets/finance_biometric_tile.dart';
 import '../../organization/pages/edit_company_page.dart';
 import '../../organization/services/company_admin_service.dart';
 import '../widgets/avatar_edit_modal.dart';
@@ -434,6 +435,12 @@ class _ProfilePageState extends State<ProfilePage> {
                       _buildBadge(context, brand),
                       _sectionBreak(context),
                       _buildCanChangeSection(context, brand),
+                      // Biometria do Financeiro (opt-in, 03/10/2026) — some
+                      // sozinha sem o módulo ou sem biometria no aparelho.
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(_kPadH, 14, _kPadH, 0),
+                        child: FinanceBiometricTile(),
+                      ),
                       _sectionBreak(context),
                       _buildLockedSection(context),
                       if (_canManageCompanies) ...[

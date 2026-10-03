@@ -97,26 +97,27 @@ class Validators {
     return null;
   }
 
-  /// Valida CNPJ
+  /// Valida CNPJ — numérico ou ALFANUMÉRICO (Receita/SERPRO, 2026): 12
+  /// caracteres [A-Z0-9] + 2 DVs numéricos. Paridade com `validateCNPJ` do
+  /// web e com o `CNPJAlfanumericoValidator` do back.
   static String? cnpj(String? value, {String? message}) {
     if (value == null || value.trim().isEmpty) {
       return message ?? 'CNPJ é obrigatório';
     }
 
-    // Remove caracteres não numéricos
-    final cnpjDigits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    final clean = value.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
 
-    if (cnpjDigits.length != 14) {
-      return message ?? 'CNPJ deve conter 14 dígitos';
+    if (clean.length != 14) {
+      return message ?? 'CNPJ deve conter 14 caracteres';
     }
 
     // Valida se todos os dígitos são iguais
-    if (RegExp(r'^(\d)\1+$').hasMatch(cnpjDigits)) {
+    if (RegExp(r'^(\d)\1+$').hasMatch(clean)) {
       return message ?? 'CNPJ inválido';
     }
 
     // Valida dígitos verificadores
-    if (!_isValidCnpj(cnpjDigits)) {
+    if (!isValidCnpj(clean)) {
       return message ?? 'CNPJ inválido';
     }
 
@@ -132,8 +133,12 @@ class Validators {
       return null;
     }
 
-    // Remove caracteres não numéricos
-    final phoneDigits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    // Dígitos sem o DDI 55 de um número completo (transv-20).
+    var phoneDigits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    if ((phoneDigits.length == 12 || phoneDigits.length == 13) &&
+        phoneDigits.startsWith('55')) {
+      phoneDigits = phoneDigits.substring(2);
+    }
 
     // Aceita telefone (10 dígitos) ou celular (11 dígitos)
     if (phoneDigits.length < 10 || phoneDigits.length > 11) {
@@ -304,26 +309,33 @@ class Validators {
     return true;
   }
 
-  static bool _isValidCnpj(String cnpj) {
+  /// Dígitos verificadores do CNPJ (numérico ou alfanumérico). Cada
+  /// caractere vale `código ASCII - 48` (0–9 → 0–9, A → 17 … Z → 42); para
+  /// CNPJ só numérico o cálculo é o tradicional. Aceita com ou sem máscara.
+  static bool isValidCnpj(String value) {
+    final cnpj = value.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
     if (cnpj.length != 14) return false;
+    if (!RegExp(r'^[A-Z0-9]{12}[0-9]{2}$').hasMatch(cnpj)) return false;
+
+    int v(int i) => cnpj.codeUnitAt(i) - 48;
 
     // Valida primeiro dígito verificador
-    final weights1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    const weights1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
     int sum = 0;
     for (int i = 0; i < 12; i++) {
-      sum += int.parse(cnpj[i]) * weights1[i];
+      sum += v(i) * weights1[i];
     }
     int digit1 = sum % 11 < 2 ? 0 : 11 - (sum % 11);
-    if (digit1 != int.parse(cnpj[12])) return false;
+    if (digit1 != v(12)) return false;
 
     // Valida segundo dígito verificador
-    final weights2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    const weights2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
     sum = 0;
     for (int i = 0; i < 13; i++) {
-      sum += int.parse(cnpj[i]) * weights2[i];
+      sum += v(i) * weights2[i];
     }
     int digit2 = sum % 11 < 2 ? 0 : 11 - (sum % 11);
-    if (digit2 != int.parse(cnpj[13])) return false;
+    if (digit2 != v(13)) return false;
 
     return true;
   }

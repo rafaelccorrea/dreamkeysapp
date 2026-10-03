@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../../../core/constants/api_constants.dart';
 import '../../../shared/services/api_service.dart';
 import '../../../shared/services/property_service.dart';
+import '../models/approval_chat_inbox_item.dart';
 import '../models/property_activity_models.dart';
 import '../models/property_change_request.dart';
 
@@ -818,6 +819,62 @@ class PropertyApprovalService {
     }
   }
 
+  /// `POST /properties/:id/approval-thread/mark-seen[?context=]` — marca a
+  /// conversa como vista para o usuário atual (fila específica ou as duas).
+  /// Zera o "não lidas" da caixa de conversas (imoveis-33).
+  Future<ApiResponse<void>> markApprovalThreadSeen(
+    String propertyId, {
+    ApprovalType? context,
+  }) async {
+    try {
+      final q = context != null ? '?context=${context.value}' : '';
+      final response = await _api.post<dynamic>(
+        '/properties/$propertyId/approval-thread/mark-seen$q',
+      );
+      if (response.success) {
+        return ApiResponse.success(statusCode: response.statusCode);
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao marcar a conversa como vista',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [APPROVAL] approval-thread mark-seen: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// `GET /properties/approval-chat-inbox` — caixa de conversas de aprovação
+  /// (uma por imóvel × fila), só as que o usuário participa (web
+  /// `ApprovalChatInboxPage`).
+  Future<ApiResponse<List<ApprovalChatInboxItem>>> getApprovalChatInbox() async {
+    try {
+      final response =
+          await _api.get<dynamic>('/properties/approval-chat-inbox');
+      if (response.success) {
+        return ApiResponse.success(
+          data: ApprovalChatInboxItem.listFrom(response.data),
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Não foi possível carregar as conversas.',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [APPROVAL] approval-chat-inbox: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
   // ─── Notificar responsáveis sobre contato do proprietário ─────────────
 
   /// `POST /properties/:id/notify-responsibles-owner-contact` — avisa os
@@ -1099,25 +1156,64 @@ class PropertyApprovalService {
     }
   }
 
-  /// `POST /properties/:id/vote/:voteType` — registra o voto do aprovador.
-  /// `decision` aceita `approved` | `rejected` (`ApprovalVoteDecision`).
+  /// Registra o voto do aprovador. `decision` aceita `approved` | `rejected`
+  /// (`ApprovalVoteDecision`).
+  ///
+  /// - Primeiro voto: `POST /properties/:id/vote/:voteType`.
+  /// - Mudar o voto ([isUpdate]): `PUT` na mesma rota (`updateVote` do back);
+  ///   o POST de quem já votou devolve 409 "use o endpoint de atualização".
+  ///   Se o app não sabia do voto anterior e o POST der 409, refaz como PUT.
   Future<ApiResponse<Map<String, dynamic>>> castVote(
     String propertyId, {
     required ApprovalType type,
     required bool approved,
     String? comment,
-  }) {
+    bool isUpdate = false,
+  }) async {
     final body = <String, dynamic>{
       'decision': approved ? 'approved' : 'rejected',
     };
     final c = comment?.trim();
     if (c != null && c.isNotEmpty) body['comment'] = c;
-    return _postMap(
-      endpoint: '/properties/$propertyId/vote/${type.value}',
+    final endpoint = '/properties/$propertyId/vote/${type.value}';
+    if (isUpdate) return _putVote(endpoint, body);
+    final res = await _postMap(
+      endpoint: endpoint,
       body: body,
       logTag: 'cast-vote',
       fallbackError: 'Erro ao registrar o voto',
     );
+    if (res.statusCode == 409) return _putVote(endpoint, body);
+    return res;
+  }
+
+  Future<ApiResponse<Map<String, dynamic>>> _putVote(
+    String endpoint,
+    Map<String, dynamic> body,
+  ) async {
+    try {
+      final response = await _api.put<Map<String, dynamic>>(
+        endpoint,
+        body: body,
+      );
+      if (response.success) {
+        return ApiResponse.success(
+          data: response.data ?? const <String, dynamic>{},
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.message ?? 'Erro ao alterar o voto',
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [APPROVAL] update-vote: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
   }
 
   // ─── Solicitações de alteração (campos protegidos) ────────────────────

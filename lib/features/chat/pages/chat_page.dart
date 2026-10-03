@@ -219,31 +219,98 @@ class _ChatPageState extends State<ChatPage>
     );
   }
 
+  /// Regra do web (`canDeleteChatConversationForAll`): só grupo, e só para
+  /// admin do grupo ou quem o criou — o back recusa os demais com 403.
+  bool _canDeleteRoomForAll(ChatRoom room) {
+    final me = _currentUserId;
+    if (me == null || room.type != ChatRoomType.group) return false;
+    final mine = room.participants.where((p) => p.userId == me);
+    final isAdmin = mine.isNotEmpty && mine.first.isAdmin == true;
+    return isAdmin || room.createdBy == me;
+  }
+
+  /// Sou o último administrador ativo do grupo? O back recusa a saída com
+  /// 400 nesse caso ("promova outro usuário a administrador antes de sair").
+  bool _isLastGroupAdmin(ChatRoom room) {
+    final me = _currentUserId;
+    if (me == null || room.type != ChatRoomType.group) return false;
+    final mine = room.participants.where((p) => p.userId == me && p.isActive);
+    if (mine.isEmpty || mine.first.isAdmin != true) return false;
+    return !room.participants.any(
+      (p) => p.isActive && p.isAdmin == true && p.userId != me,
+    );
+  }
+
   Future<void> _showDeleteChatDialog(
     BuildContext context,
-    ChatRoom room,
-  ) async {
+    ChatRoom room, {
+    bool forAll = false,
+  }) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final danger =
         isDark ? AppColors.status.errorDarkMode : AppColors.status.error;
     final name = room.getDisplayName(_currentUserId);
+    final isGroup = room.type == ChatRoomType.group;
+
+    // Último admin não pode sair: avisa antes, em vez de deixar o back
+    // recusar com 400. A saída é promover alguém (Editar grupo) ou, se a
+    // regra do web permitir, apagar o grupo para todos.
+    if (!forAll && _isLastGroupAdmin(room)) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text(
+            'Você é o último administrador',
+            style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.3),
+          ),
+          content: Text(
+            'Para sair de "$name", promova outro participante a '
+            'administrador antes (em Editar grupo). '
+            '${_canDeleteRoomForAll(room) ? 'Ou apague o grupo para todos.' : ''}',
+            style: const TextStyle(height: 1.4),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Entendi'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final String title;
+    final String body;
+    if (forAll) {
+      title = 'Apagar grupo para todos?';
+      body = 'Isso apaga o grupo "$name" para todos os participantes e '
+          'encerra a conversa para todos. Esta ação não pode ser desfeita.';
+    } else if (isGroup) {
+      title = 'Sair do grupo?';
+      body = 'Você sai do grupo "$name" e a conversa some da sua lista. '
+          'Os demais mantêm a conversa e o histórico.';
+    } else {
+      title = 'Excluir conversa?';
+      body = 'A conversa com $name some apenas da sua lista. '
+          'Do outro lado o histórico permanece.';
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text(
-          'Excluir conversa',
-          style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.3),
+        title: Text(
+          title,
+          style: const TextStyle(
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.3,
+          ),
         ),
         content: SingleChildScrollView(
-          child: Text(
-            room.type == ChatRoomType.group
-                ? 'Você sai do grupo "$name" e a conversa some da sua lista. '
-                      'Esta ação não pode ser desfeita.'
-                : 'A conversa com $name some da sua lista. '
-                      'Esta ação não pode ser desfeita.',
-            style: const TextStyle(height: 1.4),
-          ),
+          child: Text(body, style: const TextStyle(height: 1.4)),
         ),
         actions: [
           // Cancelar NEUTRO: o tema pinta TextButton de vermelho.
@@ -260,21 +327,27 @@ class _ChatPageState extends State<ChatPage>
               backgroundColor: danger,
               foregroundColor: Colors.white,
             ),
-            child: const Text('Excluir'),
+            child: Text(
+              forAll ? 'Apagar para todos' : (isGroup ? 'Sair' : 'Excluir'),
+            ),
           ),
         ],
       ),
     );
 
     if (confirmed == true) {
-      await _deleteRoom(room);
+      await _deleteRoom(room, forAll: forAll);
     }
   }
 
-  Future<void> _deleteRoom(ChatRoom room) async {
+  /// Como o web: `delete-for-me` para qualquer sala (em grupo o back trata
+  /// como sair) e `delete-for-all` só para grupo, admin/criador. O `/leave`
+  /// antigo era só de grupo — em conversa direta dava 400.
+  Future<void> _deleteRoom(ChatRoom room, {bool forAll = false}) async {
     try {
-      // Usar leaveRoom para sair/deletar a conversa (deixa a sala)
-      final response = await _chatApi.leaveRoom(room.id);
+      final response = forAll
+          ? await _chatApi.deleteRoomForAll(room.id)
+          : await _chatApi.deleteRoomForMe(room.id);
 
       if (response.success) {
         // Remover da lista
@@ -292,7 +365,13 @@ class _ChatPageState extends State<ChatPage>
         // Atualizar controller de não lidas
         _syncUnreadBadge();
 
-        _toast('Conversa excluída.');
+        _toast(
+          forAll
+              ? 'Grupo removido para todos os participantes.'
+              : (room.type == ChatRoomType.group
+                  ? 'Você saiu do grupo.'
+                  : 'Conversa removida da sua lista.'),
+        );
       } else {
         _toast(
           response.message ?? 'Não foi possível excluir a conversa.',
@@ -1553,31 +1632,46 @@ class _ChatPageState extends State<ChatPage>
             ),
             color: ThemeHelpers.cardBackgroundColor(context),
             onSelected: (value) {
-              if (value == 'delete') _showDeleteChatDialog(context, room);
+              if (value == 'delete') {
+                _showDeleteChatDialog(context, room);
+              } else if (value == 'delete_all') {
+                _showDeleteChatDialog(context, room, forAll: true);
+              }
             },
-            itemBuilder: (ctx) => [
-              PopupMenuItem<String>(
-                value: 'delete',
-                child: Row(
-                  children: [
-                    Icon(LucideIcons.trash2, size: 16, color: danger),
-                    const SizedBox(width: 10),
-                    Flexible(
-                      child: Text(
-                        'Excluir conversa',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: textColor,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13.5,
+            itemBuilder: (ctx) {
+              PopupMenuItem<String> item(String value, String label) =>
+                  PopupMenuItem<String>(
+                    value: value,
+                    child: Row(
+                      children: [
+                        Icon(LucideIcons.trash2, size: 16, color: danger),
+                        const SizedBox(width: 10),
+                        Flexible(
+                          child: Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: textColor,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13.5,
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
-                  ],
+                  );
+              return [
+                item(
+                  'delete',
+                  room.type == ChatRoomType.group
+                      ? 'Sair do grupo'
+                      : 'Excluir conversa',
                 ),
-              ),
-            ],
+                if (_canDeleteRoomForAll(room))
+                  item('delete_all', 'Apagar grupo para todos'),
+              ];
+            },
           ),
         ],
       ),

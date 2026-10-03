@@ -97,15 +97,78 @@ void main() {
       );
     });
 
-    test('/fichas-venda/nova e /fichas-venda/dashboard → lista', () {
+    test('/fichas-venda/assinaturas-pendentes → tela própria (transv-23)', () {
+      expect(
+        AppDeepLink.resolve(actionUrl: '/fichas-venda/assinaturas-pendentes'),
+        AppRoutes.saleFormsPendingSignatures,
+      );
+      expect(
+        AppDeepLink.resolve(
+          actionUrl:
+              'https://intellisysbr.com/sistema/fichas-venda/assinaturas-pendentes?x=1',
+        ),
+        AppRoutes.saleFormsPendingSignatures,
+      );
+    });
+
+    test('nova?propostaId (proposta finalizada) → nova ficha da proposta (V-L1)',
+        () {
       expect(
         AppDeepLink.resolve(actionUrl: '/fichas-venda/nova?propostaId=p-1'),
-        AppRoutes.saleForms,
+        AppRoutes.saleFormNewFromProposal('p-1'),
       );
       expect(
-        AppDeepLink.resolve(actionUrl: '/fichas-venda/dashboard'),
+        AppRoutes.saleFormNewFromProposal('p-1'),
+        '/sale-forms/new?proposalId=p-1',
+      );
+      // Notificação real do back (entityType purchase_proposal): o actionUrl
+      // vence a entidade.
+      expect(
+        AppDeepLink.resolve(
+          actionUrl: '/fichas-venda/nova?propostaId=p-2',
+          entityType: 'purchase_proposal',
+          entityId: 'p-2',
+        ),
+        AppRoutes.saleFormNewFromProposal('p-2'),
+      );
+      expect(
+        AppDeepLink.fromPushData({
+          'actionUrl': '/sistema/fichas-venda/nova?propostaId=p-3',
+        }),
+        AppRoutes.saleFormNewFromProposal('p-3'),
+      );
+    });
+
+    test('/fichas-venda/nova sem propostaId → lista', () {
+      expect(
+        AppDeepLink.resolve(actionUrl: '/fichas-venda/nova'),
         AppRoutes.saleForms,
       );
+    });
+
+    test('dashboards → painéis, não a lista (V-L12)', () {
+      expect(
+        AppDeepLink.resolve(actionUrl: '/fichas-venda/dashboard'),
+        AppRoutes.saleFormsDashboard,
+      );
+      expect(
+        AppDeepLink.resolve(actionUrl: '/fichas-proposta/dashboard'),
+        AppRoutes.proposalsDashboard,
+      );
+      // Consolidado: o web redireciona para o de venda.
+      expect(
+        AppDeepLink.resolve(actionUrl: '/fichas/dashboard'),
+        AppRoutes.saleFormsDashboard,
+      );
+      expect(AppDeepLink.resolve(actionUrl: '/fichas'), isNull);
+    });
+
+    test('/fichas-venda/:id/editar → edição (V-L12)', () {
+      expect(
+        AppDeepLink.resolve(actionUrl: '/fichas-venda/sf-7/editar'),
+        AppRoutes.saleFormEdit('sf-7'),
+      );
+      expect(AppRoutes.saleFormEdit('sf-7'), '/sale-forms/sf-7/edit');
     });
 
     test('entidade sale_form_signature sem saleFormId → sem destino', () {
@@ -133,6 +196,38 @@ void main() {
       expect(
         AppDeepLink.resolve(actionUrl: 'https://assina.ae/abc123'),
         isNull,
+      );
+    });
+  });
+
+  group('AppDeepLink.resolve — ficha de proposta (P9)', () {
+    test('?highlightProposal=:id abre a proposta, não a lista', () {
+      expect(
+        AppDeepLink.resolve(
+          actionUrl: '/fichas-proposta?highlightProposal=pp-1',
+        ),
+        AppRoutes.proposalEdit('pp-1'),
+      );
+    });
+
+    test('/fichas-proposta/:id/editar → a proposta', () {
+      expect(
+        AppDeepLink.resolve(actionUrl: '/fichas-proposta/pp-2/editar'),
+        AppRoutes.proposalEdit('pp-2'),
+      );
+    });
+
+    test('/fichas-proposta/nova → fluxo de nova proposta (V-L12)', () {
+      expect(
+        AppDeepLink.resolve(actionUrl: '/fichas-proposta/nova'),
+        AppRoutes.proposalNew,
+      );
+    });
+
+    test('/fichas-proposta sem id → lista', () {
+      expect(
+        AppDeepLink.resolve(actionUrl: '/fichas-proposta'),
+        AppRoutes.proposals,
       );
     });
   });

@@ -6,18 +6,27 @@ import '../../../shared/services/sale_forms_service.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import '../../organization/services/unit_service.dart';
+import '../sale_form_list_display.dart';
+import '../services/sale_form_lookup_service.dart';
 import '../widgets/sale_form_anexos_sheet.dart';
 import '../widgets/sale_form_card.dart';
 import '../widgets/sale_form_row_actions.dart';
 import '../widgets/sale_form_row_rules.dart';
+import '../widgets/sale_form_signature_lock_sheet.dart';
 import '../widgets/sale_form_signatures_sheet.dart';
 import '../widgets/sale_form_tones.dart';
+import 'sale_form_audit_page.dart';
 
-/// Visualização (read-only) de uma ficha de venda — Fase 1.
+/// Visualização (read-only) de uma ficha de venda — paridade com o web, que
+/// abre o formulário inteiro em modo leitura.
 ///
 /// De cima para baixo: quem é (nº, status, tipo, comprador), quanto vale,
-/// o que dá para fazer (Editar + menu), o andamento (assinaturas e anexos)
-/// e os dados em seções. Campo sem valor não aparece.
+/// o que dá para fazer (Editar + menu), o andamento (assinaturas, anexos e
+/// histórico/Raio-X) e todos os dados do formulário em seções (pessoas e
+/// cônjuges, imóvel e vínculo com o cadastro, financeiro, parcelas,
+/// comissões, colaboradores, usuários vinculados). Campo sem valor não
+/// aparece.
 class SaleFormDetailPage extends StatefulWidget {
   const SaleFormDetailPage({super.key, required this.saleFormId});
 
@@ -28,6 +37,13 @@ class SaleFormDetailPage extends StatefulWidget {
 }
 
 class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Web: a trava não abre nas telas `/fichas-venda…`.
+    SignatureLockWatcher.instance.marcarTelaDeFicha(context);
+  }
+
   bool _loading = true;
   String? _error;
   // Sem o código HTTP não dá para distinguir "sem permissão" de "fora do ar".
@@ -38,6 +54,13 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
   int? _sigTotal;
   int? _sigSigned;
   int? _anexoCount;
+  int? _sigTotalRegra;
+  int? _sigSignedRegra;
+
+  /// "Compartilhar com outras unidades" (web): ids gravados e nomes das
+  /// unidades ativas. `null` = ainda não carregou ou falhou (campo some).
+  List<String>? _sharedUnitIds;
+  Map<String, String> _unitNames = const {};
 
   @override
   void initState() {
@@ -65,7 +88,25 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
     });
     if (res.success && res.data != null) {
       _loadSummary();
+      _loadSharedUnits();
     }
+  }
+
+  /// Unidades compartilhadas (`GET …/unidades-compartilhadas`) e nomes das
+  /// unidades ativas — mesma fonte do formulário do web. Falha em silêncio.
+  Future<void> _loadSharedUnits() async {
+    final idsFut =
+        SaleFormLookupService.instance.unidadesCompartilhadas(widget.saleFormId);
+    final unitsFut = UnitService.instance.list(activeOnly: true);
+    final ids = await idsFut;
+    final units = await unitsFut;
+    if (!mounted) return;
+    setState(() {
+      _sharedUnitIds = ids;
+      _unitNames = units.success && units.data != null
+          ? {for (final u in units.data!) u.id: u.name}
+          : const {};
+    });
   }
 
   /// Busca contagens de assinaturas e anexos para o resumo — falha em silêncio
@@ -87,6 +128,14 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
         }).toList();
         _sigTotal = ativas.length;
         _sigSigned = ativas.where((s) => s.isSigned).length;
+        // Conta do back na listagem (`getSignatureStatsBySaleFormIds`): só
+        // as canceladas ficam de fora — é a que as regras do menu usam.
+        final naoCanceladas = sigsRes.data!.where((s) {
+          final st = s.status.toLowerCase();
+          return st != 'cancelled' && st != 'canceled';
+        }).toList();
+        _sigTotalRegra = naoCanceladas.length;
+        _sigSignedRegra = naoCanceladas.where((s) => s.isSigned).length;
       }
       if (anexosRes.success && anexosRes.data != null) {
         _anexoCount = anexosRes.data!.length;
@@ -94,19 +143,29 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
     });
   }
 
+  /// O `GET /:id` não traz `assinaturasTotal`/`assinaturasAssinadas` (só a
+  /// listagem traz); sem eles as regras do menu achavam que não havia
+  /// assinatura ativa (Editar liberado, "Cancelar assinaturas" sumia). A
+  /// ficha das regras leva as contagens do resumo carregado aqui.
+  SaleForm _comResumo(SaleForm f) => saleFormComResumoDeAssinaturas(
+        f,
+        total: _sigTotalRegra,
+        assinadas: _sigSignedRegra,
+      );
+
   void _openSignatures() {
     showSaleFormSignaturesSheet(
       context,
       saleFormId: widget.saleFormId,
       formNumber: _form?.formNumber,
       canInvalidate: _form != null &&
-          SaleFormRowRules(_form!).canCancelSignaturesForResend,
+          SaleFormRowRules(_comResumo(_form!)).canCancelSignaturesForResend,
       onChanged: _loadSummary,
     );
   }
 
   Future<void> _onAction(SaleForm f, SaleFormRowAction a) async {
-    final changed = await runSaleFormRowAction(context, f, a);
+    final changed = await runSaleFormRowAction(context, _comResumo(f), a);
     if (!mounted || !changed) return;
     // Excluída/cancelada volta para a lista já recarregada.
     if (a == SaleFormRowAction.excluir) {
@@ -166,13 +225,8 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
     final m = _margem(context);
     final vendedor = f.sellerName?.trim() ?? '';
     final comissao = _money(f.totalCommission);
-
-    // Endereço do imóvel resumido.
-    final propLoc = [
-      f.propertyNeighborhood?.trim(),
-      f.propertyCity?.trim(),
-      f.propertyState?.trim(),
-    ].where((e) => e != null && e.isNotEmpty).join(', ');
+    final r = f.raw;
+    final emp = f.empreendimentoData;
 
     return ListView(
       padding: EdgeInsets.fromLTRB(m, 14, m, 28),
@@ -253,7 +307,7 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
 
         const SizedBox(height: 18),
         _AcoesDaFicha(
-          rules: SaleFormRowRules(f),
+          rules: SaleFormRowRules(_comResumo(f)),
           onAction: (a) => _onAction(f, a),
         ),
 
@@ -284,30 +338,37 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
 
         const SizedBox(height: 24),
 
-        // ── Comprador ──────────────────────────────────────────────────
+        // Somente leitura, na ordem das abas do formulário do web (que
+        // abre a ficha inteira em modo leitura).
+
+        // ── Dados gerais ───────────────────────────────────────────────
         _Section(
-          icon: Icons.person_outline,
-          title: 'COMPRADOR',
+          icon: Icons.info_outline,
+          title: 'DADOS GERAIS',
           children: [
-            _Field('Nome', f.buyerName),
-            _Field('CPF/CNPJ', f.buyerCpf),
-            _Field('E-mail', f.buyerEmail),
-            _Field('Telefone', f.buyerPhone),
-            _Field('Cidade/UF', _join(f.buyerCity, f.buyerState)),
+            _Field('Equipe', f.teamName),
+            _Field('Data da venda', _data(r['saleDate'])),
+            _Field('Unidade de venda', f.saleUnit),
+            _Field(
+              'Compartilhar com outras unidades',
+              saleFormSharedUnitsText(_sharedUnitIds, _unitNames),
+            ),
+            _Field('Mídia de origem', f.mediaSource),
+            _Field('Gerente', f.managerName),
+            _Field('Secretária presente', _txt(r['secretaryPresent'])),
+            _Field('Grupo geral', r['generalGroup'] == true ? 'Sim' : null),
+            _Field('Corretor externo', f.externalBrokerName),
+            _Field('Descrição', f.description),
           ],
         ),
 
-        // ── Vendedor ───────────────────────────────────────────────────
-        _Section(
-          icon: Icons.person_outline,
-          title: 'VENDEDOR',
-          children: [
-            _Field('Nome', f.sellerName),
-            _Field('CPF/CNPJ', f.sellerCpf),
-            _Field('E-mail', f.sellerEmail),
-            _Field('Telefone', f.sellerPhone),
-          ],
-        ),
+        // ── Pessoas ────────────────────────────────────────────────────
+        _pessoa('COMPRADOR', 'buyer', docLabel: 'CPF/CNPJ'),
+        _pessoa('CÔNJUGE / SÓCIO DO COMPRADOR', 'buyerSpouse'),
+        if (!f.saleFormType.isEmpreendimento) ...[
+          _pessoa('VENDEDOR', 'seller', docLabel: 'CPF/CNPJ'),
+          _pessoa('CÔNJUGE / SÓCIO DO VENDEDOR', 'sellerSpouse'),
+        ],
 
         // ── Imóvel / Empreendimento ────────────────────────────────────
         if (f.saleFormType.isEmpreendimento)
@@ -315,13 +376,12 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
             icon: Icons.domain_outlined,
             title: 'EMPREENDIMENTO',
             children: [
-              _Field('Incorporadora',
-                  f.empreendimentoData?['incorporadora']?.toString()),
-              _Field('Empreendimento',
-                  f.empreendimentoData?['empreendimento']?.toString()),
-              _Field('Unidade', f.empreendimentoData?['unidade']?.toString()),
-              _Field('Forma de pagamento',
-                  f.empreendimentoData?['formaPagamento']?.toString()),
+              _Field('Incorporadora', _txt(emp?['incorporadora'])),
+              _Field('Empreendimento', _txt(emp?['empreendimento'])),
+              _Field('Unidade', _txt(emp?['unidade'])),
+              _Field('Data da entrada', _data(emp?['dataEntrada'])),
+              _Field('Valor da entrada', _moneyRaw(emp?['valorEntrada'])),
+              _Field('Forma de pagamento', _txt(emp?['formaPagamento'])),
             ],
           )
         else
@@ -330,7 +390,24 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
             title: 'IMÓVEL',
             children: [
               _Field('Código', f.propertyCode),
-              _Field('Localização', propLoc.isEmpty ? null : propLoc),
+              _Field(
+                'Cadastro',
+                f.propertyId != null
+                    ? 'Vinculada ao imóvel do cadastro (vira Vendido ao '
+                        'concluir as assinaturas)'
+                    : null,
+              ),
+              _Field('CEP', _txt(r['propertyZipCode'])),
+              _Field(
+                'Endereço',
+                _juntar([
+                  _txt(r['propertyAddress']),
+                  _txt(r['propertyNumber']),
+                  _txt(r['propertyComplement']),
+                ], ', '),
+              ),
+              _Field('Bairro', f.propertyNeighborhood),
+              _Field('Cidade/UF', _join(f.propertyCity, f.propertyState)),
             ],
           ),
 
@@ -342,6 +419,10 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
             _Field('Valor da venda', _money(f.saleValue)),
             _Field('Comissão total', _money(f.totalCommission)),
             _Field('Meta', _money(f.goalValue)),
+            _Field('Confissão de dívida', _simNao(r['debtConfession'])),
+            if (r['debtConfession'] == true)
+              _Field('Valor da confissão', _moneyRaw(r['debtConfessionValue'])),
+            _Field('Financiamento 100%', _simNao(r['fullFinancing'])),
             // Só o texto exibido muda: o valor gravado segue
             // `nao_aplicavel` (Não aplicável).
             _Field(
@@ -350,46 +431,207 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
                   ? 'Não se aplica'
                   : 'Obrigatório',
             ),
+            _Field('Descrição do pagamento',
+                _txt(r['commissionPaymentModelDescription'])),
           ],
         ),
 
-        // ── Comissões / corretores ─────────────────────────────────────
-        if (f.corretores.isNotEmpty)
-          _Section(
-            icon: Icons.groups_outlined,
-            title: 'CORRETORES',
-            children: [
-              for (final c in f.corretores)
-                if (c is Map)
-                  _Field(
-                    (c['nome'] ?? c['name'] ?? 'Corretor').toString(),
-                    c['porcentagem'] != null ? '${c['porcentagem']}%' : null,
-                  ),
-            ],
-          ),
+        // ── Parcelamento da comissão ───────────────────────────────────
+        ..._parcelas(r['commissionInstallmentsData']),
 
-        // ── Geral ──────────────────────────────────────────────────────
+        // ── Comissões ──────────────────────────────────────────────────
         _Section(
-          icon: Icons.info_outline,
-          title: 'GERAL',
+          icon: Icons.groups_outlined,
+          title: 'COMISSÕES',
+          children: _comissoes(f.commissionsData),
+        ),
+
+        // ── Colaboradores ──────────────────────────────────────────────
+        _Section(
+          icon: Icons.support_agent_outlined,
+          title: 'COLABORADORES',
           children: [
-            _Field('Equipe', f.teamName),
-            _Field('Unidade de venda', f.saleUnit),
-            _Field('Mídia de origem', f.mediaSource),
-            _Field('Gerente', f.managerName),
-            _Field('Corretor externo', f.externalBrokerName),
+            _Field('Pré-atendimento',
+                _txt(f.collaboratorsData?['preAtendimento'])),
+            _Field('Central de captação',
+                _txt(f.collaboratorsData?['centralCaptacao'])),
+          ],
+        ),
+
+        // ── Usuários vinculados ────────────────────────────────────────
+        _Section(
+          icon: Icons.person_add_alt_outlined,
+          title: 'USUÁRIOS VINCULADOS',
+          children: [
+            for (final u in f.linkedUsers) _usuarioVinculado(u),
+          ],
+        ),
+
+        // ── Registro ───────────────────────────────────────────────────
+        _Section(
+          icon: Icons.history_rounded,
+          title: 'REGISTRO',
+          children: [
             _Field('Criado por', f.creatorName),
+            _Field('Criado em', _dataHora(f.createdAt)),
+            _Field('Atualizado em', _dataHora(f.updatedAt)),
             _Field(
-              'Criado em',
-              f.createdAt != null
-                  ? DateFormat('dd/MM/yyyy HH:mm', 'pt_BR')
-                      .format(f.createdAt!.toLocal())
-                  : null,
+              'Situação',
+              f.ativo ? null : 'Desativada automaticamente (regra de rotina)',
             ),
-            _Field('Descrição', f.description),
           ],
         ),
       ],
+    );
+  }
+
+  // ── Leitura do `raw` (mesmos campos do formulário) ─────────────────────
+
+  /// Texto com conteúdo; "Não aplicável" aparece como "Não se aplica".
+  String? _txt(dynamic v) {
+    final s = (v ?? '').toString().trim();
+    if (s.isEmpty) return null;
+    if (s.toLowerCase() == 'não aplicável' || s.toLowerCase() == 'nao aplicavel') {
+      return 'Não se aplica';
+    }
+    return s;
+  }
+
+  String? _simNao(dynamic v) => v is bool ? (v ? 'Sim' : 'Não') : null;
+
+  /// Data sem fuso ("2026-09-20T00:00:00.000Z" → 20/09/2026).
+  String? _data(dynamic v) {
+    final t = _txt(v);
+    if (t == null || t == 'Não se aplica') return t;
+    final m = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(t);
+    if (m != null) return '${m[3]}/${m[2]}/${m[1]}';
+    return t;
+  }
+
+  String? _dataHora(DateTime? d) => d == null
+      ? null
+      : DateFormat('dd/MM/yyyy HH:mm', 'pt_BR').format(d.toLocal());
+
+  String? _moneyRaw(dynamic v) {
+    if (v == null) return null;
+    final n = v is num ? v.toDouble() : double.tryParse(v.toString());
+    return _money(n);
+  }
+
+  String? _juntar(List<String?> partes, String sep) {
+    final p = partes.whereType<String>().where((e) => e.isNotEmpty).toList();
+    return p.isEmpty ? null : p.join(sep);
+  }
+
+  String _pct(dynamic v) {
+    final n = v is num ? v : num.tryParse('$v');
+    if (n == null) return '$v%';
+    final s = n.toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), '');
+    return '${s.replaceAll('.', ',')}%';
+  }
+
+  /// Pessoa com os mesmos campos do formulário (prefixo do web).
+  Widget _pessoa(String titulo, String p, {String docLabel = 'CPF'}) {
+    final r = _form!.raw;
+    final uf = _txt(r['${p}State']);
+    final cidade = _txt(r['${p}City']);
+    return _Section(
+      icon: Icons.person_outline,
+      title: titulo,
+      children: [
+        _Field('Nome', _txt(r['${p}Name'])),
+        _Field(docLabel, _txt(r['${p}Cpf'])),
+        _Field('RG', _txt(r['${p}Rg'])),
+        _Field('Nascimento', _data(r['${p}BirthDate'])),
+        _Field('Profissão', _txt(r['${p}Profession'])),
+        _Field('E-mail', _txt(r['${p}Email'])),
+        _Field('Celular', _txt(r['${p}Phone'])),
+        _Field('CEP', _txt(r['${p}ZipCode'])),
+        _Field(
+          'Endereço',
+          _juntar([
+            _txt(r['${p}Street']),
+            _txt(r['${p}Number']),
+            _txt(r['${p}Complement']),
+          ], ', '),
+        ),
+        _Field('Bairro', _txt(r['${p}Neighborhood'])),
+        _Field('Cidade/UF', _join(cidade, uf)),
+      ],
+    );
+  }
+
+  /// `commissionInstallmentsData`: {parcelado, quantidadeParcelas,
+  /// parcelasIguais, valoresParcelas}.
+  List<Widget> _parcelas(dynamic inst) {
+    if (inst is! Map || inst['parcelado'] != true) return const [];
+    final q = inst['quantidadeParcelas'];
+    final iguais = inst['parcelasIguais'] != false;
+    final vals = inst['valoresParcelas'];
+    return [
+      _Section(
+        icon: Icons.calendar_month_outlined,
+        title: 'PARCELAMENTO DA COMISSÃO',
+        children: [
+          _Field('Parcelas', q == null ? 'Sim' : '$q'),
+          _Field('Valores', iguais ? 'Parcelas iguais' : 'Valores diferentes'),
+          if (!iguais && vals is List)
+            for (var i = 0; i < vals.length; i++)
+              _Field('${i + 1}ª parcela', _moneyRaw(vals[i])),
+        ],
+      ),
+    ];
+  }
+
+  /// Corretores/captadores/SDR/outros e gerências (diretor, gestor SDR).
+  List<Widget> _comissoes(Map<String, dynamic>? cd) {
+    if (cd == null) return const [];
+    String funcao(String? f) => switch ((f ?? '').toLowerCase()) {
+          'captador' => 'Captador',
+          'sdr' => 'SDR',
+          'outros' => 'Outros',
+          _ => 'Corretor',
+        };
+    final out = <Widget>[];
+    for (final c in (cd['corretores'] as List? ?? const [])) {
+      if (c is! Map) continue;
+      final nome = (c['nome'] ?? c['name'] ?? '').toString().trim();
+      final vf = c['valorFixo'];
+      final pc = c['porcentagem'];
+      final parte = vf is num && vf > 0
+          ? _money(vf.toDouble())
+          : (pc is num && pc > 0 ? _pct(pc) : null);
+      final nota = c['emitirNota'] == true ? ' · emite nota' : '';
+      out.add(_Field(
+        '${funcao(c['funcao']?.toString())}${nome.isEmpty ? '' : ' · $nome'}',
+        parte == null ? (nome.isEmpty ? null : '—$nota') : '$parte$nota',
+      ));
+    }
+    for (final g in (cd['gerencias'] as List? ?? const [])) {
+      if (g is! Map) continue;
+      final papel = switch (g['papel']?.toString()) {
+        'diretor' => 'Diretor',
+        'gestor_sdr' => 'Gestor SDR',
+        _ => 'Gerência',
+      };
+      final nome = (g['nome'] ?? '').toString().trim();
+      final pc = g['porcentagem'];
+      final nota = g['emitirNota'] == true ? ' · emite nota' : '';
+      out.add(_Field(
+        '$papel${nome.isEmpty ? '' : ' · $nome'}',
+        pc == null ? null : '${_pct(pc)}$nota',
+      ));
+    }
+    return out;
+  }
+
+  Widget _usuarioVinculado(Map<String, dynamic> u) {
+    final user = u['user'] ?? u['User'];
+    final nome = user is Map ? (user['name'] ?? '').toString().trim() : '';
+    final email = user is Map ? (user['email'] ?? '').toString().trim() : '';
+    return _Field(
+      nome.isEmpty ? 'Usuário' : nome,
+      email.isEmpty ? 'Vinculado' : email,
     );
   }
 
@@ -410,6 +652,9 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
       return _anexoCount == 1 ? '1 anexo' : '${_anexoCount!} anexos';
     }
 
+    final bloqueioAssinaturas = _form == null
+        ? null
+        : SaleFormRowRules(_comResumo(_form!)).signaturesBlockReason;
     final total = _sigTotal ?? 0;
     final progresso = total > 0
         ? ((_sigSigned ?? 0) / total).clamp(0.0, 1.0).toDouble()
@@ -423,13 +668,16 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
           title: 'ASSINATURAS E ANEXOS',
         ),
         const SizedBox(height: 12),
+        // Web: o modal de assinaturas só abre com update e ficha não
+        // finalizada/cancelada/excluída — aqui o card fica travado e diz o
+        // porquê (o back também recusa gerar links em ficha cancelada).
         _ActionCard(
           icon: Icons.draw_outlined,
           tom: SaleFormTom.sucesso(context),
           title: 'Assinaturas',
-          subtitle: sigSummary(),
-          progresso: progresso,
-          onTap: _openSignatures,
+          subtitle: bloqueioAssinaturas ?? sigSummary(),
+          progresso: bloqueioAssinaturas == null ? progresso : null,
+          onTap: bloqueioAssinaturas == null ? _openSignatures : null,
         ),
         const SizedBox(height: 10),
         _ActionCard(
@@ -439,7 +687,27 @@ class _SaleFormDetailPageState extends State<SaleFormDetailPage> {
           subtitle: anexoSummary(),
           onTap: _openAnexos,
         ),
+        const SizedBox(height: 10),
+        // "Raio-X completo" do web: quem mudou o quê e quando.
+        _ActionCard(
+          icon: Icons.history_rounded,
+          tom: SaleFormTom.aviso(context),
+          title: 'Histórico (Raio-X)',
+          subtitle: 'Quem criou, editou ou mexeu nas assinaturas, e quando',
+          onTap: _openHistorico,
+        ),
       ],
+    );
+  }
+
+  void _openHistorico() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SaleFormAuditPage(
+          saleFormId: widget.saleFormId,
+          formNumber: _form?.formNumber,
+        ),
+      ),
     );
   }
 
@@ -617,7 +885,9 @@ class _ActionCard extends StatelessWidget {
   final SaleFormTom tom;
   final String title;
   final String subtitle;
-  final VoidCallback onTap;
+
+  /// `null` = travado (opaco, cadeado no lugar do chevron).
+  final VoidCallback? onTap;
 
   /// 0..1 — quantos já assinaram; null = sem barra.
   final double? progresso;
@@ -627,7 +897,10 @@ class _ActionCard extends StatelessWidget {
     final muted = ThemeHelpers.textSecondaryColor(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final p = progresso;
-    return Material(
+    final travado = onTap == null;
+    return Opacity(
+      opacity: travado ? 0.6 : 1,
+      child: Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
@@ -691,10 +964,17 @@ class _ActionCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 4),
-              Icon(Icons.chevron_right_rounded, color: muted),
+              Icon(
+                travado
+                    ? Icons.lock_outline_rounded
+                    : Icons.chevron_right_rounded,
+                color: muted,
+                size: travado ? 18 : null,
+              ),
             ],
           ),
         ),
+      ),
       ),
     );
   }

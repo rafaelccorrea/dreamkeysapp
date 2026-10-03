@@ -4,42 +4,56 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../features/workspace/models/company_team_model.dart';
-import '../../../features/workspace/services/company_team_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
 import '../../../shared/widgets/app_error_state.dart';
+import '../services/sale_form_lookup_service.dart';
 
 /// Resultado do modal de tipo + equipe.
 class SaleFormTypeChoice {
   final SaleFormType type;
   final String teamId;
   final String teamName;
+
+  /// Unidade (filial) da equipe — sugere a "Unidade responsável" (web).
+  final String? teamUnitId;
   const SaleFormTypeChoice({
     required this.type,
     required this.teamId,
     required this.teamName,
+    this.teamUnitId,
   });
 }
 
 /// Modal que abre ANTES do formulário de criação: escolhe o **tipo** da ficha
 /// e a **equipe** (obrigatória) — espelha o `SaleFormTypeModal` do web.
-Future<SaleFormTypeChoice?> showSaleFormTypeModal(BuildContext context) {
+///
+/// Na criação nada vem marcado (o web exige escolher o tipo). Com [initial]
+/// é o "Alterar tipo da ficha" do formulário (`changeMode` do web): já abre
+/// com o tipo e a equipe atuais.
+Future<SaleFormTypeChoice?> showSaleFormTypeModal(
+  BuildContext context, {
+  SaleFormTypeChoice? initial,
+}) {
   return showModalBottomSheet<SaleFormTypeChoice>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => const _SaleFormTypeSheet(),
+    builder: (_) => _SaleFormTypeSheet(initial: initial),
   );
 }
 
 class _SaleFormTypeSheet extends StatefulWidget {
-  const _SaleFormTypeSheet();
+  const _SaleFormTypeSheet({this.initial});
+  final SaleFormTypeChoice? initial;
   @override
   State<_SaleFormTypeSheet> createState() => _SaleFormTypeSheetState();
 }
 
 class _SaleFormTypeSheetState extends State<_SaleFormTypeSheet> {
-  SaleFormType _type = SaleFormType.terceiros;
-  String? _teamId;
+  late SaleFormType? _type = widget.initial?.type;
+  late String? _teamId =
+      (widget.initial?.teamId.isNotEmpty ?? false) ? widget.initial!.teamId : null;
+  bool get _alterando => widget.initial != null;
   String _teamSearch = '';
   final _searchCtrl = TextEditingController();
 
@@ -69,22 +83,15 @@ class _SaleFormTypeSheetState extends State<_SaleFormTypeSheet> {
       _loading = true;
       _error = null;
     });
-    final res = await CompanyTeamService.instance.listTeams(
-      status: 'active',
-      limit: 100,
-    );
+    // Catálogo `GET /teams?useInSaleForms=true`, como o web (já filtrado e
+    // ordenado).
+    final res = await SaleFormLookupService.instance.equipesDeFichas();
     if (!mounted) return;
     setState(() {
       _loading = false;
       if (res.success && res.data != null) {
-        _teams =
-            res.data!.teams
-                .where((t) => t.useInSaleForms && t.isActive)
-                .toList()
-              ..sort(
-                (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-              );
-        if (_teams.length == 1) _teamId = _teams.first.id;
+        _teams = res.data!;
+        if (_teams.length == 1 && _teamId == null) _teamId = _teams.first.id;
         _error = null;
         _errorStatus = 0;
       } else {
@@ -136,7 +143,7 @@ class _SaleFormTypeSheetState extends State<_SaleFormTypeSheet> {
       if (_teamSearch.isEmpty) return true;
       return t.name.toLowerCase().contains(_teamSearch);
     }).toList();
-    final canConfirm = _teamId != null;
+    final canConfirm = _type != null && _teamId != null;
 
     Widget sectionLabel(String text, {bool required = false}) => Row(
       children: [
@@ -244,7 +251,7 @@ class _SaleFormTypeSheetState extends State<_SaleFormTypeSheet> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'Nova ficha de venda',
+                    _alterando ? 'Alterar tipo da ficha' : 'Nova ficha de venda',
                     style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w900,
                       color: textColor,
@@ -253,7 +260,9 @@ class _SaleFormTypeSheetState extends State<_SaleFormTypeSheet> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Escolha o tipo e a equipe para começar.',
+                    _alterando
+                        ? 'Troque o tipo e/ou a equipe; os dados já preenchidos continuam.'
+                        : 'Escolha o tipo e a equipe para começar.',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: secondary,
                     ),
@@ -267,7 +276,7 @@ class _SaleFormTypeSheetState extends State<_SaleFormTypeSheet> {
                 shrinkWrap: true,
                 padding: const EdgeInsets.fromLTRB(18, 18, 18, 8),
                 children: [
-                  sectionLabel('TIPO'),
+                  sectionLabel('TIPO', required: true),
                   const SizedBox(height: 10),
                   for (final t in SaleFormType.values) ...[
                     _TypeTile(
@@ -309,14 +318,19 @@ class _SaleFormTypeSheetState extends State<_SaleFormTypeSheet> {
                 child: FilledButton.icon(
                   onPressed: canConfirm
                       ? () {
-                          final team = _teams.firstWhere(
-                            (t) => t.id == _teamId,
-                          );
+                          CompanyTeam? team;
+                          for (final t in _teams) {
+                            if (t.id == _teamId) team = t;
+                          }
+                          // Alterando com a equipe atual fora do catálogo
+                          // (desabilitada/inativa): mantém a da ficha.
+                          final ini = widget.initial;
                           Navigator.of(context).pop(
                             SaleFormTypeChoice(
-                              type: _type,
-                              teamId: team.id,
-                              teamName: team.name,
+                              type: _type!,
+                              teamId: team?.id ?? _teamId!,
+                              teamName: team?.name ?? ini?.teamName ?? '',
+                              teamUnitId: team?.unitId ?? ini?.teamUnitId,
                             ),
                           );
                         }
@@ -333,7 +347,11 @@ class _SaleFormTypeSheetState extends State<_SaleFormTypeSheet> {
                   ),
                   icon: const Icon(LucideIcons.arrowRight, size: 18),
                   label: Text(
-                    canConfirm ? 'Continuar' : 'Selecione uma equipe',
+                    _type == null
+                        ? 'Selecione o tipo'
+                        : _teamId == null
+                            ? 'Selecione uma equipe'
+                            : (_alterando ? 'Aplicar' : 'Continuar'),
                     style: const TextStyle(
                       fontWeight: FontWeight.w900,
                       fontSize: 14.5,

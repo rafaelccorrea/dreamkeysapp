@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/module_access_service.dart';
 import '../../../shared/utils/error_cause.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
@@ -12,6 +13,7 @@ import '../../../shared/widgets/custom_button.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../models/inspection_model.dart';
 import '../services/inspection_service.dart';
+import '../utils/inspection_checklist.dart';
 
 /// Página de detalhes de uma vistoria
 class InspectionDetailsPage extends StatefulWidget {
@@ -31,6 +33,7 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
   bool _isLoading = true;
   bool _isLoadingHistory = false;
   bool _isUploadingPhoto = false;
+
   /// Diagnóstico da falha (API ou exceção) — carrega o código HTTP junto.
   ErrorCause? _errorCause;
   List<InspectionHistoryEntry> _history = [];
@@ -77,6 +80,51 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
           _isLoading = false;
         });
       }
+    }
+  }
+
+  /// vistorias-03: DELETE /inspection/:id/history/:historyId, com confirmação.
+  Future<void> _removerDoHistorico(InspectionHistoryEntry entry) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remover do histórico?'),
+        content: const Text(
+          'Esta entrada será removida do histórico da vistoria.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final response = await _inspectionService.removeHistoryEntry(
+      widget.inspectionId,
+      entry.id,
+    );
+    if (!mounted) return;
+    if (response.success) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Entrada removida do histórico')),
+      );
+      await _loadHistory();
+    } else {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            response.message ?? 'Não foi possível remover a entrada',
+          ),
+          backgroundColor: AppColors.status.error,
+        ),
+      );
     }
   }
 
@@ -758,6 +806,17 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
     }
   }
 
+  // vistorias-01 (03/10/2026): mesmas permissões do web (VistoriaDetailPage)
+  // e do back (inspection.controller): editar, status, fotos e histórico =
+  // `inspection:update`; excluir = `inspection:delete`; pedir aprovação
+  // financeira (POST /inspection-approval) = `inspection:create`.
+  bool get _canUpdate =>
+      ModuleAccessService.instance.hasPermission('inspection:update');
+  bool get _canDelete =>
+      ModuleAccessService.instance.hasPermission('inspection:delete');
+  bool get _canRequestApproval =>
+      ModuleAccessService.instance.hasPermission('inspection:create');
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -771,7 +830,7 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
       title: 'Detalhes da Vistoria',
       showBottomNavigation: false,
       actions: [
-        if (_inspection != null)
+        if (_inspection != null && (_canUpdate || _canDelete))
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
             onSelected: (value) {
@@ -787,26 +846,28 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
               }
             },
             itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'edit',
-                child: Row(
-                  children: [
-                    Icon(Icons.edit, size: 20),
-                    SizedBox(width: 8),
-                    Text('Editar'),
-                  ],
+              if (_canUpdate)
+                const PopupMenuItem(
+                  value: 'edit',
+                  child: Row(
+                    children: [
+                      Icon(Icons.edit, size: 20),
+                      SizedBox(width: 8),
+                      Text('Editar'),
+                    ],
+                  ),
                 ),
-              ),
-              const PopupMenuItem(
-                value: 'delete',
-                child: Row(
-                  children: [
-                    Icon(Icons.delete, size: 20, color: Colors.red),
-                    SizedBox(width: 8),
-                    Text('Excluir', style: TextStyle(color: Colors.red)),
-                  ],
+              if (_canDelete)
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete, size: 20, color: Colors.red),
+                      SizedBox(width: 8),
+                      Text('Excluir', style: TextStyle(color: Colors.red)),
+                    ],
+                  ),
                 ),
-              ),
             ],
           ),
       ],
@@ -900,7 +961,8 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
                     ),
 
                     // Ações rápidas
-                    if (_inspection!.status == InspectionStatus.scheduled)
+                    if (_canUpdate &&
+                        _inspection!.status == InspectionStatus.scheduled)
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(16),
@@ -912,7 +974,8 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
                         ),
                       ),
 
-                    if (_inspection!.status == InspectionStatus.inProgress)
+                    if (_canUpdate &&
+                        _inspection!.status == InspectionStatus.inProgress)
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(16),
@@ -1110,7 +1173,8 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
                                 color: AppColors.primary.primary,
                               ),
                             ),
-                            if (!_inspection!.hasFinancialApproval &&
+                            if (_canRequestApproval &&
+                                !_inspection!.hasFinancialApproval &&
                                 _inspection!.value! > 0) ...[
                               const SizedBox(height: 12),
                               SizedBox(
@@ -1258,7 +1322,7 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
                                     strokeWidth: 2,
                                   ),
                                 )
-                              else
+                              else if (_canUpdate)
                                 IconButton(
                                   icon: const Icon(Icons.add_photo_alternate),
                                   onPressed: _uploadPhoto,
@@ -1335,31 +1399,87 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
                                             },
                                       ),
                                     ),
-                                    Positioned(
-                                      top: 4,
-                                      right: 4,
-                                      child: Container(
-                                        decoration: const BoxDecoration(
-                                          color: Colors.black54,
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: IconButton(
-                                          icon: const Icon(
-                                            Icons.close,
-                                            color: Colors.white,
-                                            size: 18,
+                                    if (_canUpdate)
+                                      Positioned(
+                                        top: 4,
+                                        right: 4,
+                                        child: Container(
+                                          decoration: const BoxDecoration(
+                                            color: Colors.black54,
+                                            shape: BoxShape.circle,
                                           ),
-                                          onPressed: () =>
-                                              _removePhoto(photoUrl),
-                                          padding: EdgeInsets.zero,
-                                          constraints: const BoxConstraints(),
+                                          child: IconButton(
+                                            icon: const Icon(
+                                              Icons.close,
+                                              color: Colors.white,
+                                              size: 18,
+                                            ),
+                                            onPressed: () =>
+                                                _removePhoto(photoUrl),
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(),
+                                          ),
                                         ),
                                       ),
-                                    ),
                                   ],
                                 );
                               },
                             ),
+
+                          // Checklist (vistorias-02): como o card da web,
+                          // só quando a vistoria tem itens.
+                          if (_inspection?.checklist?.isNotEmpty == true) ...[
+                            const SizedBox(height: 24),
+                            _buildSectionTitle(theme, 'Checklist'),
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 10,
+                              runSpacing: 10,
+                              children: _inspection!.checklist!.entries.map((
+                                e,
+                              ) {
+                                return Container(
+                                  width: 160,
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: ThemeHelpers.cardBackgroundColor(
+                                      context,
+                                    ),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: ThemeHelpers.borderLightColor(
+                                        context,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        InspectionChecklist.chave(e.key),
+                                        style: theme.textTheme.labelMedium
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        InspectionChecklist.valor(e.value),
+                                        style: theme.textTheme.bodyMedium
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w500,
+                                              color: InspectionChecklist.cor(
+                                                e.value,
+                                              ),
+                                            ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ],
 
                           // Histórico
                           const SizedBox(height: 24),
@@ -1367,11 +1487,12 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               _buildSectionTitle(theme, 'Histórico'),
-                              TextButton.icon(
-                                onPressed: _addHistoryEntry,
-                                icon: const Icon(Icons.add),
-                                label: const Text('Adicionar'),
-                              ),
+                              if (_canUpdate)
+                                TextButton.icon(
+                                  onPressed: _addHistoryEntry,
+                                  icon: const Icon(Icons.add),
+                                  label: const Text('Adicionar'),
+                                ),
                             ],
                           ),
                           const SizedBox(height: 12),
@@ -1466,6 +1587,22 @@ class _InspectionDetailsPageState extends State<InspectionDetailsPage> {
                                             ],
                                           ),
                                         ),
+                                        // vistorias-03: remover a entrada,
+                                        // como a web (inspection:update).
+                                        if (ModuleAccessService.instance
+                                            .hasPermission('inspection:update'))
+                                          IconButton(
+                                            tooltip: 'Remover do histórico',
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                            icon: Icon(
+                                              Icons.delete_outline,
+                                              size: 20,
+                                              color: AppColors.status.error,
+                                            ),
+                                            onPressed: () =>
+                                                _removerDoHistorico(entry),
+                                          ),
                                       ],
                                     ),
                                     const SizedBox(height: 8),

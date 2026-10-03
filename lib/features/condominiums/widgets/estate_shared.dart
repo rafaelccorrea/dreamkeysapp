@@ -570,10 +570,10 @@ class EstateInfoRow extends StatelessWidget {
   }
 }
 
-/// Formata CNPJ (14 dígitos) — paridade com o web.
+/// Formata CNPJ (14 caracteres, inclusive alfanumérico) — paridade com o web.
 String formatCnpjPretty(String? cnpj) {
   if (cnpj == null || cnpj.trim().isEmpty) return '';
-  final digits = cnpj.replaceAll(RegExp(r'\D'), '');
+  final digits = cnpj.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
   if (digits.length != 14) return cnpj;
   return '${digits.substring(0, 2)}.${digits.substring(2, 5)}.'
       '${digits.substring(5, 8)}/${digits.substring(8, 12)}-'

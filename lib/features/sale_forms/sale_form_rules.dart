@@ -210,14 +210,68 @@ class SaleFormRulesInput {
   String v(String k) => fd[k] ?? '';
 }
 
+/// Data de nascimento no futuro (`AAAA-MM-DD...`) — o picker já não deixa
+/// escolher, mas a data pode vir pré-preenchida (proposta vinculada,
+/// rascunho, ficha antiga). `null` = ok (vazio, N/A ou ilegível ficam com a
+/// regra de obrigatório).
+String? saleFormBirthDateFutureError(String raw, {DateTime? today}) {
+  final m = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(raw.trim());
+  if (m == null) return null;
+  final d = DateTime(int.parse(m[1]!), int.parse(m[2]!), int.parse(m[3]!));
+  final t = today ?? DateTime.now();
+  final hoje = DateTime(t.year, t.month, t.day);
+  return d.isAfter(hoje) ? 'Data de nascimento não pode ser no futuro' : null;
+}
+
+/// Teto de usuários vinculados (web: 10, e a comissão só lista vinculados).
+/// No app quem entra na comissão é vinculado junto ao salvar, então conta a
+/// união dos dois. `null` = dentro do limite.
+String? saleFormVinculadosErro(
+  List<String> vinculados,
+  List<String?> participantes, {
+  int max = 10,
+}) {
+  final todos = <String>{
+    ...vinculados.where((e) => e.trim().isNotEmpty),
+    for (final p in participantes)
+      if (p != null && p.trim().isNotEmpty) p,
+  };
+  if (todos.length <= max) return null;
+  return 'Máximo de $max usuários vinculados à ficha (contando quem está nas '
+      'comissões). Hoje são ${todos.length}: remova vínculos ou participantes.';
+}
+
+/// `nivel` de cada linha de gerência no payload, na ordem das linhas — regra
+/// do web (`CreateSaleFormPage.tsx`): o estado guarda o `nivel` lido da
+/// ficha e só renumera 1..n (contando TODAS as gerências, inclusive as sem %,
+/// que depois saem do payload sem renumerar) quando uma gerência entra ou
+/// sai. [originais] = `nivel` lido de cada linha (`null` = linha nova ou que
+/// virou gerência); [carregadas] = quantas gerências a ficha tinha ao abrir.
+List<int> saleFormGerenciaNiveis(List<int?> originais, int carregadas) {
+  final intactas = originais.length == carregadas &&
+      originais.every((n) => n != null && n > 0);
+  return [
+    for (var i = 0; i < originais.length; i++)
+      intactas ? originais[i]! : i + 1,
+  ];
+}
+
 /// `computeErrorsForTab` do web — erros da aba, na ordem do web.
 Map<String, String> computeSaleFormErrorsForTab(
   int tabId,
-  SaleFormRulesInput i,
-) {
+  SaleFormRulesInput i, {
+  DateTime? today,
+}) {
   final e = <String, String>{};
   String v(String k) => i.v(k);
   bool na(String k) => isSaleFormNa(v(k));
+
+  /// Nascimento preenchido não pode estar no futuro.
+  void nasc(String k) {
+    if (e.containsKey(k) || na(k)) return;
+    final err = saleFormBirthDateFutureError(v(k), today: today);
+    if (err != null) e[k] = err;
+  }
 
   /// Obrigatório ou N/A.
   void req(String k, String msg) {
@@ -250,7 +304,7 @@ Map<String, String> computeSaleFormErrorsForTab(
       if (v('mediaSource').trim().isEmpty) {
         e['mediaSource'] = 'Mídia de origem é obrigatória';
       }
-      req('saleUnit', 'Unidade responsável é obrigatória');
+      req('saleUnit', 'Unidade de venda é obrigatória');
       req(
         'description',
         i.generalGroup
@@ -263,12 +317,13 @@ Map<String, String> computeSaleFormErrorsForTab(
           'CPF ou CNPJ inválido', saleFormValidCpfOuCnpj);
       req('buyerRg', 'RG do comprador é obrigatório');
       req('buyerBirthDate', 'Data de nascimento é obrigatória');
+      nasc('buyerBirthDate');
       req('buyerProfession', 'Profissão é obrigatória');
       fmt('buyerEmail', 'E-mail é obrigatório', 'E-mail inválido',
           saleFormValidEmail,
           porDigitos: false);
       fmt('buyerPhone', 'Celular é obrigatório',
-          'Celular inválido (DDD + número)', saleFormValidPhone);
+          'Telefone inválido (mín. 10 dígitos)', saleFormValidPhone);
       fmt('buyerZipCode', 'CEP é obrigatório', 'CEP inválido (8 dígitos)',
           saleFormValidCep);
       req('buyerStreet', 'Rua é obrigatória');
@@ -279,19 +334,21 @@ Map<String, String> computeSaleFormErrorsForTab(
     case 2:
       if (!i.hasBuyerSpouse) break;
       _conjuge('buyerSpouse', req, fmt);
+      nasc('buyerSpouseBirthDate');
     case 3:
       req('sellerName', 'Nome do vendedor é obrigatório');
       fmt('sellerCpf', 'CPF ou CNPJ do vendedor é obrigatório',
           'CPF ou CNPJ inválido', saleFormValidCpfOuCnpj);
       req('sellerRg', 'RG do vendedor é obrigatório');
       req('sellerBirthDate', 'Data de nascimento é obrigatória');
+      nasc('sellerBirthDate');
       req('sellerProfession', 'Profissão é obrigatória');
       fmt('sellerEmail', 'E-mail é obrigatório', 'E-mail inválido',
           saleFormValidEmail,
           porDigitos: false);
-      fmt('sellerPhone', 'Celular é obrigatório',
-          'Celular inválido (DDD + número)', saleFormValidPhone);
-      fmt('sellerZipCode', 'CEP é obrigatório', 'CEP inválido (8 dígitos)',
+      fmt('sellerPhone', 'Celular é obrigatório', 'Telefone inválido',
+          saleFormValidPhone);
+      fmt('sellerZipCode', 'CEP é obrigatório', 'CEP inválido',
           saleFormValidCep);
       req('sellerStreet', 'Rua é obrigatória');
       req('sellerNumber', 'Número é obrigatório');
@@ -301,6 +358,7 @@ Map<String, String> computeSaleFormErrorsForTab(
     case 4:
       if (!i.hasSellerSpouse) break;
       _conjuge('sellerSpouse', req, fmt);
+      nasc('sellerSpouseBirthDate');
     case 5:
       if (i.isLancamentoOuMcmv) {
         req('incorporadora', 'Incorporadora é obrigatória');
@@ -318,7 +376,7 @@ Map<String, String> computeSaleFormErrorsForTab(
       } else {
         req('propertyCode', 'Código do imóvel é obrigatório');
         fmt('propertyZipCode', 'CEP do imóvel é obrigatório',
-            'CEP inválido (8 dígitos)', saleFormValidCep);
+            'CEP inválido', saleFormValidCep);
         req('propertyAddress', 'Endereço do imóvel é obrigatório');
         req('propertyNumber', 'Número é obrigatório');
         req('propertyNeighborhood', 'Bairro é obrigatório');
@@ -395,7 +453,7 @@ void _conjuge(
       fmt,
 ) {
   req('${p}Name',
-      'Nome do cônjuge é obrigatório quando há cônjuge ou sócio na venda');
+      'Nome do cônjuge é obrigatório quando “Possui cônjuge/sócio” está marcado');
   fmt('${p}Cpf', 'CPF do cônjuge é obrigatório', 'CPF inválido',
       saleFormValidCpf);
   req('${p}Rg', 'RG do cônjuge é obrigatório');
@@ -405,14 +463,274 @@ void _conjuge(
       saleFormValidEmail,
       porDigitos: false);
   fmt('${p}Phone', 'Celular do cônjuge é obrigatório',
-      'Celular inválido (DDD + número)', saleFormValidPhone);
-  fmt('${p}ZipCode', 'CEP do cônjuge é obrigatório',
-      'CEP inválido (8 dígitos)', saleFormValidCep);
+      'Telefone inválido', saleFormValidPhone);
+  fmt('${p}ZipCode', 'CEP do cônjuge é obrigatório', 'CEP inválido',
+      saleFormValidCep);
   req('${p}Street', 'Rua é obrigatória');
   req('${p}Number', 'Número é obrigatório');
   req('${p}Neighborhood', 'Bairro é obrigatório');
   req('${p}City', 'Cidade é obrigatória');
   req('${p}State', 'Estado é obrigatório');
+}
+
+// ─── Sugestões, unidade e comissões (web `CreateSaleFormPage.tsx`) ──────────
+
+/// `PROFISSOES_COMUNS` do web: sugestões do campo Profissão (o usuário
+/// também pode digitar outra).
+const List<String> kSaleFormProfissoesComuns = [
+  'Advogado', 'Arquiteto', 'Arquiteta', 'Corretor', 'Corretora', 'Dentista',
+  'Engenheiro', 'Engenheira', 'Médico', 'Médica', 'Veterinário', 'Veterinária',
+  'Contador', 'Contadora', 'Administrador', 'Administradora', 'Empresário',
+  'Empresária', 'Professor', 'Professora', 'Enfermeiro', 'Enfermeira',
+  'Psicólogo', 'Psicóloga', 'Farmacêutico', 'Farmacêutica', 'Vendedor',
+  'Vendedora', 'Gerente', 'Diretor', 'Diretora', 'Analista', 'Assistente',
+  'Técnico', 'Técnica', 'Designer', 'Programador', 'Programadora', 'Consultor',
+  'Consultora', 'Autônomo', 'Autônoma', 'Aposentado', 'Aposentada',
+  'Estudante', 'Outro',
+];
+
+/// Sugestões de profissão para o que já foi digitado (como o `datalist` do
+/// navegador: contém o texto, sem diferenciar caixa). Vazio = todas.
+List<String> saleFormProfissoesSugeridas(String digitado) {
+  final q = digitado.trim().toLowerCase();
+  if (q.isEmpty) return kSaleFormProfissoesComuns;
+  return [
+    for (final p in kSaleFormProfissoesComuns)
+      if (p.toLowerCase().contains(q) && p.toLowerCase() != q) p,
+  ];
+}
+
+/// `saleUnitAntdOptions` do web: só as unidades (sem "Não se aplica"); o
+/// valor gravado que não está na lista (legado, inclusive "Não aplicável")
+/// continua como opção, rotulada "(indisponível)", para não se perder.
+({List<String> opcoes, Map<String, String> rotulos}) saleFormUnidadeOpcoes(
+  List<String> nomes,
+  String atual,
+) {
+  final t = atual.trim();
+  final opcoes = [...nomes];
+  final rotulos = <String, String>{};
+  if (t.isNotEmpty && !nomes.contains(t)) {
+    opcoes.add(t);
+    rotulos[t] = '$t (indisponível)';
+  }
+  return (opcoes: opcoes, rotulos: rotulos);
+}
+
+/// Nome de quem está na comissão. O `GET :id` não traz o nome dos corretores
+/// (o back só preenche no export); o web resolve pela lista de membros
+/// (`companyMembersApi.getMembers`). [preferirGravado] = gerência, que grava
+/// o `nome` e o reenvia como veio.
+String? saleFormNomeParticipante({
+  String? id,
+  Object? nomeGravado,
+  Map<String, String> nomesPorId = const {},
+  bool preferirGravado = false,
+}) {
+  final gravado = (nomeGravado ?? '').toString().trim();
+  final idT = (id ?? '').trim();
+  final doMembro = idT.isEmpty ? '' : (nomesPorId[idT] ?? '').trim();
+  if (preferirGravado && gravado.isNotEmpty) return gravado;
+  if (doMembro.isNotEmpty) return doMembro;
+  return gravado.isEmpty ? null : gravado;
+}
+
+/// Gerência antiga sem `gestorId` (só `nome`): o web casa o id pelo nome
+/// entre os usuários vinculados (`vinc.find(mem => mem.name === g.nome)`).
+/// `null` = não casou (a linha continua e é salva só com o nome, como no web).
+String? saleFormGestorIdPorNome(
+  String? nome,
+  Iterable<({String id, String name})> vinculados,
+) {
+  final n = (nome ?? '').trim();
+  if (n.isEmpty) return null;
+  for (final v in vinculados) {
+    if (v.id.trim().isNotEmpty && v.name.trim() == n) return v.id;
+  }
+  return null;
+}
+
+/// Linha da comissão sem usuário escolhido: só a gerência antiga (lida da
+/// ficha sem `gestorId` e sem casar pelo nome) passa — o web a salva assim.
+/// Linha nova sem usuário continua barrada.
+bool saleFormLinhaSemUsuarioPermitida({
+  required bool ehGerencia,
+  required bool legadoSemId,
+}) =>
+    ehGerencia && legadoSemId;
+
+/// Linha de `commissionsData.gerencias` como o web monta: `nome` só quando
+/// há, `gestorId` só quando há (gerência antiga vai só com o nome), `papel`
+/// só para diretor/gestor SDR.
+Map<String, dynamic> saleFormGerenciaLinha({
+  required int nivel,
+  required double porcentagem,
+  String? nome,
+  String? gestorId,
+  String? papel,
+  bool emitirNota = false,
+}) {
+  final n = (nome ?? '').trim();
+  final g = (gestorId ?? '').trim();
+  return {
+    'nivel': nivel,
+    'porcentagem': porcentagem,
+    if (n.isNotEmpty) 'nome': n,
+    if (g.isNotEmpty) 'gestorId': g,
+    if (papel == 'diretor' || papel == 'gestor_sdr') 'papel': papel,
+    'emitirNota': emitirNota,
+  };
+}
+
+/// `captadores[]` aninhados no corretor, no formato que o web reenvia
+/// (`id`, `nome?`, `porcentagem?`; sem id não vai). `null` = não havia lista.
+List<Map<String, dynamic>>? saleFormCaptadoresPayload(Object? raw) {
+  if (raw is! List) return null;
+  final out = <Map<String, dynamic>>[];
+  for (final c in raw.whereType<Map>()) {
+    final id = (c['id'] ?? '').toString().trim();
+    if (id.isEmpty) continue;
+    final nome = c['nome'];
+    final pc = c['porcentagem'];
+    final num? n = pc is num ? pc : num.tryParse('${pc ?? ''}');
+    out.add({
+      'id': id,
+      'nome': ?nome,
+      'porcentagem': ?n,
+    });
+  }
+  return out;
+}
+
+/// Soma dos captadores aninhados — entra na trava de corretores e
+/// captadores (`sumSaleFormCommissionGroups` do web).
+double saleFormCaptadoresSoma(Object? raw) {
+  if (raw is! List) return 0;
+  var s = 0.0;
+  for (final c in raw.whereType<Map>()) {
+    final pc = c['porcentagem'];
+    final n = pc is num ? pc : num.tryParse('${pc ?? ''}');
+    s += (n ?? 0).toDouble();
+  }
+  return s;
+}
+
+// ─── Erros 400 do back (web `parseApiValidationErrors`) ────────────────────
+
+/// `extractFirstPortugueseMessage` do web.
+String _primeiraMensagemPt(String msg) {
+  final parts = msg.split(RegExp(r',\s*'));
+  final pt = RegExp(
+    r'[àáâãäéêëíîïóôõöúûüç]|deve|obrigatório|inválido|maior|menor',
+    caseSensitive: false,
+  );
+  for (final p in parts) {
+    if (pt.hasMatch(p)) return p.trim();
+  }
+  return (parts.isNotEmpty && parts.first.isNotEmpty ? parts.first : msg)
+      .trim();
+}
+
+List<({String campo, String mensagem})> _achatar(List items, String pai) {
+  final out = <({String campo, String mensagem})>[];
+  for (final item in items) {
+    if (item is! Map) continue;
+    final nome = (item['field'] ?? item['property'] ?? 'unknown').toString();
+    final caminho = pai.isEmpty ? nome : '$pai.$nome';
+    final errs = item['errors'];
+    final msg = (item['message'] ??
+            (errs is List ? errs.map((e) => '$e').join(', ') : ''))
+        .toString()
+        .trim();
+    final filhos = item['children'];
+    if (filhos is List && filhos.isNotEmpty) {
+      final sub = _achatar(filhos, caminho);
+      if (sub.isNotEmpty) {
+        out.addAll(sub);
+        continue;
+      }
+    }
+    if (msg.isNotEmpty) {
+      out.add((campo: caminho, mensagem: _primeiraMensagemPt(msg)));
+    }
+  }
+  return out;
+}
+
+/// `parseApiValidationErrors` do web: `details.validationErrors` (aninhado,
+/// com `children`) ou `errors` na raiz. [body] = corpo da resposta de erro.
+List<({String campo, String mensagem})> saleFormApiValidationErrors(
+  Object? body,
+) {
+  if (body is! Map) return const [];
+  final details = body['details'];
+  final ve = details is Map ? details['validationErrors'] : null;
+  if (ve is List && ve.isNotEmpty) return _achatar(ve, '');
+  final errs = body['errors'];
+  if (errs is List && errs.isNotEmpty) {
+    return [
+      for (final e in errs.whereType<Map>())
+        if ((e['field'] ?? '').toString().isNotEmpty &&
+            (e['message'] ?? '').toString().isNotEmpty)
+          (
+            campo: e['field'].toString(),
+            mensagem: _primeiraMensagemPt(e['message'].toString()),
+          ),
+    ];
+  }
+  return const [];
+}
+
+/// Caminho do back → chave do campo no formulário (a do web). O payload
+/// aninha alguns campos (`empreendimentoData.*`, `collaboratorsData.*`,
+/// `commissionInstallments.*`); o web usava o caminho cru, que não casava com
+/// campo nenhum nesses casos.
+String saleFormCampoDoErroApi(String caminho) {
+  final partes = caminho.split('.');
+  final raiz = partes.first;
+  final folha = partes.length > 1 ? partes[1] : '';
+  switch (raiz) {
+    case 'empreendimentoData':
+    case 'collaboratorsData':
+      return folha.isEmpty ? raiz : folha;
+    case 'commissionInstallments':
+      return folha == 'valoresParcelas'
+          ? 'commissionInstallmentValues'
+          : 'commissionInstallmentsCount';
+    case 'unitId':
+    case 'saleUnitId':
+    case 'sharedUnitIds':
+      return 'saleUnit';
+    case 'propertyId':
+      return 'propertyCode';
+    case 'commissionPaymentModel':
+      return 'commissionPaymentModelDescription';
+    case 'userIds':
+      return 'linkedUsers';
+    default:
+      return raiz;
+  }
+}
+
+/// Aba (id do web) do campo: Geral 0 … Vincular 6, Comissões 7. `null` =
+/// campo sem aba conhecida.
+int? saleFormAbaDoCampo(String campo) {
+  for (final e in kSaleFormTabFieldKeys.entries) {
+    if (e.value.contains(campo)) return e.key;
+  }
+  if (campo == 'commissionsData') return 7;
+  if (campo == 'linkedUsers') return 6;
+  if (campo == 'generalGroup' || campo == 'externalBrokerName') return 0;
+  if (campo.startsWith('property')) return 5;
+  for (final (p, aba) in const [
+    ('buyerSpouse', 2),
+    ('sellerSpouse', 4),
+    ('buyer', 1),
+    ('seller', 3),
+  ]) {
+    if (campo.startsWith(p)) return aba;
+  }
+  return null;
 }
 
 // ─── Máscaras (mesmas do web) ───────────────────────────────────────────────
@@ -466,8 +784,23 @@ String saleFormMaskCep(String v) {
   return d.length <= 5 ? d : '${d.substring(0, 5)}-${d.substring(5)}';
 }
 
+/// `maskRG` do web (`utils/masks.ts`), passo a passo (cada `replace` do JS
+/// troca só a primeira ocorrência): só dígitos (no máximo 12), formato
+/// `00.000.000-0`. Como no web, o último passo corta o que passa de um
+/// dígito depois do hífen.
+String saleFormMaskRg(String v) {
+  var d = saleFormDigits(v);
+  if (d.length > 12) d = d.substring(0, 12);
+  var s = d.replaceFirstMapped(
+      RegExp(r'(\d{2})(\d)'), (m) => '${m[1]}.${m[2]}');
+  s = s.replaceFirstMapped(RegExp(r'(\d{3})(\d)'), (m) => '${m[1]}.${m[2]}');
+  s = s.replaceFirstMapped(
+      RegExp(r'(\d{3})(\d{1,2})'), (m) => '${m[1]}-${m[2]}');
+  return s.replaceFirstMapped(RegExp(r'(-\d{1})\d+?$'), (m) => m[1]!);
+}
+
 /// Máscara por tipo de campo.
-enum SaleFormMask { none, cpfOuCnpj, cpf, phone, cep, email }
+enum SaleFormMask { none, cpfOuCnpj, cpf, phone, cep, email, rg }
 
 String saleFormApplyMask(SaleFormMask m, String v) => switch (m) {
       SaleFormMask.none => v,
@@ -475,15 +808,19 @@ String saleFormApplyMask(SaleFormMask m, String v) => switch (m) {
       SaleFormMask.cpf => saleFormMaskCpf(saleFormDigits(v)),
       SaleFormMask.phone => saleFormMaskPhone(v),
       SaleFormMask.cep => saleFormMaskCep(v),
+      SaleFormMask.rg => saleFormMaskRg(v),
       // `maskEmail`: sem espaços, minúsculas.
       SaleFormMask.email => v.replaceAll(RegExp(r'\s'), '').toLowerCase(),
     };
 
 /// Como o `applyMask` do web: "N/A" (qualquer caixa) vira "Não aplicável";
-/// senão aplica a máscara do campo.
+/// senão aplica a máscara do campo. [maxLength] = `maxLength` do input do
+/// web (CPF/CNPJ 18, RG 50, celular 16, CEP 9…): corta o que passar, mas
+/// nunca o "Não aplicável" (no web o limite só vale para o que se digita).
 class SaleFormFieldFormatter extends TextInputFormatter {
-  SaleFormFieldFormatter(this.mask);
+  SaleFormFieldFormatter(this.mask, {this.maxLength});
   final SaleFormMask mask;
+  final int? maxLength;
 
   @override
   TextEditingValue formatEditUpdate(
@@ -496,8 +833,15 @@ class SaleFormFieldFormatter extends TextInputFormatter {
         selection: TextSelection.collapsed(offset: kSaleFormNa.length),
       );
     }
-    if (mask == SaleFormMask.none) return newValue;
-    final masked = saleFormApplyMask(mask, newValue.text);
+    final max = maxLength;
+    if (mask == SaleFormMask.none &&
+        (max == null || newValue.text.length <= max)) {
+      return newValue;
+    }
+    var masked = mask == SaleFormMask.none
+        ? newValue.text
+        : saleFormApplyMask(mask, newValue.text);
+    if (max != null && masked.length > max) masked = masked.substring(0, max);
     if (masked == newValue.text) return newValue;
     return TextEditingValue(
       text: masked,

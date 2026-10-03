@@ -9,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_permissions.dart';
+import '../../../core/navigation/adaptive_page_route.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
@@ -17,6 +18,7 @@ import '../../../shared/services/property_service.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import '../models/approval_chat_inbox_item.dart';
 import '../models/property_change_request.dart';
 import '../services/property_approval_service.dart';
 import '../widgets/approval_action_sheets.dart';
@@ -26,6 +28,8 @@ import '../widgets/approval_info_sheets.dart';
 import '../widgets/approval_owner_auth_sheet.dart';
 import '../widgets/approval_property_card.dart';
 import '../widgets/change_request_card.dart';
+import '../utils/change_request_filters.dart';
+import 'approval_chat_inbox_page.dart';
 
 /// Tela de **Fila de Aprovação de Imóveis**.
 ///
@@ -113,6 +117,20 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
   PropertyChangeRequestStatus? _editRequestsFilter =
       PropertyChangeRequestStatus.pending;
 
+  /// "Minhas" (`?mine=true`) — só faz diferença para revisores, que por
+  /// padrão veem as solicitações da empresa inteira (imoveis-34).
+  bool _editRequestsMine = false;
+
+  /// Filtro por imóvel (`?propertyId=`); `null` = todos.
+  ChangeRequestPropertyRef? _editRequestsProperty;
+
+  /// Imóveis vistos nas últimas listas — opções do filtro por imóvel.
+  final Map<String, ChangeRequestPropertyRef> _editRequestsKnownProperties =
+      {};
+
+  /// Não lidas na caixa de conversas de aprovação (botão "Conversas").
+  int _inboxUnread = 0;
+
   /// Configuração de aprovação da empresa — decide marca d'água na publicação,
   /// bifurcação para votação (multi-aprovadores), exigência de assinatura do
   /// proprietário e se a esteira de campos protegidos está ligada.
@@ -172,6 +190,7 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     if (canView) _didLoadQueues = true;
     return Future.wait([
       _loadSettings(),
+      _loadInboxUnread(),
       _loadMine(),
       // A esteira de edições é escopada no backend (revisores veem tudo, os
       // demais só as próprias), então a aba existe para qualquer usuário.
@@ -202,12 +221,18 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
     });
     final res = await PropertyApprovalService.instance.listChangeRequests(
       status: _editRequestsFilter,
+      mine: _editRequestsMine,
+      propertyId: _editRequestsProperty?.id,
     );
     if (!mounted) return;
     setState(() {
       _loadingEditRequests = false;
       if (res.success && res.data != null) {
         _editRequests = res.data!;
+        for (final r in _editRequests.items) {
+          final p = r.property;
+          if (p != null) _editRequestsKnownProperties[p.id] = p;
+        }
         _errorEditRequests = null;
         _errorStatusEditRequests = 0;
       } else {
@@ -216,6 +241,66 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
         _errorStatusEditRequests = res.statusCode;
       }
     });
+  }
+
+  /// Escolhe o imóvel do filtro entre os que já apareceram nas solicitações
+  /// (`?propertyId=` no `GET /property-change-requests`).
+  Future<void> _pickEditRequestsProperty() async {
+    final options =
+        changeRequestPropertyOptions(_editRequestsKnownProperties.values);
+    if (options.isEmpty) {
+      _actionSnack(
+        'Nenhum imóvel nas solicitações carregadas. Tente o filtro "Todas".',
+      );
+      return;
+    }
+    final picked = await showModalBottomSheet<ChangeRequestPropertyRef>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: ThemeHelpers.cardBackgroundColor(context),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.7,
+      ),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const ApprovalSheetGrabber(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+            child: Text(
+              'Filtrar por imóvel',
+              style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+            ),
+          ),
+          Flexible(
+            child: ListView.builder(
+              shrinkWrap: true,
+              padding: const EdgeInsets.only(bottom: 16),
+              itemCount: options.length,
+              itemBuilder: (_, i) => ListTile(
+                leading: const Icon(LucideIcons.house, size: 18),
+                title: Text(
+                  changeRequestPropertyLabel(options[i]),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () => Navigator.of(ctx).pop(options[i]),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _editRequestsProperty = picked);
+    await _loadEditRequests();
   }
 
   ApprovalListFilters _filters() => ApprovalListFilters(
@@ -589,10 +674,14 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
       type: queue,
       approved: result.approved,
       comment: result.comment,
+      isUpdate: result.isUpdate,
     );
     if (!mounted) return false;
     if (res.success) {
-      _actionSnack('Voto registrado.', ok: true);
+      _actionSnack(
+        result.isUpdate ? 'Voto alterado.' : 'Voto registrado.',
+        ok: true,
+      );
       await _refreshAll();
       return true;
     }
@@ -1697,6 +1786,18 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
 
     return Row(
       children: [
+        // Caixa de conversas de aprovação (web: botão "Conversas" no topo da
+        // fila → /properties/approval-chats). imoveis-33.
+        Expanded(
+          child: _ToolbarPill(
+            icon: LucideIcons.messagesSquare,
+            label: _inboxUnread > 0 ? 'Conversas · $_inboxUnread' : 'Conversas',
+            tone: const Color(0xFF7C3AED),
+            active: _inboxUnread > 0,
+            onTap: _openChatInbox,
+          ),
+        ),
+        const SizedBox(width: 10),
         Expanded(
           child: _ToolbarPill(
             icon: LucideIcons.slidersHorizontal,
@@ -1721,6 +1822,25 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
         ],
       ],
     );
+  }
+
+  /// Não lidas da caixa de conversas (alimenta o rótulo do botão). Falha é
+  /// silenciosa: o botão segue abrindo a caixa, que mostra o erro.
+  Future<void> _loadInboxUnread() async {
+    final res = await PropertyApprovalService.instance.getApprovalChatInbox();
+    if (!mounted || !res.success) return;
+    setState(() {
+      _inboxUnread = ApprovalChatInboxItem.totalUnread(res.data ?? const []);
+    });
+  }
+
+  Future<void> _openChatInbox() async {
+    await Navigator.of(context).push<void>(
+      adaptivePageRoute<void>(
+        builder: (_) => const ApprovalChatInboxPage(),
+      ),
+    );
+    if (mounted) _loadInboxUnread();
   }
 
   Future<void> _openFiltersSheet() async {
@@ -2376,6 +2496,42 @@ class _PropertyApprovalsPageState extends State<PropertyApprovalsPage> {
                 ),
                 const SizedBox(width: 8),
               ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        // Escopo: "Minhas" (revisores veem a empresa toda por padrão) e
+        // filtro por imóvel — `?mine=true` / `?propertyId=` (imoveis-34).
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          physics: const ClampingScrollPhysics(),
+          child: Row(
+            children: [
+              if (_editRequests.canReview || _editRequestsMine) ...[
+                _EditRequestFilterChip(
+                  label: _editRequestsMine ? '✓ Minhas' : 'Minhas',
+                  tone: blue,
+                  selected: _editRequestsMine,
+                  onTap: () {
+                    setState(() => _editRequestsMine = !_editRequestsMine);
+                    _loadEditRequests();
+                  },
+                ),
+                const SizedBox(width: 8),
+              ],
+              _EditRequestFilterChip(
+                label: _editRequestsProperty == null
+                    ? 'Imóvel: todos ▾'
+                    : 'Imóvel: ${changeRequestPropertyLabel(_editRequestsProperty!)} ✕',
+                tone: blue,
+                selected: _editRequestsProperty != null,
+                onTap: _editRequestsProperty != null
+                    ? () {
+                        setState(() => _editRequestsProperty = null);
+                        _loadEditRequests();
+                      }
+                    : _pickEditRequestsProperty,
+              ),
             ],
           ),
         ),

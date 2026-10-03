@@ -16,6 +16,8 @@ import 'features/notifications/controllers/notification_controller.dart';
 import 'features/appointments/controllers/appointment_controller.dart';
 import 'features/kanban/controllers/kanban_controller.dart';
 import 'features/chat/controllers/chat_unread_controller.dart';
+import 'features/sale_forms/widgets/sale_form_signature_lock_sheet.dart'
+    show SignatureLockRouteObserver;
 import 'shared/services/live_activity_service.dart';
 
 void main() async {
@@ -84,6 +86,8 @@ class _MyAppState extends State<MyApp> {
         darkTheme: AppTheme.darkTheme,
         themeMode: ThemeService.instance.themeMode,
         navigatorKey: appNavigatorKey,
+        // Trava de assinatura reavaliada a cada tela (web: SignatureLockGate).
+        navigatorObservers: [SignatureLockRouteObserver.instance],
         initialRoute: AppRoutes.splash,
         onGenerateRoute: AppRoutes.generateRoute,
         localizationsDelegates: const [

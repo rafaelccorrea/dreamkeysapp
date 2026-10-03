@@ -50,12 +50,16 @@ import '../../features/notes/pages/create_note_page.dart';
 import '../../features/notes/pages/notes_page.dart';
 import '../../features/proposals/pages/create_proposal_page.dart';
 import '../../features/proposals/pages/proposals_page.dart';
+import '../../features/proposals/abrir_nova_proposta.dart';
 import '../../features/sale_forms/pages/sale_forms_page.dart';
 import '../../features/sale_forms/pages/sale_forms_dashboard_page.dart';
 import '../../features/proposals/pages/proposals_dashboard_page.dart';
 import '../../features/sale_forms/pages/sale_form_detail_page.dart';
 import '../../features/sale_forms/pages/sale_form_pending_signatures_page.dart';
+import '../../features/sale_forms/pages/create_sale_form_page.dart';
+import '../../features/sale_forms/sale_form_new_from_proposal.dart';
 import '../../shared/widgets/permission_route.dart';
+import '../../shared/widgets/route_action_launcher.dart';
 import '../../features/commissions/pages/commissions_page.dart';
 import '../../features/workspace/pages/workspace_page.dart';
 import '../../features/workspace/pages/users_page.dart';
@@ -136,6 +140,14 @@ import '../../features/analytics/pages/property_analytics_page.dart';
 import '../../features/analytics/pages/compare_users_page.dart';
 import '../../features/analytics/pages/compare_teams_page.dart';
 import '../../shared/services/property_service.dart';
+import '../../shared/services/subscription_access_gate.dart';
+import '../../features/subscriptions/models/subscription_models.dart';
+import '../../features/subscriptions/pages/access_blocked_page.dart';
+import '../../features/subscriptions/pages/subscription_details_page.dart';
+import '../../features/subscriptions/pages/subscription_management_page.dart';
+import '../../features/subscriptions/pages/subscription_page.dart';
+import '../../features/subscriptions/pages/subscription_plans_page.dart';
+import '../../features/finance/finance_routes.dart';
 
 /// Rotas da aplicação com transições customizadas
 class AppRoutes {
@@ -285,7 +297,20 @@ class AppRoutes {
   static const String proposalsDashboard = '/proposals/dashboard';
   static String proposalEdit(String id) => '/proposals/$id/edit';
 
+  /// `/fichas-proposta/nova` do web: dispara `abrirNovaProposta` (fluxo de
+  /// criação com escolha de tipo) — ver [RouteActionLauncher].
+  static const String proposalNew = '/proposals/new';
+
   static const String saleForms = '/sale-forms';
+
+  /// Edição de ficha de venda — `/fichas-venda/:id/editar` do web.
+  static String saleFormEdit(String id) => '/sale-forms/$id/edit';
+
+  /// Nova ficha a partir de proposta — `/fichas-venda/nova?propostaId=X` do
+  /// web (notificação "proposta finalizada").
+  static const String saleFormNew = '/sale-forms/new';
+  static String saleFormNewFromProposal(String proposalId) =>
+      '$saleFormNew?proposalId=${Uri.encodeQueryComponent(proposalId)}';
 
   /// Painel de fichas de venda (paridade com `/fichas-venda/dashboard` do web).
   static const String saleFormsDashboard = '/sale-forms/dashboard';
@@ -386,6 +411,29 @@ class AppRoutes {
   static const String rewardCreate = '/rewards/create';
   static String rewardEdit(String id) => '/rewards/$id/edit';
 
+  // Assinaturas (sub-01 / NEW-01, 03/10/2026). As telas já existiam sem
+  // rota; os caminhos são os que elas mesmas usam (`/subscription/plans`,
+  // `/subscription/manage/:id`).
+  static const String mySubscription = '/subscription';
+  static const String subscriptionPlans = '/subscription/plans';
+  static const String subscriptionManage = '/subscription/manage';
+  static String subscriptionManageDetails(String id) =>
+      '/subscription/manage/$id';
+
+  /// Acesso bloqueado (assinatura / plano sem CRM) — ver
+  /// `SubscriptionAccessGate`.
+  static const String subscriptionRequired =
+      SubscriptionAccessGate.subscriptionRequiredRoute;
+  static const String systemUnavailable =
+      SubscriptionAccessGate.systemUnavailableRoute;
+  static const String crmUnavailable =
+      SubscriptionAccessGate.crmNotIncludedRoute;
+
+  // Financeiro (microserviço próprio; toda tela passa pelo portão do PIN).
+  // Mesmos paths do web para os deep links casarem 1:1.
+  static const String financeiro = FinanceRoutes.index;
+  static const String financeiroMeuDashboard = FinanceRoutes.meuDashboard;
+
   // Suporte (Tickets) + Central de Ajuda
   static const String tickets = '/tickets';
   static const String ticketCreate = '/tickets/new';
@@ -454,6 +502,64 @@ class AppRoutes {
     final routeName = rawName == null
         ? null
         : rawName.split('?').first.split('#').first;
+
+    // Conta bloqueada (assinatura vencida/suspensa ou plano sem CRM): fora
+    // das rotas liberadas, abre a tela de bloqueio em vez de uma tela que só
+    // daria 403 (NEW-01/NEW-02). Vale para drawer, deep link e push.
+    final blockedTarget =
+        SubscriptionAccessGate.instance.routeOverride(routeName);
+    if (blockedTarget != null) {
+      // Plano só Financeiro: a "Home" (e qualquer rota de CRM) abre o Meu
+      // Financeiro em vez de uma tela de bloqueio.
+      if (FinanceRoutes.owns(blockedTarget)) {
+        return _buildRoute(
+          FinanceRoutes.pageFor(blockedTarget),
+          RouteSettings(name: blockedTarget, arguments: settings.arguments),
+        );
+      }
+      return _buildRoute(
+        AccessBlockedPage(decision: SubscriptionAccessGate.instance.decision),
+        RouteSettings(name: blockedTarget, arguments: settings.arguments),
+      );
+    }
+
+    if (routeName == subscriptionRequired) {
+      return _buildRoute(
+        const AccessBlockedPage(
+          decision: AccessGateDecision.subscriptionRequired,
+        ),
+        settings,
+      );
+    } else if (routeName == systemUnavailable) {
+      return _buildRoute(
+        const AccessBlockedPage(decision: AccessGateDecision.systemUnavailable),
+        settings,
+      );
+    } else if (routeName == crmUnavailable) {
+      return _buildRoute(
+        const AccessBlockedPage(decision: AccessGateDecision.crmNotIncluded),
+        settings,
+      );
+    } else if (routeName == mySubscription) {
+      return _buildRoute(const SubscriptionPage(), settings);
+    } else if (routeName == subscriptionPlans) {
+      return _buildRoute(const SubscriptionPlansPage(), settings);
+    } else if (routeName == subscriptionManage) {
+      return _buildRoute(const SubscriptionManagementPage(), settings);
+    } else if (routeName != null &&
+        routeName.startsWith('$subscriptionManage/')) {
+      final id = routeName.substring(subscriptionManage.length + 1);
+      if (id.isNotEmpty && !id.contains('/')) {
+        final item = settings.arguments;
+        return _buildRoute(
+          SubscriptionDetailsPage(
+            subscriptionId: id,
+            initialItem: item is AdminSubscriptionItem ? item : null,
+          ),
+          settings,
+        );
+      }
+    }
 
     if (routeName == splash) {
       return _buildRoute(const SplashPage(), settings);
@@ -629,30 +735,58 @@ class AppRoutes {
         }
       }
     } else if (routeName == AppRoutes.inspections) {
-      return _buildRoute(const InspectionsPage(), settings);
+      return _buildRoute(
+        _guarded(const InspectionsPage(),
+            module: 'vistoria', permission: 'inspection:view'),
+        settings,
+      );
     } else if (routeName == AppRoutes.inspectionCreate) {
-      return _buildRoute(const CreateInspectionPage(), settings);
+      return _buildRoute(
+        _guarded(const CreateInspectionPage(),
+            module: 'vistoria', permission: 'inspection:create'),
+        settings,
+      );
     } else if (routeName != null && routeName.startsWith('/inspections/')) {
       final segments = routeName.split('/');
       if (segments.length >= 3) {
         final id = segments[2];
         if (segments.length == 3) {
           // Detalhes: /inspections/:id
-          return _buildRoute(InspectionDetailsPage(inspectionId: id), settings);
+          return _buildRoute(
+            _guarded(InspectionDetailsPage(inspectionId: id),
+                module: 'vistoria', permission: 'inspection:view'),
+            settings,
+          );
         } else if (segments.length == 4 && segments[3] == 'edit') {
           // Edição: /inspections/:id/edit
-          return _buildRoute(EditInspectionPage(inspectionId: id), settings);
+          return _buildRoute(
+            _guarded(EditInspectionPage(inspectionId: id),
+                module: 'vistoria', permission: 'inspection:update'),
+            settings,
+          );
         }
       }
     } else if (routeName == AppRoutes.keys) {
-      return _buildRoute(const KeysPage(), settings);
+      return _buildRoute(
+        _guarded(const KeysPage(),
+            module: 'key_control', permission: 'key:view'),
+        settings,
+      );
     } else if (routeName == AppRoutes.keyCreate) {
-      return _buildRoute(const CreateKeyPage(), settings);
+      return _buildRoute(
+        _guarded(const CreateKeyPage(),
+            module: 'key_control', permission: 'key:create'),
+        settings,
+      );
     } else if (routeName != null && routeName.startsWith('/keys/')) {
       final segments = routeName.split('/');
       if (segments.length >= 4 && segments[3] == 'edit') {
         final id = segments[2];
-        return _buildRoute(CreateKeyPage(keyId: id), settings);
+        return _buildRoute(
+          _guarded(CreateKeyPage(keyId: id),
+              module: 'key_control', permission: 'key:update'),
+          settings,
+        );
       }
     } else if (routeName == AppRoutes.documents) {
       return _buildRoute(const DocumentsPage(), settings);
@@ -702,7 +836,17 @@ class AppRoutes {
     } else if (routeName == AppRoutes.saleForms) {
       return _buildRoute(const SaleFormsPage(), settings);
     } else if (routeName == AppRoutes.saleFormsDashboard) {
-      return _buildRoute(const SaleFormsDashboardPage(), settings);
+      // M-4: `ModuleRoute sale_forms` + `PermissionRoute view_dashboard
+      // noRoleBypass` do web. O `PermissionRoute` do app já é o noRoleBypass:
+      // só master pula o módulo e o bypass de papel é o do back.
+      return _buildRoute(
+        _guarded(
+          const SaleFormsDashboardPage(),
+          module: 'sale_forms',
+          permission: 'sale_form:view_dashboard',
+        ),
+        settings,
+      );
     } else if (routeName == AppRoutes.saleFormsPendingSignatures) {
       return _buildRoute(
         const PermissionRoute(
@@ -711,14 +855,50 @@ class AppRoutes {
         ),
         settings,
       );
+    } else if (routeName == AppRoutes.saleFormNew) {
+      // V-L1: `/fichas-venda/nova?propostaId=X` (aviso "proposta finalizada").
+      // A permissão (`sale_form:create`) é conferida dentro do fluxo, que
+      // espera as permissões carregarem na abertura a frio.
+      final proposalId = rawName == null
+          ? ''
+          : (Uri.tryParse(rawName)?.queryParameters['proposalId'] ?? '')
+              .trim();
+      if (proposalId.isEmpty) {
+        return _buildRoute(const SaleFormsPage(), settings);
+      }
+      return _buildRoute(
+        RouteActionLauncher(
+          action: (ctx) => abrirNovaFichaDaProposta(ctx, proposalId),
+          fallbackRoute: AppRoutes.saleForms,
+        ),
+        settings,
+      );
     } else if (routeName != null && routeName.startsWith('/sale-forms/')) {
       // Detalhe: /sale-forms/:id (notificações de ficha de venda, 25/09/2026).
       // `dashboard` já casou na igualdade acima; qualquer outro segmento
       // único é id de ficha.
       final segments = routeName.split('/');
-      if (segments.length == 3 && segments[2].isNotEmpty) {
+      // /sale-forms/:id/edit — `/fichas-venda/:id/editar` (sale_form:update).
+      if (segments.length == 4 &&
+          segments[2].isNotEmpty &&
+          segments[3] == 'edit') {
         return _buildRoute(
-          SaleFormDetailPage(saleFormId: segments[2]),
+          _guarded(
+            CreateSaleFormPage(saleFormId: segments[2]),
+            module: 'sale_forms',
+            permission: 'sale_form:update',
+          ),
+          settings,
+        );
+      }
+      if (segments.length == 3 && segments[2].isNotEmpty) {
+        // V-L11: o web guarda o detalhe com `sale_form:view`.
+        return _buildRoute(
+          _guarded(
+            SaleFormDetailPage(saleFormId: segments[2]),
+            module: 'sale_forms',
+            permission: 'sale_form:view',
+          ),
           settings,
         );
       }
@@ -726,15 +906,45 @@ class AppRoutes {
       return _buildRoute(const ProposalsPage(), settings);
     } else if (routeName == AppRoutes.proposalCreate) {
       return _buildRoute(const CreateProposalPage(), settings);
+    } else if (routeName == AppRoutes.proposalNew) {
+      // V-L12: `/fichas-proposta/nova` — mesmo fluxo do botão da lista
+      // (permissão + rascunho), não a tela crua.
+      return _buildRoute(
+        _guarded(
+          const RouteActionLauncher(
+            action: abrirNovaProposta,
+            fallbackRoute: AppRoutes.proposals,
+          ),
+          module: 'sale_forms',
+          permission: 'proposal:create',
+        ),
+        settings,
+      );
     } else if (routeName == AppRoutes.proposalsDashboard) {
-      return _buildRoute(const ProposalsDashboardPage(), settings);
+      // M-4: idem dashboard de venda (`proposal:view_dashboard`).
+      return _buildRoute(
+        _guarded(
+          const ProposalsDashboardPage(),
+          module: 'sale_forms',
+          permission: 'proposal:view_dashboard',
+        ),
+        settings,
+      );
     } else if (routeName != null &&
         routeName.startsWith('/proposals/')) {
       final segments = routeName.split('/');
       if (segments.length == 4 && segments[3] == 'edit') {
         final id = segments[2];
         if (id.isNotEmpty) {
-          return _buildRoute(CreateProposalPage(proposalId: id), settings);
+          // P-C1: `/fichas-proposta/:id/editar` exige `proposal:update`.
+          return _buildRoute(
+            _guarded(
+              CreateProposalPage(proposalId: id),
+              module: 'sale_forms',
+              permission: 'proposal:update',
+            ),
+            settings,
+          );
         }
       }
     } else if (routeName == AppRoutes.workspace) {
@@ -869,17 +1079,33 @@ class AppRoutes {
         }
       }
     } else if (routeName == AppRoutes.assets) {
-      return _buildRoute(const AssetsPage(), settings);
+      return _buildRoute(
+        _guarded(const AssetsPage(),
+            module: 'asset_management', permission: 'asset:view'),
+        settings,
+      );
     } else if (routeName == AppRoutes.assetCreate) {
-      return _buildRoute(const CreateAssetPage(), settings);
+      return _buildRoute(
+        _guarded(const CreateAssetPage(),
+            module: 'asset_management', permission: 'asset:create'),
+        settings,
+      );
     } else if (routeName != null && routeName.startsWith('/assets/')) {
       final segments = routeName.split('/');
       if (segments.length >= 3) {
         final id = segments[2];
         if (segments.length == 3 && id.isNotEmpty) {
-          return _buildRoute(AssetDetailsPage(assetId: id), settings);
+          return _buildRoute(
+            _guarded(AssetDetailsPage(assetId: id),
+                module: 'asset_management', permission: 'asset:view'),
+            settings,
+          );
         } else if (segments.length == 4 && segments[3] == 'edit') {
-          return _buildRoute(CreateAssetPage(assetId: id), settings);
+          return _buildRoute(
+            _guarded(CreateAssetPage(assetId: id),
+                module: 'asset_management', permission: 'asset:update'),
+            settings,
+          );
         }
       }
     } else if (routeName == AppRoutes.rentals) {
@@ -929,18 +1155,34 @@ class AppRoutes {
     } else if (routeName == AppRoutes.creditAnalysis) {
       return _buildRoute(const CreditAnalysisPage(), settings);
     } else if (routeName == AppRoutes.collection) {
-      return _buildRoute(const CollectionPage(), settings);
+      return _buildRoute(
+        _guarded(const CollectionPage(),
+            module: 'credit_and_collection', permission: 'collection:view'),
+        settings,
+      );
     } else if (routeName == AppRoutes.collectionRules) {
-      return _buildRoute(const CollectionRulesPage(), settings);
+      return _buildRoute(
+        _guarded(const CollectionRulesPage(),
+            module: 'credit_and_collection', permission: 'collection:manage'),
+        settings,
+      );
     } else if (routeName == AppRoutes.collectionRuleCreate) {
-      return _buildRoute(const CollectionRuleFormPage(), settings);
+      return _buildRoute(
+        _guarded(const CollectionRuleFormPage(),
+            module: 'credit_and_collection', permission: 'collection:manage'),
+        settings,
+      );
     } else if (routeName != null &&
         routeName.startsWith('/collection/rules/')) {
       // /collection/rules/:id — edição de régua
       final segments = routeName.split('/');
       if (segments.length == 4 && segments[3].isNotEmpty) {
         return _buildRoute(
-            CollectionRuleFormPage(ruleId: segments[3]), settings);
+          _guarded(CollectionRuleFormPage(ruleId: segments[3]),
+              module: 'credit_and_collection',
+              permission: 'collection:manage'),
+          settings,
+        );
       }
     } else if (routeName == AppRoutes.gamification) {
       return _buildRoute(const GamificationPage(), settings);
@@ -1079,12 +1321,31 @@ class AppRoutes {
       return _buildRoute(const CompareUsersPage(), settings);
     } else if (routeName == AppRoutes.analyticsCompareTeams) {
       return _buildRoute(const CompareTeamsPage(), settings);
+    } else if (FinanceRoutes.owns(routeName)) {
+      // /financeiro e /financeiro/* — portão de módulo + PIN embutido.
+      // Com a query (`?venda=`, `?saleId=`): o Financeiro lê.
+      return _buildRoute(FinanceRoutes.pageFor(rawName ?? routeName!), settings);
     }
 
     // Rota não encontrada
     return _buildRoute(
       const Scaffold(body: Center(child: Text('Página não encontrada'))),
       settings,
+    );
+  }
+
+  /// Guarda de módulo + permissão da rota, igual ao `ModuleRoute` +
+  /// `PermissionRoute` do web (transv-25, 03/10/2026): sem acesso, a tela de
+  /// "sem permissão"/"fora do plano" em vez de uma tela que só daria 403.
+  static Widget _guarded(
+    Widget child, {
+    String? module,
+    String? permission,
+  }) {
+    return PermissionRoute(
+      module: module,
+      permission: permission,
+      child: child,
     );
   }
 

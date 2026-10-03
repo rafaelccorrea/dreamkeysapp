@@ -63,11 +63,12 @@ class InspectionCard extends StatelessWidget {
       ),
       color: ThemeHelpers.cardBackgroundColor(context),
       child: InkWell(
-        onTap: onTap ??
+        onTap:
+            onTap ??
             () {
-              Navigator.of(context).pushNamed(
-                AppRoutes.inspectionDetails(inspection.id),
-              );
+              Navigator.of(
+                context,
+              ).pushNamed(AppRoutes.inspectionDetails(inspection.id));
             },
         onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(16),
@@ -202,9 +203,9 @@ class InspectionCard extends StatelessWidget {
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text(
-                        inspection.property!['title']?.toString() ?? 
-                        inspection.property!['address']?.toString() ?? 
-                        'Propriedade',
+                        inspection.property!['title']?.toString() ??
+                            inspection.property!['address']?.toString() ??
+                            'Propriedade',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: ThemeHelpers.textSecondaryColor(context),
                         ),
@@ -243,23 +244,23 @@ class InspectionCard extends StatelessWidget {
                           color: inspection.approvalStatus == 'approved'
                               ? AppColors.status.success.withOpacity(0.1)
                               : inspection.approvalStatus == 'rejected'
-                                  ? AppColors.status.error.withOpacity(0.1)
-                                  : AppColors.status.warning.withOpacity(0.1),
+                              ? AppColors.status.error.withOpacity(0.1)
+                              : AppColors.status.warning.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
                           inspection.approvalStatus == 'approved'
                               ? 'Aprovado'
                               : inspection.approvalStatus == 'rejected'
-                                  ? 'Rejeitado'
-                                  : 'Pendente',
+                              ? 'Rejeitado'
+                              : 'Pendente',
                           style: TextStyle(
                             fontSize: 10,
                             color: inspection.approvalStatus == 'approved'
                                 ? AppColors.status.success
                                 : inspection.approvalStatus == 'rejected'
-                                    ? AppColors.status.error
-                                    : AppColors.status.warning,
+                                ? AppColors.status.error
+                                : AppColors.status.warning,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -275,4 +276,3 @@ class InspectionCard extends StatelessWidget {
     );
   }
 }
-

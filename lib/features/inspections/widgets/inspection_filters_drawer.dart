@@ -19,7 +19,8 @@ class InspectionFiltersDrawer extends StatefulWidget {
   });
 
   @override
-  State<InspectionFiltersDrawer> createState() => _InspectionFiltersDrawerState();
+  State<InspectionFiltersDrawer> createState() =>
+      _InspectionFiltersDrawerState();
 }
 
 class _InspectionFiltersDrawerState extends State<InspectionFiltersDrawer> {
@@ -173,8 +174,8 @@ class _InspectionFiltersDrawerState extends State<InspectionFiltersDrawer> {
                     child: Text(
                       'Selecionar Vistoriador',
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                   IconButton(
@@ -205,13 +206,11 @@ class _InspectionFiltersDrawerState extends State<InspectionFiltersDrawer> {
                         ? Text(user['email'].toString())
                         : null,
                     selected: isSelected,
-                    selectedTileColor:
-                        AppColors.primary.primary.withValues(alpha: 0.1),
+                    selectedTileColor: AppColors.primary.primary.withValues(
+                      alpha: 0.1,
+                    ),
                     onTap: () {
-                      Navigator.pop(context, {
-                        'id': userId,
-                        'name': userName,
-                      });
+                      Navigator.pop(context, {'id': userId, 'name': userName});
                     },
                   );
                 },
@@ -261,7 +260,11 @@ class _InspectionFiltersDrawerState extends State<InspectionFiltersDrawer> {
     Navigator.of(context).pop();
   }
 
-  Widget _buildSectionTitle(BuildContext context, ThemeData theme, String title) {
+  Widget _buildSectionTitle(
+    BuildContext context,
+    ThemeData theme,
+    String title,
+  ) {
     return Text(
       title,
       style: theme.textTheme.titleMedium?.copyWith(
@@ -311,10 +314,7 @@ class _InspectionFiltersDrawerState extends State<InspectionFiltersDrawer> {
               ),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.filter_list,
-                    color: AppColors.primary.primary,
-                  ),
+                  Icon(Icons.filter_list, color: AppColors.primary.primary),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
@@ -438,7 +438,9 @@ class _InspectionFiltersDrawerState extends State<InspectionFiltersDrawer> {
                                   height: 20,
                                   child: Padding(
                                     padding: EdgeInsets.all(12),
-                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
                                   ),
                                 )
                               : const Icon(Icons.arrow_drop_down),
@@ -448,10 +450,8 @@ class _InspectionFiltersDrawerState extends State<InspectionFiltersDrawer> {
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: _selectedInspectorName != null
                                 ? Theme.of(context).colorScheme.onSurface
-                                : Theme.of(context)
-                                    .colorScheme
-                                    .onSurface
-                                    .withValues(alpha: 0.6),
+                                : Theme.of(context).colorScheme.onSurface
+                                      .withValues(alpha: 0.6),
                           ),
                         ),
                       ),
@@ -546,5 +546,3 @@ class _InspectionFiltersDrawerState extends State<InspectionFiltersDrawer> {
     );
   }
 }
-
-

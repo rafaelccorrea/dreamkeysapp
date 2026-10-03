@@ -5,6 +5,8 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/sale_forms_service.dart';
 import '../../../shared/widgets/skeleton_box.dart';
+import '../sale_form_list_display.dart';
+import '../sale_forms_relatorio_export.dart' show saleFormsExportPropertyLine;
 import 'sale_form_actions_sheet.dart';
 import 'sale_form_row_rules.dart';
 import 'sale_form_tones.dart';
@@ -60,19 +62,24 @@ class SaleFormCard extends StatelessWidget {
         ? f.buyerName!.trim()
         : 'Comprador não informado';
 
-    final imovel = [
-      if (f.propertyCode?.trim().isNotEmpty == true) 'Cód. ${f.propertyCode!.trim()}',
-      if (f.propertyNeighborhood?.trim().isNotEmpty == true)
-        f.propertyNeighborhood!.trim(),
-    ].join(' · ');
+    // Web (`formatSaleFormPropertyLine`): endereço completo ou, em
+    // Lançamento/MCMV, incorporadora · empreendimento · unidade.
+    final imovelWeb = saleFormsExportPropertyLine(f.raw);
+    final imovel = imovelWeb == '—' ? '' : imovelWeb;
     final data = f.createdAt != null
         ? DateFormat('dd/MM/yy', 'pt_BR').format(f.createdAt!.toLocal())
         : null;
     final meta = [
       f.saleFormType.label,
-      if (imovel.isNotEmpty) imovel,
       if (f.creatorName?.trim().isNotEmpty == true) f.creatorName!.trim(),
       ?data,
+    ].join(' · ');
+    // Web (card mobile e tabela): Vendedor, Unidade e Equipe.
+    final vendedor = saleFormSellerListLabel(f);
+    final pessoas = [
+      if (vendedor != '—') 'Vendedor: $vendedor',
+      if (f.saleUnit?.trim().isNotEmpty == true) 'Unidade: ${f.saleUnit!.trim()}',
+      if (f.teamName?.trim().isNotEmpty == true) 'Equipe: ${f.teamName!.trim()}',
     ].join(' · ');
 
     final sigTotal = f.assinaturasTotal;
@@ -133,7 +140,8 @@ class SaleFormCard extends StatelessWidget {
                               TextSpan(
                                 text: excluida
                                     ? ' Excluída'
-                                    : ' ${f.statusLabel}',
+                                    // Pílula do web: rótulo curto.
+                                    : ' ${f.statusShortLabel}',
                                 style: TextStyle(
                                   color: excluida
                                       ? SaleFormTom.erro(context).texto
@@ -202,12 +210,68 @@ class SaleFormCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  // 3 · tipo, imóvel, autor, data
+                  if (pessoas.isNotEmpty) ...[
+                    Text(
+                      pessoas,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: muted,
+                        height: 1.25,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                  ],
+                  if (imovel.isNotEmpty) ...[
+                    Text(
+                      imovel,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: muted, height: 1.3),
+                    ),
+                    const SizedBox(height: 2),
+                  ],
+                  // 3 · tipo, autor, data
                   Text(
                     meta,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 12, color: muted, height: 1.25),
+                  ),
+                  // 4 · rastreabilidade (web: "Rastreabilidade" na linha) —
+                  // último evento da auditoria, recusa da trava, desativação.
+                  const SizedBox(height: 3),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1.5),
+                        child: Icon(
+                          f.ativo || excluida
+                              ? LucideIcons.history
+                              : LucideIcons.circleAlert,
+                          size: 12,
+                          color: f.ativo || excluida
+                              ? muted
+                              : SaleFormTom.aviso(context).texto,
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(
+                          saleFormRastreioLinha(f),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: muted,
+                            height: 1.3,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   if (mostraAssinaturas) ...[
                     const SizedBox(height: 8),

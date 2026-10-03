@@ -46,6 +46,8 @@ import '../services/property_approval_service.dart';
 import '../services/property_detail_extras_service.dart';
 import '../widgets/approval_action_sheets.dart';
 import '../utils/property_edit_permissions.dart';
+import '../utils/property_publish_rules.dart';
+import '../utils/property_save_feedback.dart';
 import '../utils/property_status_visual.dart';
 import '../utils/property_type_visual.dart';
 import '../utils/compute_property_score.dart';
@@ -56,6 +58,7 @@ import '../widgets/property_presentation_pdf_sheet.dart';
 import '../widgets/details/property_activation_sheet.dart';
 import '../widgets/details/property_additional_info_section.dart';
 import '../widgets/details/property_approval_banner.dart';
+import '../widgets/details/property_gallery_manager_page.dart';
 import '../widgets/details/property_history_entry_tile.dart';
 import '../widgets/details/property_details_kit.dart'
     show kPropertyDeletedReadOnlyReason;
@@ -682,6 +685,19 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final main = property.mainImage;
     if (main != null && main.url.trim().isNotEmpty) return [main];
     return const <PropertyImage>[];
+  }
+
+  /// Abre a gestão da galeria; ao voltar, recarrega o imóvel se algo mudou.
+  Future<void> _openGalleryManager(Property property) async {
+    var changed = false;
+    await openPropertyGalleryManager(
+      context,
+      propertyId: property.id,
+      media: property.images ?? const <PropertyImage>[],
+      canDelete: _canDeletePropertyImages || _canEditProperty,
+      onMutated: () => changed = true,
+    );
+    if (changed && mounted) _refreshAfterChange();
   }
 
   /// "Baixar fotos" — foto atual, todas ou escolher (web); sem
@@ -1370,6 +1386,35 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                             });
                           },
                         ),
+                      // Publicar/Ocultar do site — mesmo gate do menu do card
+                      // no web (Disponível + aprovar publicação/master/admin);
+                      // publicar exige ativo e 5 fotos (`publishableImageCount`).
+                      if (property != null &&
+                          !property.isDeleted &&
+                          property.statusRaw ==
+                              PropertyStatus.available.value &&
+                          _sitePublishToggleAllowed(canEdit))
+                        tile(
+                          icon: property.isAvailableForSite == true
+                              ? Icons.public_off_rounded
+                              : Icons.public_rounded,
+                          label: property.isAvailableForSite == true
+                              ? 'Ocultar do site'
+                              : 'Publicar no site',
+                          subtitle: property.isAvailableForSite == true
+                              ? 'Some do site público na hora'
+                              : 'Passa a aparecer no site público',
+                          color: isDark
+                              ? AppColors.status.successDarkMode
+                              : AppColors.status.success,
+                          lockedReason: property.isAvailableForSite == true
+                              ? null
+                              : sitePublishBlockReason(property),
+                          onTap: () {
+                            Navigator.of(sheetContext).pop();
+                            _toggleSitePublication(property);
+                          },
+                        ),
                       if (property != null && !_canUndoSold)
                         tile(
                           icon: Icons.published_with_changes_rounded,
@@ -1868,6 +1913,49 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         permission: _editPermission,
       );
 
+  /// Quem pode publicar/ocultar pelo atalho: pode editar a ficha e é
+  /// master/admin ou tem `property:approve_publication` (web
+  /// `canPublishToggle`).
+  bool _sitePublishToggleAllowed(bool canEdit) {
+    if (!canEdit) return false;
+    final role = ModuleAccessService.instance.userRole?.toLowerCase() ?? '';
+    return role == 'master' ||
+        role == 'admin' ||
+        ModuleAccessService.instance
+            .hasPermission(AppPermissions.propertyApprovePublication);
+  }
+
+  /// `PATCH /properties/:id { isAvailableForSite }` — só essa chave, como o
+  /// `handleTogglePublicSite` do web.
+  Future<void> _toggleSitePublication(Property property) async {
+    final publish = property.isAvailableForSite != true;
+    if (publish && sitePublishBlockReason(property) != null) return;
+    final res = await _propertyService.updateProperty(property.id, {
+      'isAvailableForSite': publish,
+    });
+    if (!mounted) return;
+    final raw = (res.message ?? '').trim();
+    final queued = res.success && res.data?.pendingChangeRequest != null;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: !res.success
+            ? AppColors.status.error
+            : (queued ? AppColors.status.info : AppColors.status.success),
+        content: Text(
+          !res.success
+              ? (raw.isEmpty ? 'Não foi possível atualizar o site.' : raw)
+              : queued
+                  ? 'A mudança foi enviada para aprovação.'
+                  : (publish
+                      ? 'Imóvel publicado no site.'
+                      : 'Imóvel removido do site.'),
+        ),
+      ),
+    );
+    if (res.success) _refreshAfterChange();
+  }
+
   /// Ativar/Desativar (escopo + motivo) — master/admin/gestor, como o
   /// `PropertyActiveToggle` do web.
   Future<void> _openActivation() async {
@@ -2186,15 +2274,26 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         if (response.data != null) _property = response.data;
       }
     });
+    // Com aprovação de edição ligada, a observação pode virar solicitação de
+    // alteração — aí não foi "salva" ainda (imoveis-14).
+    final queued = response.success &&
+        (response.data?.pendingChangeRequest != null ||
+            response.data?.resubmittedForApproval != null);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
+        duration: Duration(seconds: queued ? 10 : 4),
         content: Text(
-          response.success
-              ? 'Observações salvas.'
-              : (response.message ?? 'Não foi possível salvar.'),
+          queued
+              ? PropertySaveFeedback.afterEdit(response.data).message
+              : response.success
+                  ? 'Observações salvas.'
+                  : (response.message ?? 'Não foi possível salvar.'),
         ),
-        backgroundColor:
-            response.success ? AppColors.status.success : AppColors.status.error,
+        backgroundColor: queued
+            ? AppColors.status.info
+            : response.success
+                ? AppColors.status.success
+                : AppColors.status.error,
       ),
     );
   }
@@ -6458,6 +6557,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               : AppColors.status.teal,
           onTap: () => _openPhotoDownload(),
         ),
+      // Gestão da galeria (imoveis-28): ordem, capa, site, fotos e vídeo —
+      // o que o web faz na etapa de fotos da edição.
+      if (_canEditProperty)
+        (
+          icon: Icons.photo_library_outlined,
+          title: 'Gerenciar fotos e vídeo',
+          subtitle: 'Ordenar, capa, mostrar no site e enviar o vídeo',
+          color: const Color(0xFF7C3AED),
+          onTap: () => _openGalleryManager(property),
+        ),
       // Matches e Ofertas ocultas no app: as linhas só voltam com os flags.
       if (FeatureVisibility.matchesEnabled)
         (
@@ -7794,13 +7903,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     Property property,
   ) {
     final muted = ThemeHelpers.textSecondaryColor(context);
-    if (!DocumentPermissions.moduleEnabled) {
-      return _buildLockedLine(
-        context,
-        'Documentos fazem parte de um módulo que não está incluído no plano '
-        'atual da empresa. Fale com o administrador.',
-      );
-    }
     final failure = _documentsFailure;
     // A prova da autorização vem antes dos documentos enviados (web).
     final certificate = PropertyOwnerAuthCertificate.isVisible(property)
@@ -7813,6 +7915,21 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
             ),
           )
         : null;
+    // O certificado de autorização do proprietário não depende do módulo de
+    // Documentos: o web o mostra sempre no topo da seção (imoveis-19). Só a
+    // lista de documentos enviados fica travada sem o módulo.
+    if (!DocumentPermissions.moduleEnabled) {
+      final locked = _buildLockedLine(
+        context,
+        'Documentos fazem parte de um módulo que não está incluído no plano '
+        'atual da empresa. Fale com o administrador.',
+      );
+      if (certificate == null) return locked;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [certificate, locked],
+      );
+    }
     final createLock = property.isDeleted
         ? kPropertyDeletedReadOnlyReason
         : DocumentPermissions.canCreate
@@ -7849,7 +7966,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (certificate != null) certificate,
+          ?certificate,
           _buildActivitySkeleton(context),
         ],
       );
@@ -7858,7 +7975,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (certificate != null) certificate,
+          ?certificate,
           AppErrorState.fromApi(
             message: failure.message,
             statusCode: failure.statusCode,
@@ -9888,6 +10005,7 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
   bool _didMutate = false;
   bool _deleting = false;
   bool _settingMain = false;
+  bool _togglingSite = false;
 
   /// Cache de dimensões reais (decodificadas) por url. Evita resolver de
   /// novo a cada rebuild e permite mostrar o ratio na barra inferior.
@@ -10035,6 +10153,45 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Mostra/oculta a foto atual no site público (`PUT /gallery/:id`).
+  Future<void> _toggleCurrentSiteVisibility() async {
+    if (!widget.canSetMain || _togglingSite) return;
+    final img = _currentImage;
+    if (img == null || img.id.isEmpty) return;
+    final show = img.showOnPublicSite == false;
+    setState(() => _togglingSite = true);
+    final res = await PropertyDetailExtrasService.instance
+        .setImageShowOnPublicSite(img.id, show: show);
+    if (!mounted) return;
+    setState(() {
+      _togglingSite = false;
+      if (res.success) {
+        _images = _images
+            .map((e) => e.id == img.id ? e.copyWith(showOnPublicSite: show) : e)
+            .toList();
+        _didMutate = true;
+      }
+    });
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: res.success
+            ? const Color(0xFF3FA66B)
+            : AppColors.status.error,
+        content: Text(
+          res.success
+              ? (show
+                  ? 'A foto volta a aparecer no site.'
+                  : 'Foto oculta no site — segue no CRM.')
+              : ((res.message ?? '').trim().isEmpty
+                  ? 'Não foi possível mudar a foto no site.'
+                  : res.message!.trim()),
+          style: const TextStyle(color: Colors.white),
         ),
       ),
     );
@@ -10260,6 +10417,22 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
                       tooltip: current.isMain
                           ? 'Já é a foto principal'
                           : 'Definir como foto principal',
+                    ),
+                    const SizedBox(width: 10),
+                    // Mostrar/ocultar no site (`showOnPublicSite`, imoveis-28):
+                    // foto oculta fica só no CRM.
+                    _GalleryRoundIconButton(
+                      icon: current.showOnPublicSite == false
+                          ? Icons.visibility_off_rounded
+                          : Icons.public_rounded,
+                      onTap: _toggleCurrentSiteVisibility,
+                      tint: current.showOnPublicSite == false
+                          ? Colors.white
+                          : const Color(0xFF3FA66B),
+                      busy: _togglingSite,
+                      tooltip: current.showOnPublicSite == false
+                          ? 'Oculta no site — tocar para mostrar'
+                          : 'Aparece no site — tocar para ocultar',
                     ),
                   ],
                   if (widget.canDelete && current != null) ...[

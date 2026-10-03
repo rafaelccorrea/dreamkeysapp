@@ -6,7 +6,6 @@ import '../../../core/theme/theme_helpers.dart';
 import '../../../features/workspace/models/admin_user_model.dart';
 import '../../../features/workspace/models/company_team_model.dart';
 import '../../../features/workspace/services/admin_users_service.dart';
-import '../../../features/workspace/services/company_team_service.dart';
 import '../../../shared/services/api_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
 import '../../../shared/widgets/app_error_state.dart';
@@ -14,6 +13,7 @@ import '../../../shared/widgets/file_delivery_sheet.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../pages/create_sale_form_page.dart';
 import '../pages/sale_form_detail_page.dart';
+import '../services/sale_form_lookup_service.dart';
 import 'sale_form_row_rules.dart';
 import 'sale_form_signatures_sheet.dart';
 import 'sale_form_tones.dart';
@@ -297,8 +297,10 @@ Future<String?> askSaleFormReason(
                 minLines: 2,
                 maxLines: 4,
                 onChanged: (_) => setLocal(() {}),
+                // Back: `FichaActionReasonDto` exige ao menos 5 caracteres.
                 decoration: const InputDecoration(
                   labelText: 'Motivo *',
+                  helperText: 'Mínimo de 5 caracteres.',
                   alignLabelWithHint: true,
                 ),
               ),
@@ -316,7 +318,7 @@ Future<String?> askSaleFormReason(
               backgroundColor: danger,
               foregroundColor: Colors.white,
             ),
-            onPressed: controller.text.trim().isEmpty
+            onPressed: controller.text.trim().length < 5
                 ? null
                 : () => Navigator.pop(ctx, controller.text.trim()),
             child: Text(confirmLabel),
@@ -664,17 +666,14 @@ class _EquipesCorpoState extends State<_EquipesCorpo> {
       _loading = true;
       _erro = null;
     });
-    final res = await CompanyTeamService.instance.listTeams(
-      status: 'active',
-      limit: 100,
-    );
+    // Web (`SaleFormsPage`, trocar equipe): `getTeams({useInSaleForms})`.
+    final res = await SaleFormLookupService.instance
+        .equipesDeFichas(paraTrocarEquipe: true);
     if (!mounted) return;
     setState(() {
       _loading = false;
       if (res.success && res.data != null) {
-        _teams = res.data!.teams
-            .where((t) => t.isActive && t.useInSaleForms)
-            .toList();
+        _teams = res.data!;
       } else {
         _erro = res.message ?? 'Não foi possível carregar as equipes.';
         _erroStatus = res.statusCode;

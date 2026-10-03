@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/navigation/app_navigator.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/sale_forms_service.dart';
+import '../pages/create_sale_form_page.dart';
+import '../signature_lock_policy.dart';
 import 'sale_form_tones.dart';
 
 /// Trava por assinatura parada — paridade com `SignatureLockGate` +
@@ -56,6 +59,140 @@ Future<bool> showSignatureLockIfBlocked(BuildContext context) async {
 }
 
 bool _lockAberta = false;
+
+/// "Ir para a ficha" da trava: `true` = abre a edição (web
+/// `/fichas-venda/:id/editar`, rota com `PermissionRoute sale_form:update`);
+/// `false` = abre o detalhe. A própria edição cai para só leitura quando a
+/// ficha está em assinatura, finalizada, cancelada ou excluída
+/// (`saleFormEdicaoBloqueada`), como o `formLockedByStatus` do web.
+bool signatureLockIrParaFichaAbreEdicao({required bool canUpdate}) => canUpdate;
+
+/// Próximo estado da trava depois de uma recusa registrada (web:
+/// `handleRefuse` → `checkStatus`). [consulta] é a nova consulta ao back:
+///  - ok e não bloqueado (ou sem itens) → `null` (fecha);
+///  - ok e bloqueado → o que o back devolveu;
+///  - falha de rede → a lista local sem a ficha recusada (`null` se vazia).
+SaleFormSignatureLockStatus? signatureLockAposRecusa({
+  required SaleFormSignatureLockStatus atual,
+  required String recusadaId,
+  required SaleFormSignatureLockStatus? consulta,
+  required bool consultaOk,
+}) {
+  if (consultaOk) {
+    if (consulta == null || !consulta.blocked || consulta.items.isEmpty) {
+      return null;
+    }
+    return consulta;
+  }
+  final restantes =
+      atual.items.where((i) => i.saleFormId != recusadaId).toList();
+  if (restantes.isEmpty) return null;
+  return SaleFormSignatureLockStatus(
+    blocked: true,
+    maxNotifications: atual.maxNotifications,
+    thresholdDays: atual.thresholdDays,
+    items: restantes,
+  );
+}
+
+/// Reavalia a trava ao longo do uso, como o `SignatureLockGate` do web
+/// (consulta a cada troca de rota; o modal não fecha): a cada tela nova
+/// ([SignatureLockRouteObserver], registrado no `MaterialApp`), ao montar a
+/// Home, ao voltar o app para o primeiro plano e ao voltar da ficha aberta
+/// pela própria trava. As telas das fichas de venda ficam de fora (o web pula
+/// `/fichas-venda…`): as nomeadas pelo nome da rota, as sem nome por
+/// [marcarTelaDeFicha].
+///
+/// O back conta no máximo um aviso por dia por ficha; o intervalo
+/// [kSignatureLockIntervaloMinimo] só junta rajadas de troca de tela.
+class SignatureLockWatcher with WidgetsBindingObserver {
+  SignatureLockWatcher._();
+  static final SignatureLockWatcher instance = SignatureLockWatcher._();
+
+  bool _observando = false;
+  DateTime? _ultimaConsulta;
+  final Expando<bool> _telasDeFicha = Expando<bool>('telaDeFicha');
+
+  /// Marca a rota de uma tela das fichas de venda aberta sem nome (detalhe,
+  /// criação/edição, auditoria) — o web não consulta a trava nessas telas.
+  void marcarTelaDeFicha(BuildContext context) {
+    final r = ModalRoute.of(context);
+    if (r != null) _telasDeFicha[r] = true;
+  }
+
+  /// `true` = ao entrar nesta rota a trava não é consultada.
+  bool rotaIgnorada(Route<dynamic> route) =>
+      _telasDeFicha[route] == true ||
+      signatureLockRotaIgnorada(route.settings.name);
+
+  /// Liga a reavaliação ao voltar para o primeiro plano (idempotente).
+  void start() {
+    if (_observando) return;
+    _observando = true;
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  /// Consulta a trava e abre a folha se bloqueado. Sem [force], respeita o
+  /// intervalo mínimo. Usa o contexto do navegador raiz quando [context] é
+  /// nulo.
+  Future<bool> check({BuildContext? context, bool force = false}) async {
+    final agora = DateTime.now();
+    if (!force && !signatureLockPodeConsultar(_ultimaConsulta, agora)) {
+      return false;
+    }
+    final ctx = context ?? appNavigatorKey.currentState?.overlay?.context;
+    if (ctx == null || !ctx.mounted) return false;
+    _ultimaConsulta = agora;
+    return showSignatureLockIfBlocked(ctx);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Sem sessão (logout limpa as permissões) a folha nem consulta.
+      check();
+    }
+  }
+}
+
+/// Observador do navegador raiz: a cada tela nova (push, replace ou volta
+/// para uma tela), consulta a trava — `useEffect([location.pathname])` do
+/// `SignatureLockGate` web. Diálogos e folhas não contam (no web não mudam a
+/// rota). Espera a transição assentar e só consulta se a tela ainda for a do
+/// topo e não for das fichas/login.
+class SignatureLockRouteObserver extends NavigatorObserver {
+  SignatureLockRouteObserver._();
+  static final SignatureLockRouteObserver instance =
+      SignatureLockRouteObserver._();
+
+  static const Duration _assentar = Duration(milliseconds: 450);
+
+  void _agendar(Route<dynamic>? route) {
+    if (route is! PageRoute) return;
+    Future<void>.delayed(_assentar, () {
+      if (!route.isActive || !route.isCurrent) return;
+      final w = SignatureLockWatcher.instance;
+      if (w.rotaIgnorada(route)) return;
+      final ctx = route.navigator?.overlay?.context;
+      if (ctx == null || !ctx.mounted) return;
+      w.check(context: ctx);
+    });
+  }
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _agendar(route);
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    // Fechar diálogo/folha não troca a tela.
+    if (route is PageRoute) _agendar(previousRoute);
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) =>
+      _agendar(newRoute);
+}
 
 /// saleFormId → link de assinatura do usuário logado (http/https).
 Future<Map<String, String>> _linksMeus() async {
@@ -170,26 +307,57 @@ class _SignatureLockSheetState extends State<_SignatureLockSheet> {
       return;
     }
     _snack(res.data ?? 'Recusa registrada.');
+    // Web (`SignatureLockGate.handleRefuse`): depois da recusa consulta a
+    // trava de novo (`checkStatus`) — outra ficha pode ter entrado no prazo
+    // nesse meio-tempo. Falha de rede não prende: fica a lista local sem a
+    // ficha recusada.
     final restantes =
         _status.items.where((i) => i.saleFormId != item.saleFormId).toList();
-    if (restantes.isEmpty) {
+    setState(() => _verificando = true);
+    final again = await SaleFormsService.instance.getSignatureLockStatus();
+    if (!mounted) return;
+    setState(() => _verificando = false);
+    final proximo = signatureLockAposRecusa(
+      atual: _status,
+      recusadaId: item.saleFormId,
+      consulta: again.success ? again.data : null,
+      consultaOk: again.success,
+    );
+    if (proximo == null) {
       Navigator.of(context).pop();
       return;
     }
-    setState(() => _status = SaleFormSignatureLockStatus(
-          blocked: true,
-          maxNotifications: _status.maxNotifications,
-          thresholdDays: _status.thresholdDays,
-          items: restantes,
-        ));
-    final novos = await _linksMeus();
-    if (mounted) setState(() => _links = novos);
+    setState(() => _status = proximo);
+    if (restantes.length != proximo.items.length ||
+        proximo.items.any((i) => !_links.containsKey(i.saleFormId))) {
+      final novos = await _linksMeus();
+      if (mounted) setState(() => _links = novos);
+    }
   }
 
-  void _abrirFicha(SaleFormSignatureLockItem item) {
+  /// "Ir para a ficha" — web: `navigate('/fichas-venda/:id/editar')`. A
+  /// edição do app, como a do web, relê a ficha e, em assinatura/finalizada/
+  /// cancelada, vira só leitura (detalhe). Sem `sale_form:update` (a rota
+  /// `/editar` do web exige) abre o detalhe. Ao voltar, reavalia a trava (no
+  /// web o modal reaparece na rota seguinte).
+  Future<void> _abrirFicha(SaleFormSignatureLockItem item) async {
     final nav = Navigator.of(context);
+    final edicao = signatureLockIrParaFichaAbreEdicao(
+      canUpdate: ModuleAccessService.instance.hasPermission('sale_form:update'),
+    );
     nav.pop();
-    nav.pushNamed(AppRoutes.saleFormDetails(item.saleFormId));
+    if (edicao) {
+      await nav.push<bool>(
+        MaterialPageRoute(
+          builder: (_) => CreateSaleFormPage(saleFormId: item.saleFormId),
+        ),
+      );
+    } else {
+      await nav.pushNamed(AppRoutes.saleFormDetails(item.saleFormId));
+    }
+    if (!nav.mounted) return;
+    await SignatureLockWatcher.instance
+        .check(context: nav.overlay?.context, force: true);
   }
 
   @override
@@ -395,7 +563,7 @@ class _SignatureLockSheetState extends State<_SignatureLockSheet> {
                 : OutlinedButton.icon(
                     onPressed: ocupado ? null : () => _abrirFicha(item),
                     icon: const Icon(LucideIcons.fileText, size: 17),
-                    label: const Text('Abrir a ficha'),
+                    label: const Text('Ir para a ficha'),
                     style: contorno(ThemeHelpers.textColor(context)),
                   ),
           ),
@@ -404,6 +572,17 @@ class _SignatureLockSheetState extends State<_SignatureLockSheet> {
             Text(
               'Abre o Autentique fora do app. Depois, toque em "Já assinei".',
               style: t.labelSmall?.copyWith(color: muted, height: 1.35),
+            ),
+            // Web: "Ir para a ficha" sempre aparece na trava.
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: ocupado ? null : () => _abrirFicha(item),
+                icon: const Icon(LucideIcons.fileText, size: 17),
+                label: const Text('Ir para a ficha'),
+                style: contorno(ThemeHelpers.textColor(context)),
+              ),
             ),
           ],
           const SizedBox(height: 10),

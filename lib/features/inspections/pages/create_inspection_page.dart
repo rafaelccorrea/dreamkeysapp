@@ -7,7 +7,7 @@ import '../../../shared/widgets/custom_button.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../shared/services/api_service.dart';
-import '../../../shared/utils/masks.dart';
+import '../../../shared/services/module_access_service.dart';
 import '../../documents/widgets/entity_selector.dart';
 import '../models/inspection_model.dart';
 import '../services/inspection_service.dart';
@@ -35,7 +35,8 @@ class _CreateInspectionPageState extends State<CreateInspectionPage> {
   final _responsiblePhoneController = TextEditingController();
 
   // Estados
-  InspectionType _selectedType = InspectionType.entry;
+  /// Sem tipo pré-selecionado, como a web (vistorias-07).
+  InspectionType? _selectedType;
   DateTime? _scheduledDate;
   TimeOfDay? _scheduledTime;
   String? _selectedPropertyId;
@@ -273,6 +274,16 @@ class _CreateInspectionPageState extends State<CreateInspectionPage> {
       return;
     }
 
+    if (_selectedType == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Tipo é obrigatório'),
+          backgroundColor: AppColors.status.error,
+        ),
+      );
+      return;
+    }
+
     if (_selectedPropertyId == null || _selectedPropertyId!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -293,7 +304,7 @@ class _CreateInspectionPageState extends State<CreateInspectionPage> {
         description: _descriptionController.text.trim().isEmpty
             ? null
             : _descriptionController.text.trim(),
-        type: _selectedType,
+        type: _selectedType!,
         scheduledDate: scheduledDateTime,
         propertyId: _selectedPropertyId!,
         inspectorId: _selectedInspectorId,
@@ -303,10 +314,11 @@ class _CreateInspectionPageState extends State<CreateInspectionPage> {
             : _responsibleNameController.text.trim(),
         responsibleDocument: _responsibleDocumentController.text.trim().isEmpty
             ? null
-            : Masks.unmaskAll(_responsibleDocumentController.text.trim()),
+            : _responsibleDocumentController.text
+                  .trim(), // vistorias-05: com máscara, como a web
         responsiblePhone: _responsiblePhoneController.text.trim().isEmpty
             ? null
-            : Masks.unmaskPhone(_responsiblePhoneController.text.trim()),
+            : _responsiblePhoneController.text.trim(),
         observations: _observationsController.text.trim().isEmpty
             ? null
             : _observationsController.text.trim(),
@@ -357,6 +369,23 @@ class _CreateInspectionPageState extends State<CreateInspectionPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final dateFormat = DateFormat('dd/MM/yyyy');
+
+    // vistorias-01: sem `inspection:create` o back recusa com 403 (web:
+    // PermissionRoute na rota). Bloqueia antes de a pessoa preencher tudo.
+    if (!ModuleAccessService.instance.hasPermission('inspection:create')) {
+      return const AppScaffold(
+        title: 'Nova Vistoria',
+        body: Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'Você não tem permissão para criar vistorias.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
 
     return AppScaffold(
       title: 'Nova Vistoria',

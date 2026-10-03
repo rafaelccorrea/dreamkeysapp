@@ -625,6 +625,14 @@ class PublicSiteBlockCatalog {
       label: 'Chamada final',
       description: 'Botão de contato / WhatsApp',
     ),
+    'ribbon': (
+      label: 'Fita de assinatura',
+      description: 'Faixa em rolagem contínua, logo abaixo do banner',
+    ),
+    'lead_form': (
+      label: 'Formulário de captação',
+      description: 'Formulário que transforma visitantes em leads no CRM',
+    ),
   };
 
   static String labelOf(String type) => _catalog[type]?.label ?? type;
@@ -660,38 +668,50 @@ class PublicSiteBlockCatalog {
         return LucideIcons.shieldCheck;
       case 'cta':
         return LucideIcons.megaphone;
+      case 'ribbon':
+        return LucideIcons.ribbon;
+      case 'lead_form':
+        return LucideIcons.clipboardList;
       default:
         return LucideIcons.square;
     }
   }
 
-  /// Preset por template — paridade com `getDefaultHomeBlocks` do web,
-  /// usada quando `homeBlocks` vem vazio do backend.
+  /// Preset por template — cópia EXATA de `TEMPLATE_BLOCK_PRESETS` do back
+  /// (`public-site-blocks.types.ts`) e de `TEMPLATE_PRESETS` do web
+  /// (`publicSiteBlocks.ts`). Usada quando `homeBlocks` vem vazio do backend.
+  ///
+  /// integ-F1 (03/10/2026): os presets antigos do app não tinham
+  /// `lead_form`. Com `homeBlocks` vazio, o site público desenha os defaults
+  /// do back (com o formulário); ao salvar/reordenar uma seção, o app gravava
+  /// os SEUS defaults e o site perdia o formulário de captação. O Premium
+  /// também divergia (`stats` em vez de `ribbon`).
+  static const Map<String, List<String>> templatePresets = {
+    'modern': [
+      'hero', 'categories', 'featured_cards', 'property_grid',
+      'process', 'testimonials', 'about', 'lead_form', 'cta',
+    ],
+    'classic': [
+      'hero', 'featured_cards', 'categories', 'property_grid',
+      'services', 'process', 'about', 'lead_form', 'cta',
+    ],
+    'corporate': [
+      'hero', 'services', 'featured_cards', 'categories',
+      'property_grid', 'process', 'testimonials', 'lead_form', 'cta',
+    ],
+    'luxury': [
+      'hero', 'about', 'featured_carousel', 'property_grid',
+      'process', 'lead_form', 'cta',
+    ],
+    'compact': ['hero', 'property_grid', 'lead_form', 'cta'],
+    'premium': [
+      'hero', 'ribbon', 'featured_carousel', 'featured_cards',
+      'property_grid', 'about', 'testimonials', 'trust', 'lead_form', 'cta',
+    ],
+  };
+
   static List<PublicSiteHomeBlock> defaultsFor(String templateId) {
-    const presets = <String, List<String>>{
-      'modern': [
-        'hero', 'categories', 'featured_cards', 'property_grid',
-        'process', 'testimonials', 'about', 'cta',
-      ],
-      'classic': [
-        'hero', 'featured_cards', 'categories', 'property_grid',
-        'services', 'process', 'about', 'cta',
-      ],
-      'corporate': [
-        'hero', 'services', 'featured_cards', 'categories',
-        'property_grid', 'process', 'testimonials', 'cta',
-      ],
-      'luxury': [
-        'hero', 'about', 'featured_carousel', 'property_grid',
-        'process', 'cta',
-      ],
-      'compact': ['hero', 'property_grid', 'cta'],
-      'premium': [
-        'hero', 'stats', 'featured_carousel', 'featured_cards',
-        'property_grid', 'about', 'testimonials', 'trust', 'cta',
-      ],
-    };
-    final types = presets[templateId] ?? presets['modern']!;
+    final types = templatePresets[templateId] ?? templatePresets['modern']!;
     return [
       for (var i = 0; i < types.length; i++)
         PublicSiteHomeBlock(

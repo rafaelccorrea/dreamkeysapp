@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../../../core/navigation/adaptive_page_route.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
+import '../../../shared/services/module_access_service.dart';
 import '../../../shared/utils/error_cause.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
@@ -112,20 +113,37 @@ class AppointmentDetailsPage extends StatefulWidget {
   const AppointmentDetailsPage({super.key, required this.appointmentId});
 
   @override
-  State<AppointmentDetailsPage> createState() =>
-      _AppointmentDetailsPageState();
+  State<AppointmentDetailsPage> createState() => _AppointmentDetailsPageState();
 }
 
 class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
   bool _updatingStatus = false;
 
+  // Paridade com o web (`AppointmentDetailsPage.tsx`) e com o back
+  // (`appointments.service.ts`): editar, excluir e mudar status exigem SER O
+  // CRIADOR e ter `calendar:update` / `calendar:delete` — o back recusa com
+  // 403 para qualquer outro, inclusive admin. Sem direito, a ação fica
+  // visível e desabilitada (como o cadeado do web), nunca dá 403.
+  bool _isCreator(Appointment a) {
+    final me = ModuleAccessService.instance.userId;
+    return me != null && me.isNotEmpty && me == a.userId;
+  }
+
+  bool _canUpdate(Appointment a) =>
+      _isCreator(a) &&
+      ModuleAccessService.instance.hasPermission('calendar:update');
+
+  bool _canDelete(Appointment a) =>
+      _isCreator(a) &&
+      ModuleAccessService.instance.hasPermission('calendar:delete');
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context
-          .read<AppointmentController>()
-          .loadAppointmentById(widget.appointmentId);
+      context.read<AppointmentController>().loadAppointmentById(
+        widget.appointmentId,
+      );
     });
   }
 
@@ -146,8 +164,7 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
       SnackBar(
         backgroundColor: ok ? _statusTone(s) : AppColors.status.error,
         behavior: SnackBarBehavior.floating,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         content: Row(
           children: [
             Icon(
@@ -176,8 +193,7 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => Dialog(
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
           child: Column(
@@ -198,17 +214,17 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
               const SizedBox(height: 16),
               Text(
                 'Excluir agendamento?',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 6),
               Text(
                 '“${a.title}” será removido permanentemente.',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: ThemeHelpers.textSecondaryColor(context),
-                    ),
+                  color: ThemeHelpers.textSecondaryColor(context),
+                ),
               ),
               const SizedBox(height: 20),
               Row(
@@ -217,8 +233,9 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
                     child: TextButton(
                       style: TextButton.styleFrom(
                         // Cancelar nunca em vermelho: neutro forçado.
-                        foregroundColor:
-                            ThemeHelpers.textSecondaryColor(context),
+                        foregroundColor: ThemeHelpers.textSecondaryColor(
+                          context,
+                        ),
                       ),
                       onPressed: () => Navigator.pop(context, false),
                       child: const FittedBox(
@@ -259,8 +276,9 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
         SnackBar(
           backgroundColor: AppColors.status.success,
           behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           content: const Text('Agendamento excluído'),
         ),
       );
@@ -270,8 +288,9 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
         SnackBar(
           backgroundColor: AppColors.status.error,
           behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           content: Text(ctrl.error ?? 'Erro ao excluir'),
         ),
       );
@@ -308,19 +327,42 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
 
           // Seções presentes (as vazias somem — nada de blocos "sem dados").
           final sections = <Widget>[
-            _buildStatusFlow(theme, a),
+            // Mudar status = PATCH :id/status (criador + calendar:update).
+            if (_canUpdate(a)) _buildStatusFlow(theme, a),
             _buildWhenSection(theme, a),
             if (hasLocation)
               _editorialBlock(
                 accent: _kPlaceAccent,
                 overline: 'LOCAL',
                 overlineIcon: Icons.location_on_rounded,
-                child: Text(
-                  a.location!.trim(),
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    height: 1.45,
-                  ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        a.location!.trim(),
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          height: 1.45,
+                        ),
+                      ),
+                    ),
+                    // Copiar endereço, como a web (agenda-07).
+                    IconButton(
+                      tooltip: 'Copiar endereço',
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.copy_rounded, size: 18),
+                      onPressed: () async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        await Clipboard.setData(
+                          ClipboardData(text: a.location!.trim()),
+                        );
+                        messenger.showSnackBar(
+                          const SnackBar(content: Text('Endereço copiado')),
+                        );
+                      },
+                    ),
+                  ],
                 ),
               ),
             if (hasDescription)
@@ -433,10 +475,7 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
             ],
           ),
         ),
-        if (trailing != null) ...[
-          const SizedBox(width: 8),
-          trailing,
-        ],
+        if (trailing != null) ...[const SizedBox(width: 8), trailing],
       ],
     );
   }
@@ -502,10 +541,11 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
   // ---------------------------------------------------------------------------
   Widget _buildHero(ThemeData theme, Appointment a, Color accent) {
     final now = DateTime.now();
-    final isHappening =
-        now.isAfter(a.startDate) && now.isBefore(a.endDate);
-    final relative =
-        AppointmentVisuals.relativeTimeLabel(a.startDate, a.endDate);
+    final isHappening = now.isAfter(a.startDate) && now.isBefore(a.endDate);
+    final relative = AppointmentVisuals.relativeTimeLabel(
+      a.startDate,
+      a.endDate,
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -564,8 +604,7 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color:
-                                  ThemeHelpers.textSecondaryColor(context),
+                              color: ThemeHelpers.textSecondaryColor(context),
                               fontWeight: FontWeight.w700,
                               letterSpacing: 1.0,
                               fontSize: 10,
@@ -637,9 +676,7 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: ThemeHelpers.borderColor(context),
-        ),
+        border: Border.all(color: ThemeHelpers.borderColor(context)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -755,8 +792,10 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
               onTap: _updatingStatus ? null : () => _changeStatus(s),
               borderRadius: BorderRadius.circular(999),
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 9,
+                ),
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(999),
@@ -803,29 +842,26 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
   Widget _buildWhenSection(ThemeData theme, Appointment a) {
     final start = a.startDate;
     final end = a.endDate;
-    final sameDay = start.year == end.year &&
+    final sameDay =
+        start.year == end.year &&
         start.month == end.month &&
         start.day == end.day;
     final allDay = _isAllDay(start, end);
     final title = sameDay
         ? AppointmentVisuals.capitalize(
-            DateFormat("EEEE, d 'de' MMMM", 'pt_BR').format(start))
+            DateFormat("EEEE, d 'de' MMMM", 'pt_BR').format(start),
+          )
         : '${AppointmentVisuals.formattedShortDate(start)} → ${AppointmentVisuals.formattedShortDate(end)}';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _sectionHeader(
-          accent: _kWhenAccent,
-          overline: 'QUANDO',
-          title: title,
-        ),
+        _sectionHeader(accent: _kWhenAccent, overline: 'QUANDO', title: title),
         const SizedBox(height: 14),
         if (allDay)
           Row(
             children: [
-              const Icon(Icons.wb_sunny_rounded,
-                  size: 20, color: _kWhenAccent),
+              const Icon(Icons.wb_sunny_rounded, size: 20, color: _kWhenAccent),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -866,7 +902,9 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
                       const SizedBox(height: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(999),
                           border: Border.all(
@@ -966,11 +1004,13 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
         if (id.isNotEmpty && !seen.add(id)) continue;
         final name = inv.invitedUser?['name']?.toString().trim() ?? '';
         final email = inv.invitedUser?['email']?.toString().trim() ?? '';
-        entries.add(_GuestEntry(
-          name: name.isEmpty ? 'Convidado' : name,
-          subtitle: email.isEmpty ? null : email,
-          invite: inv.status,
-        ));
+        entries.add(
+          _GuestEntry(
+            name: name.isEmpty ? 'Convidado' : name,
+            subtitle: email.isEmpty ? null : email,
+            invite: inv.status,
+          ),
+        );
       }
     }
 
@@ -981,11 +1021,15 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
         if (p.id.isNotEmpty) seen.add(p.id);
         final email = p.email.trim();
         final role = p.role.trim();
-        entries.add(_GuestEntry(
-          name: p.name.trim().isEmpty ? 'Participante' : p.name.trim(),
-          subtitle: email.isNotEmpty ? email : (role.isNotEmpty ? role : null),
-          invite: null,
-        ));
+        entries.add(
+          _GuestEntry(
+            name: p.name.trim().isEmpty ? 'Participante' : p.name.trim(),
+            subtitle: email.isNotEmpty
+                ? email
+                : (role.isNotEmpty ? role : null),
+            invite: null,
+          ),
+        );
       }
     }
     return entries;
@@ -1013,8 +1057,7 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
           if (i > 0)
             Container(
               height: 1,
-              color:
-                  ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
+              color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
             ),
           _guestRow(theme, guests[i]),
         ],
@@ -1024,8 +1067,9 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
 
   Widget _guestRow(ThemeData theme, _GuestEntry g) {
     final tone = _personColor(g.name);
-    final initial =
-        g.name.trim().isEmpty ? '?' : g.name.trim()[0].toUpperCase();
+    final initial = g.name.trim().isEmpty
+        ? '?'
+        : g.name.trim()[0].toUpperCase();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
@@ -1192,8 +1236,7 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
             final tone = tag?.tone ?? _kTagsAccent;
             final label = tag?.label ?? value;
             return Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
               decoration: BoxDecoration(
                 color: tone.withValues(alpha: 0.14),
                 borderRadius: BorderRadius.circular(999),
@@ -1228,28 +1271,33 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
 
   Widget _buildLinksSection(ThemeData theme, Appointment a) {
     final rows = <Widget>[];
-    final propertyName =
-        _mapName(a.property, const ['title', 'name', 'code']);
+    final propertyName = _mapName(a.property, const ['title', 'name', 'code']);
     final clientName = _mapName(a.client, const ['name', 'fullName']);
     if (a.property != null) {
-      rows.add(_linkRow(
-        icon: LucideIcons.building2,
-        overline: 'IMÓVEL',
-        name: propertyName ?? 'Imóvel vinculado',
-      ));
+      rows.add(
+        _linkRow(
+          icon: LucideIcons.building2,
+          overline: 'IMÓVEL',
+          name: propertyName ?? 'Imóvel vinculado',
+        ),
+      );
     }
     if (a.client != null) {
       if (rows.isNotEmpty) {
-        rows.add(Container(
-          height: 1,
-          color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
-        ));
+        rows.add(
+          Container(
+            height: 1,
+            color: ThemeHelpers.borderColor(context).withValues(alpha: 0.35),
+          ),
+        );
       }
-      rows.add(_linkRow(
-        icon: LucideIcons.user,
-        overline: 'CLIENTE',
-        name: clientName ?? 'Cliente vinculado',
-      ));
+      rows.add(
+        _linkRow(
+          icon: LucideIcons.user,
+          overline: 'CLIENTE',
+          name: clientName ?? 'Cliente vinculado',
+        ),
+      );
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1281,9 +1329,7 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(11),
               color: _kLinksAccent.withValues(alpha: 0.12),
-              border: Border.all(
-                color: _kLinksAccent.withValues(alpha: 0.28),
-              ),
+              border: Border.all(color: _kLinksAccent.withValues(alpha: 0.28)),
             ),
             child: Icon(icon, size: 17, color: _kLinksAccent),
           ),
@@ -1319,8 +1365,9 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
           Icon(
             Icons.chevron_right_rounded,
             size: 18,
-            color: ThemeHelpers.textSecondaryColor(context)
-                .withValues(alpha: 0.6),
+            color: ThemeHelpers.textSecondaryColor(
+              context,
+            ).withValues(alpha: 0.6),
           ),
         ],
       ),
@@ -1333,11 +1380,14 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
   // ---------------------------------------------------------------------------
   Widget _buildRegistry(ThemeData theme, Appointment a) {
     final secondary = ThemeHelpers.textSecondaryColor(context);
-    final hairline =
-        ThemeHelpers.borderColor(context).withValues(alpha: 0.35);
+    final hairline = ThemeHelpers.borderColor(context).withValues(alpha: 0.35);
     final f = DateFormat("d MMM y '·' HH:mm", 'pt_BR');
 
+    // "Criado por", como o detalhe da web (agenda-07).
+    final criador = (a.user?['name'] ?? a.user?['fullName'])?.toString().trim();
     final entries = <(IconData, String, String)>[
+      if (criador != null && criador.isNotEmpty)
+        (LucideIcons.userRound, 'CRIADO POR', criador),
       (
         _visibilityIcon(a.visibility),
         'VISIBILIDADE',
@@ -1358,8 +1408,9 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
     // Pares por linha; sobra ímpar vira linha cheia.
     final rows = <List<(IconData, String, String)>>[];
     for (var i = 0; i < entries.length; i += 2) {
-      rows.add(entries.sublist(
-          i, i + 2 > entries.length ? entries.length : i + 2));
+      rows.add(
+        entries.sublist(i, i + 2 > entries.length ? entries.length : i + 2),
+      );
     }
 
     return Column(
@@ -1391,9 +1442,7 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
                 ),
                 if (row.length == 2) ...[
                   Container(width: 1, color: hairline),
-                  Expanded(
-                    child: _registryCell(row[1], padLeft: true),
-                  ),
+                  Expanded(child: _registryCell(row[1], padLeft: true)),
                 ],
               ],
             ),
@@ -1461,6 +1510,11 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
   // BOTTOM BAR — Excluir outline vermelho / Editar verde
   // ---------------------------------------------------------------------------
   Widget _buildBottomBar(ThemeData theme, Appointment a) {
+    final canDelete = _canDelete(a);
+    final canEdit = _canUpdate(a);
+    final deleteColor = canDelete
+        ? AppColors.status.error
+        : ThemeHelpers.textSecondaryColor(context).withValues(alpha: 0.6);
     return Container(
       decoration: BoxDecoration(
         color: theme.scaffoldBackgroundColor.withValues(alpha: 0.96),
@@ -1488,22 +1542,17 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
               icon: Icon(
                 Icons.delete_outline_rounded,
                 size: 18,
-                color: AppColors.status.error,
+                color: deleteColor,
               ),
               label: FittedBox(
                 fit: BoxFit.scaleDown,
-                child: Text(
-                  'Excluir',
-                  style: TextStyle(color: AppColors.status.error),
-                ),
+                child: Text('Excluir', style: TextStyle(color: deleteColor)),
               ),
               style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.status.error,
-                side: BorderSide(
-                  color: AppColors.status.error.withValues(alpha: 0.55),
-                ),
+                foregroundColor: deleteColor,
+                side: BorderSide(color: deleteColor.withValues(alpha: 0.55)),
               ),
-              onPressed: () => _confirmDelete(context, a),
+              onPressed: canDelete ? () => _confirmDelete(context, a) : null,
             ),
           ),
           const SizedBox(width: 10),
@@ -1519,20 +1568,22 @@ class _AppointmentDetailsPageState extends State<AppointmentDetailsPage> {
                 backgroundColor: _kEditGreen,
                 foregroundColor: Colors.white,
               ),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  adaptivePageRoute<void>(
-                    builder: (_) =>
-                        EditAppointmentPage(appointmentId: a.id),
-                  ),
-                ).then((_) {
-                  if (!mounted) return;
-                  context
-                      .read<AppointmentController>()
-                      .loadAppointmentById(widget.appointmentId);
-                });
-              },
+              onPressed: !canEdit
+                  ? null
+                  : () {
+                      Navigator.push(
+                        context,
+                        adaptivePageRoute<void>(
+                          builder: (_) =>
+                              EditAppointmentPage(appointmentId: a.id),
+                        ),
+                      ).then((_) {
+                        if (!mounted) return;
+                        context
+                            .read<AppointmentController>()
+                            .loadAppointmentById(widget.appointmentId);
+                      });
+                    },
             ),
           ),
         ],

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../../shared/services/module_access_service.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
 import '../../../shared/widgets/skeleton_box.dart';
@@ -24,6 +25,16 @@ class _KeysPageState extends State<KeysPage>
     with SingleTickerProviderStateMixin {
   final KeyService _keyService = KeyService.instance;
   late TabController _tabController;
+
+  // chaves-01 (03/10/2026): mesmas permissões do web (KeysPage) e do back
+  // (keys.controller): criar/editar/excluir/retirar/devolver = `key:*`.
+  bool _can(String permission) =>
+      ModuleAccessService.instance.hasPermission(permission);
+  bool get _canCreate => _can('key:create');
+  bool get _canUpdate => _can('key:update');
+  bool get _canDelete => _can('key:delete');
+  bool get _canCheckout => _can('key:checkout');
+  bool get _canReturn => _can('key:return');
 
   // Estado geral
   String? _errorMessage;
@@ -280,13 +291,14 @@ class _KeysPageState extends State<KeysPage>
             },
             tooltip: 'Filtros',
           ),
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () {
-              Navigator.of(context).pushNamed(AppRoutes.keyCreate);
-            },
-            tooltip: 'Criar Chave',
-          ),
+          if (_canCreate)
+            IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: () {
+                Navigator.of(context).pushNamed(AppRoutes.keyCreate);
+              },
+              tooltip: 'Criar Chave',
+            ),
         ],
         body: Column(
           children: [
@@ -542,16 +554,22 @@ class _KeysPageState extends State<KeysPage>
                       onTap: () {
                         _showKeyDetailsModal(context, key);
                       },
-                      onCheckout: () {
-                        _showCheckoutModal(context, key);
-                      },
+                      onCheckout: _canCheckout
+                          ? () {
+                              _showCheckoutModal(context, key);
+                            }
+                          : null,
                       onReturn: null,
-                      onEdit: () {
-                        _navigateToEditKey(key);
-                      },
-                      onDelete: () {
-                        _deleteKey(context, key);
-                      },
+                      onEdit: _canUpdate
+                          ? () {
+                              _navigateToEditKey(key);
+                            }
+                          : null,
+                      onDelete: _canDelete
+                          ? () {
+                              _deleteKey(context, key);
+                            }
+                          : null,
                     ),
                   );
                 }, childCount: _keys.length),
@@ -652,8 +670,9 @@ class _KeysPageState extends State<KeysPage>
                     child: KeyControlCard(
                       control: control,
                       onReturn:
-                          control.status ==
-                              key_models.KeyControlStatus.checkedOut
+                          _canReturn &&
+                              control.status ==
+                                  key_models.KeyControlStatus.checkedOut
                           ? () {
                               _showReturnModal(context, control);
                             }
@@ -746,8 +765,9 @@ class _KeysPageState extends State<KeysPage>
                     child: KeyControlCard(
                       control: control,
                       onReturn:
-                          control.status ==
-                              key_models.KeyControlStatus.checkedOut
+                          _canReturn &&
+                              control.status ==
+                                  key_models.KeyControlStatus.checkedOut
                           ? () {
                               _showReturnModal(context, control);
                             }
@@ -1558,8 +1578,10 @@ class _KeysPageState extends State<KeysPage>
                 Text(key.notes!, style: Theme.of(context).textTheme.bodyMedium),
               ],
               const SizedBox(height: 24),
+              if (_canUpdate || _canCheckout)
               Row(
                 children: [
+                  if (_canUpdate)
                   Expanded(
                     child: ElevatedButton.icon(
                       onPressed: () {
@@ -1573,7 +1595,8 @@ class _KeysPageState extends State<KeysPage>
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  if (_canUpdate && _canCheckout) const SizedBox(width: 12),
+                  if (_canCheckout)
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: () {

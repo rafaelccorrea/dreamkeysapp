@@ -19,9 +19,8 @@ import 'proposal_row_actions.dart';
 ///  • o que desfaz trabalho (cancelar, excluir) no fim, em vermelho,
 ///    separado do resto.
 ///
-/// As MESMAS ações e regras do menu de antes (`ProposalRowRules`, espelho do
-/// web). Proposta aberta numa conta que não edita: assinaturas e edição
-/// aparecem travadas com o motivo — nunca somem.
+/// As MESMAS ações e regras do menu do web (`ProposalRowRules`). Conta que
+/// não edita propostas não vê assinaturas nem edição (o web esconde).
 Future<ProposalRowAction?> showProposalActionsSheet(
   BuildContext context, {
   required ProposalRowRules rules,
@@ -42,15 +41,11 @@ class _Acao {
     required this.icon,
     required this.label,
     this.detalhe,
-    this.bloqueio,
   });
   final ProposalRowAction value;
   final IconData icon;
   final String label;
   final String? detalhe;
-
-  /// Motivo de a ação estar travada (aparece no lugar do detalhe).
-  final String? bloqueio;
 }
 
 class _ProposalActionsSheet extends StatelessWidget {
@@ -62,9 +57,9 @@ class _ProposalActionsSheet extends StatelessWidget {
     final mq = MediaQuery.of(context);
     final p = rules.p;
     final etapa = p.etapa.number;
-    final trava = rules.travadaPorPermissao;
-    const motivoTrava = ProposalRowRules.motivoDaTrava;
 
+    // Sem `proposal:update`, assinaturas e edição somem (web), não ficam
+    // com cadeado.
     final atalhos = <_Acao>[
       if (rules.canPdf)
         _Acao(
@@ -72,19 +67,17 @@ class _ProposalActionsSheet extends StatelessWidget {
           icon: LucideIcons.fileDown,
           label: rules.finalizada ? 'PDF consolidado' : 'PDF da etapa $etapa',
         ),
-      if (rules.canSignatures || trava)
+      if (rules.canSignatures)
         _Acao(
           value: ProposalRowAction.assinaturas,
           icon: LucideIcons.signature,
           label: 'Assinaturas da etapa $etapa',
-          bloqueio: trava ? motivoTrava : null,
         ),
-      if (rules.canEdit || trava)
-        _Acao(
+      if (rules.canEdit)
+        const _Acao(
           value: ProposalRowAction.editar,
           icon: LucideIcons.pencil,
           label: 'Editar',
-          bloqueio: trava ? motivoTrava : null,
         ),
       const _Acao(
         value: ProposalRowAction.historico,
@@ -362,24 +355,14 @@ class _GradeDeAtalhos extends StatelessWidget {
   }
 }
 
-/// Toque numa ação travada: diz o porquê, a folha fica aberta.
-void _avisarTrava(BuildContext context, String motivo) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text(motivo), behavior: SnackBarBehavior.floating),
-  );
-}
-
 class _ChapaDeAtalho extends StatelessWidget {
   const _ChapaDeAtalho({required this.acao});
   final _Acao acao;
 
   @override
   Widget build(BuildContext context) {
-    final travada = acao.bloqueio != null;
     final brand = Theme.of(context).colorScheme.primary;
-    final texto = travada
-        ? ThemeHelpers.textSecondaryColor(context)
-        : ThemeHelpers.textColor(context);
+    final texto = ThemeHelpers.textColor(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Material(
       color: isDark
@@ -388,13 +371,7 @@ class _ChapaDeAtalho extends StatelessWidget {
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
-        onTap: () {
-          if (travada) {
-            _avisarTrava(context, acao.bloqueio!);
-            return;
-          }
-          Navigator.of(context).pop(acao.value);
-        },
+        onTap: () => Navigator.of(context).pop(acao.value),
         child: Container(
           constraints: const BoxConstraints(minHeight: 64),
           padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
@@ -404,11 +381,7 @@ class _ChapaDeAtalho extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Icon(
-                travada ? LucideIcons.lock : acao.icon,
-                size: 19,
-                color: travada ? texto : brand,
-              ),
+              Icon(acao.icon, size: 19, color: brand),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -438,23 +411,12 @@ class _LinhaDeAcao extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final travada = acao.bloqueio != null;
     final muted = ThemeHelpers.textSecondaryColor(context);
     final perigoCor = SaleFormTom.erro(context).texto;
-    final cor = travada
-        ? muted
-        : perigo
-        ? perigoCor
-        : ThemeHelpers.textColor(context);
+    final cor = perigo ? perigoCor : ThemeHelpers.textColor(context);
     return InkWell(
       borderRadius: BorderRadius.circular(12),
-      onTap: () {
-        if (travada) {
-          _avisarTrava(context, acao.bloqueio!);
-          return;
-        }
-        Navigator.of(context).pop(acao.value);
-      },
+      onTap: () => Navigator.of(context).pop(acao.value),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 2),
         child: Row(
@@ -467,11 +429,7 @@ class _LinhaDeAcao extends StatelessWidget {
                 color: (perigo ? perigoCor : muted).withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(
-                travada ? LucideIcons.lock : acao.icon,
-                size: 18,
-                color: perigo ? perigoCor : cor,
-              ),
+              child: Icon(acao.icon, size: 18, color: cor),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -490,10 +448,10 @@ class _LinhaDeAcao extends StatelessWidget {
                       color: cor,
                     ),
                   ),
-                  if ((acao.bloqueio ?? acao.detalhe) != null) ...[
+                  if (acao.detalhe != null) ...[
                     const SizedBox(height: 2),
                     Text(
-                      acao.bloqueio ?? acao.detalhe!,
+                      acao.detalhe!,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(

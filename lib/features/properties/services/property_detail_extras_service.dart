@@ -626,6 +626,30 @@ class PropertyDetailExtrasService {
     return _asPropertyResponse(res);
   }
 
+  /// Mostra/oculta UMA foto no site público — `PUT /gallery/:id
+  /// { showOnPublicSite }` (`UpdateImageDto`; a rota é PUT, não PATCH). Foto
+  /// oculta segue no CRM e não conta para as 5 fotos de publicação.
+  Future<ApiResponse<void>> setImageShowOnPublicSite(
+    String imageId, {
+    required bool show,
+  }) async {
+    final res = await _sendJson(
+      'PUT',
+      '/gallery/$imageId',
+      body: {'showOnPublicSite': show},
+      timeout: const Duration(seconds: 30),
+      logTag: 'gallery-site-visibility',
+    );
+    if (res.success) {
+      return ApiResponse.success(data: null, statusCode: res.statusCode);
+    }
+    return ApiResponse.error(
+      message: res.message ?? '',
+      statusCode: res.statusCode,
+      data: res.error,
+    );
+  }
+
   /// A aba "Site" existe para esta empresa? `true` só quando a esteira de
   /// aprovação está DESLIGADA (`requireApprovalToPublishOnSite` e
   /// `requireApprovalToBeAvailable` falsos). Falha na leitura = esteira
@@ -938,6 +962,10 @@ class PropertyDetailExtrasService {
         case 'DELETE':
           res = await http
               .delete(uri, headers: headers, body: encoded)
+              .timeout(timeout);
+        case 'PUT':
+          res = await http
+              .put(uri, headers: headers, body: encoded)
               .timeout(timeout);
         default:
           res = await http

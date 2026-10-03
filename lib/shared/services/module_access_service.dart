@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'permission_service.dart';
 import 'company_service.dart';
 import 'secure_storage_service.dart';
+import '../utils/role_access_rules.dart';
 
 /// Informações sobre um módulo
 class ModuleInfo {
@@ -182,29 +183,36 @@ class ModuleAccessService extends ChangeNotifier {
   }
 
   /// Verifica se usuário tem uma permissão específica
+  ///
+  /// Bypass de papel igual ao `PermissionsGuard` do back (transv-03): master
+  /// em tudo, admin em tudo menos `user:create`, manager só nas poucas
+  /// permissões que o back libera para ele (ver `role_access_rules.dart`).
   bool hasPermission(String permission) {
-    if (_hasRoleBypass()) return true;
+    if (roleBypassesPermission(_userRole, permission)) return true;
     return _userPermissions?.permissionNames.contains(permission) ?? false;
   }
 
   /// Verifica se usuário tem qualquer uma das permissões
   bool hasAnyPermission(List<String> permissions) {
-    if (_hasRoleBypass()) return true;
-    if (_userPermissions == null) return false;
-    return permissions.any((p) => _userPermissions!.permissionNames.contains(p));
+    return permissions.any(hasPermission);
   }
 
   /// Verifica se usuário tem todas as permissões
   bool hasAllPermissions(List<String> permissions) {
-    if (_hasRoleBypass()) return true;
-    if (_userPermissions == null) return false;
-    return permissions.every((p) => _userPermissions!.permissionNames.contains(p));
+    return permissions.every(hasPermission);
   }
 
-  /// Verifica se módulo está disponível na empresa
+  /// Verifica se módulo está disponível na empresa.
+  ///
+  /// Só master ignora o módulo (transv-04, igual ao `ModuleAccessGuard` do
+  /// back). Enquanto a empresa ainda não carregou, admin/gestor seguem
+  /// liberados como antes — senão telas que checam uma vez no `initState`
+  /// sumiriam no primeiro acesso; o back continua decidindo.
   bool isModuleAvailableForCompany(String moduleId) {
-    if (_hasRoleBypass()) return true;
-    return _selectedCompany?.availableModules.contains(moduleId) ?? false;
+    if (roleBypassesModule(_userRole)) return true;
+    final company = _selectedCompany;
+    if (company == null) return roleIsElevated(_userRole);
+    return company.availableModules.contains(moduleId);
   }
 
   /// Alias de [isModuleAvailableForCompany] — mesmo critério; nome alinhado ao web.
@@ -213,8 +221,6 @@ class ModuleAccessService extends ChangeNotifier {
 
   /// Verifica se usuário tem permissões para o módulo
   bool hasPermissionForModule(String moduleId) {
-    if (_hasRoleBypass()) return true;
-    
     final requiredPermissions = _getRequiredPermissionsForModule(moduleId);
     if (requiredPermissions.isEmpty) return true;
     
@@ -238,12 +244,6 @@ class ModuleAccessService extends ChangeNotifier {
     _isLoading = false;
     debugPrint('🧹 [MODULE_ACCESS] Dados limpos');
     notifyListeners();
-  }
-
-  /// Verifica se role tem bypass
-  bool _hasRoleBypass() {
-    final role = _userRole?.toLowerCase();
-    return role == 'master' || role == 'admin' || role == 'manager';
   }
 
   /// Obtém ID do usuário atual
@@ -403,6 +403,7 @@ class PermissionModuleMapping {
     'team:delete': 'team_management',
     
     // Financial permissions
+    'financial:access': 'financial_management',
     'financial:view': 'financial_management',
     'financial:create': 'financial_management',
     'financial:update': 'financial_management',
@@ -471,7 +472,9 @@ class PermissionModuleMapping {
     'match_system': ['match:view'],
     'document_management': ['document:read'],
     'team_management': ['team:view'],
-    'financial_management': ['financial:view'],
+    // fin-17: o crachá do Financeiro no CRM é `financial:access` (as telas
+    // de gestão). O Meu Financeiro NÃO passa por aqui — só o módulo.
+    'financial_management': ['financial:access'],
     'marketing_tools': ['marketing:view'],
     'business_intelligence': ['bi:view'],
     'gamification': ['gamification:view'],

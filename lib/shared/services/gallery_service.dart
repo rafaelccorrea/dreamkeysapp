@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart' show MediaType;
 import 'dart:convert';
 import 'api_service.dart';
 import '../../core/constants/api_constants.dart';
@@ -209,24 +210,31 @@ class GalleryService {
     }
   }
 
-  /// Atualiza uma imagem
+  /// Atualiza uma imagem — `PUT /gallery/:id` (a rota do back é `@Put`, não
+  /// PATCH) com os campos do `UpdateImageDto`: `category`, `altText`,
+  /// `description`, `tags`, `isPublic` e `showOnPublicSite`. Capa e ordem
+  /// têm rotas próprias (`setMainImage`, `reorderImages`).
   Future<ApiResponse<GalleryImage>> updateImage({
     required String imageId,
-    String? url,
-    String? alt,
-    bool? isMain,
-    int? order,
+    String? category,
+    String? altText,
+    String? description,
+    List<String>? tags,
+    bool? isPublic,
+    bool? showOnPublicSite,
   }) async {
     debugPrint('🖼️ [GALLERY_SERVICE] Atualizando imagem: $imageId');
 
     try {
       final data = <String, dynamic>{};
-      if (url != null) data['url'] = url;
-      if (alt != null) data['alt'] = alt;
-      if (isMain != null) data['isMain'] = isMain;
-      if (order != null) data['order'] = order;
+      if (category != null) data['category'] = category;
+      if (altText != null) data['altText'] = altText;
+      if (description != null) data['description'] = description;
+      if (tags != null) data['tags'] = tags;
+      if (isPublic != null) data['isPublic'] = isPublic;
+      if (showOnPublicSite != null) data['showOnPublicSite'] = showOnPublicSite;
 
-      final response = await _apiService.patch<Map<String, dynamic>>(
+      final response = await _apiService.put<Map<String, dynamic>>(
         '/gallery/$imageId',
         body: data,
       );
@@ -364,6 +372,99 @@ class GalleryService {
       );
     } catch (e) {
       debugPrint('❌ [GALLERY_SERVICE] Erro de conexão: $e');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Envia o vídeo do imóvel — `POST /gallery/upload-video` (multipart:
+  /// `video`, `propertyId`, `durationSeconds`, `showOnPublicSite`). O back
+  /// mantém um vídeo só: o anterior é substituído. Paridade com
+  /// `galleryApi.uploadVideo` do web (tamanho/duração validados antes por
+  /// `validateGalleryVideo`). [thumbnail] = capa JPEG opcional (campo
+  /// `thumbnail`). Devolve o JSON da mídia criada.
+  Future<ApiResponse<Map<String, dynamic>>> uploadVideo({
+    required String propertyId,
+    required File file,
+    required String fileName,
+    required String mimeType,
+    int? durationSeconds,
+    bool showOnPublicSite = true,
+    File? thumbnail,
+  }) async {
+    debugPrint('🎬 [GALLERY_SERVICE] Enviando vídeo do imóvel $propertyId');
+    try {
+      final headers = await _apiService.buildOutboundHeaders(
+        endpoint: '/gallery/upload-video',
+        excludeContentType: true,
+      );
+      final uri = Uri.parse('${ApiConstants.baseApiUrl}/gallery/upload-video');
+      final request = http.MultipartRequest('POST', uri);
+      request.headers.addAll(headers);
+
+      final slash = mimeType.indexOf('/');
+      request.files.add(
+        http.MultipartFile(
+          'video',
+          http.ByteStream(file.openRead()),
+          await file.length(),
+          filename: fileName,
+          contentType: slash > 0
+              ? MediaType(
+                  mimeType.substring(0, slash),
+                  mimeType.substring(slash + 1),
+                )
+              : null,
+        ),
+      );
+      // Capa (quadro do vídeo) gerada no aparelho — o back não gera; o web
+      // manda a do navegador no mesmo campo `thumbnail`.
+      if (thumbnail != null && await thumbnail.exists()) {
+        request.files.add(
+          http.MultipartFile(
+            'thumbnail',
+            http.ByteStream(thumbnail.openRead()),
+            await thumbnail.length(),
+            filename: 'video-thumbnail.jpg',
+            contentType: MediaType('image', 'jpeg'),
+          ),
+        );
+      }
+      request.fields['propertyId'] = propertyId;
+      if (durationSeconds != null) {
+        request.fields['durationSeconds'] = durationSeconds.toString();
+      }
+      request.fields['showOnPublicSite'] = showOnPublicSite.toString();
+
+      // Vídeo pode ser grande (até 150 MB): teto longo, como o web.
+      final streamed =
+          await request.send().timeout(const Duration(minutes: 10));
+      final response = await http.Response.fromStream(streamed);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        Map<String, dynamic> body = const {};
+        try {
+          final decoded = jsonDecode(response.body);
+          if (decoded is Map<String, dynamic>) {
+            body = decoded['data'] is Map<String, dynamic>
+                ? decoded['data'] as Map<String, dynamic>
+                : decoded;
+          }
+        } catch (_) {}
+        return ApiResponse.success(
+          data: body,
+          statusCode: response.statusCode,
+        );
+      }
+      return ApiResponse.error(
+        message: response.statusCode == 413
+            ? 'Vídeo muito grande para o servidor.'
+            : _parseErrorResponse(response.body),
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      debugPrint('❌ [GALLERY_SERVICE] Erro ao enviar vídeo: $e');
       return ApiResponse.error(
         message: 'Erro de conexão: ${e.toString()}',
         statusCode: 0,

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -11,7 +13,12 @@ import '../../../shared/services/module_access_service.dart';
 import '../../../shared/services/purchase_proposals_service.dart';
 import '../../../shared/widgets/app_error_state.dart';
 import '../../../shared/widgets/app_scaffold.dart';
+import '../../sale_forms/ficha_draft_store.dart';
 import '../../sale_forms/widgets/fichas_filters_kit.dart';
+import '../abrir_nova_proposta.dart';
+import '../utils/proposal_draft.dart';
+import '../utils/proposal_edit_rules.dart';
+import '../utils/proposal_list_header.dart';
 import '../../sale_forms/widgets/sale_form_tones.dart';
 import '../widgets/proposal_card.dart';
 import '../widgets/proposal_row_actions.dart';
@@ -27,6 +34,9 @@ const double _kPadH = 16;
 const double _kMaxConteudo = 720;
 
 final NumberFormat _inteiro = NumberFormat.decimalPattern('pt_BR');
+
+/// Busca ao digitar: mesmo debounce do web (`PurchaseProposalsPage`, 400 ms).
+const Duration _kBuscaDebounce = Duration(milliseconds: 400);
 
 Color _accent(BuildContext context) {
   return Theme.of(context).brightness == Brightness.dark
@@ -115,15 +125,47 @@ class _ProposalsPageState extends State<ProposalsPage> {
   int _errorStatus = 0;
   bool _showDeletedOnly = false;
 
+  /// Topo da lista (web `HeroFacts`): rascunho em aberto no aparelho e
+  /// quantas unidades de venda a empresa tem.
+  bool _temRascunho = false;
+  int? _unidades;
+  Timer? _buscaTimer;
+
   @override
   void initState() {
     super.initState();
     _load();
+    _carregarUnidades();
     _scroll.addListener(_onScroll);
+  }
+
+  Future<void> _carregarUnidades() async {
+    final res = await PurchaseProposalsService.instance.listSaleUnits(
+      activeOnly: false,
+    );
+    if (!mounted || !res.success || res.data == null) return;
+    setState(() => _unidades = res.data!.length);
+  }
+
+  Future<void> _conferirRascunho() async {
+    final d = await FichaDraftStore.instance.ler(kProposalDraftTipo);
+    if (!mounted) return;
+    final tem = d != null;
+    if (tem != _temRascunho) setState(() => _temRascunho = tem);
+  }
+
+  /// Busca ao digitar (web: debounce de 400 ms → `filters.search`).
+  void _onBuscaDigitada(String v) {
+    _buscaTimer?.cancel();
+    if (v.trim() == (_filters.search?.trim() ?? '')) return;
+    _buscaTimer = Timer(_kBuscaDebounce, () {
+      if (mounted) _load(manterFoco: true);
+    });
   }
 
   @override
   void dispose() {
+    _buscaTimer?.cancel();
     _search.dispose();
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
@@ -146,13 +188,16 @@ class _ProposalsPageState extends State<ProposalsPage> {
     );
   }
 
-  Future<void> _load() async {
+  /// [manterFoco] = disparada pela busca ao digitar: o teclado fica aberto.
+  Future<void> _load({bool manterFoco = false}) async {
+    _buscaTimer?.cancel();
     setState(() {
       _loading = true;
       _error = null;
     });
     final f = _withSearchAndDeleted(_filters.copyWith(page: 1));
     final statsFut = _carregarContagem();
+    unawaited(_conferirRascunho());
     final res = await PurchaseProposalsService.instance.list(filters: f);
     final stats = await statsFut;
     if (!mounted) return;
@@ -169,7 +214,7 @@ class _ProposalsPageState extends State<ProposalsPage> {
       }
       if (stats != null) _stats = stats;
     });
-    if (mounted) FocusScope.of(context).unfocus();
+    if (mounted && !manterFoco) FocusScope.of(context).unfocus();
   }
 
   Future<void> _loadMore() async {
@@ -225,28 +270,36 @@ class _ProposalsPageState extends State<ProposalsPage> {
   // ─── Navegação ───────────────────────────────────────────────────────────
 
   Future<void> _openCreate() async {
-    final created = await Navigator.of(
-      context,
-    ).push<bool>(MaterialPageRoute(builder: (_) => const CreateProposalPage()));
-    if (created == true && mounted) {
+    final created = await abrirNovaPropostaComRetorno(context);
+    if (!mounted) return;
+    if (created) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Proposta criada com sucesso.')),
       );
       _load();
+    } else {
+      // Voltou sem criar: o rascunho pode ter nascido ou sido descartado.
+      _conferirRascunho();
     }
   }
 
-  /// "Nova proposta" travada: aparece com cadeado e diz o porquê (não some).
-  void _createLocked() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Criar fichas de proposta depende de permissão. Peça ao '
-          'administrador da empresa.',
-        ),
-        behavior: SnackBarBehavior.floating,
-      ),
+  /// Edição da proposta (a própria página confere permissão e status).
+  Future<void> _openEdit(PurchaseProposal p) async {
+    final updated = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => CreateProposalPage(proposalId: p.id)),
     );
+    if (updated == true && mounted) _load();
+  }
+
+  /// Atalho da linha — mesmas condições e destinos do web: "Enviar para
+  /// assinatura" (etapa 1 forçada), "Assinaturas (Proprietário)" (etapa 2
+  /// forçada) ou "Continuar" (abre a EDIÇÃO).
+  void _onContinue(PurchaseProposal p, ProposalAtalho atalho) {
+    if (atalho.tipo == ProposalAtalhoTipo.continuar) {
+      _openEdit(p);
+      return;
+    }
+    _openSignatures(p, etapaOverride: atalho.etapa);
   }
 
   Future<void> _openDetail(PurchaseProposal p) async {
@@ -261,12 +314,7 @@ class _ProposalsPageState extends State<ProposalsPage> {
       _openSignatures(p, showHistorico: true);
       return;
     }
-    final updated = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => CreateProposalPage(proposalId: p.id)),
-    );
-    if (updated == true && mounted) {
-      _load();
-    }
+    await _openEdit(p);
   }
 
   void _openSignatures(
@@ -310,12 +358,7 @@ class _ProposalsPageState extends State<ProposalsPage> {
         _openSignatures(p, showHistorico: true);
         return;
       case ProposalRowAction.editar:
-        final updated = await Navigator.of(context).push<bool>(
-          MaterialPageRoute(
-            builder: (_) => CreateProposalPage(proposalId: p.id),
-          ),
-        );
-        if (updated == true && mounted) _load();
+        await _openEdit(p);
         return;
       default:
         if (await runProposalRowAction(context, p, a) && mounted) _load();
@@ -396,7 +439,12 @@ class _ProposalsPageState extends State<ProposalsPage> {
                       accent: accent,
                       stats: _stats,
                       canCreate: canCreate,
-                      onCreate: canCreate ? _openCreate : _createLocked,
+                      onCreate: _openCreate,
+                      fatos: proposalHeroFatos(
+                        canViewAll: canViewAll,
+                        unidadesDeVenda: _unidades,
+                        temRascunho: _temRascunho,
+                      ),
                     ),
                     const SizedBox(height: 14),
                     Row(
@@ -407,6 +455,7 @@ class _ProposalsPageState extends State<ProposalsPage> {
                             accent: accent,
                             aplicada: buscaAplicada,
                             onSubmitted: _load,
+                            onChanged: _onBuscaDigitada,
                             onClear: () {
                               _search.clear();
                               _load();
@@ -497,11 +546,20 @@ class _ProposalsPageState extends State<ProposalsPage> {
                       return const ProposalCardSkeleton();
                     }
                     final p = itens[i];
+                    final atalho = proposalAtalhoDaLinha(
+                      p,
+                      canUpdate: ModuleAccessService.instance.hasPermission(
+                        'proposal:update',
+                      ),
+                    );
                     return ProposalCard(
                       proposal: p,
                       accent: accent,
+                      atalho: atalho,
                       onTap: () => _openDetail(p),
-                      onContinue: () => _openSignatures(p),
+                      onContinue: atalho == null
+                          ? null
+                          : () => _onContinue(p, atalho),
                       onShowHistorico: () =>
                           _openSignatures(p, showHistorico: true),
                       onAction: (a) => _onAction(p, a),
@@ -526,12 +584,14 @@ class _Hero extends StatelessWidget {
     required this.stats,
     required this.canCreate,
     required this.onCreate,
+    required this.fatos,
   });
 
   final Color accent;
   final _Contagem? stats;
   final bool canCreate;
   final VoidCallback onCreate;
+  final ProposalHeroFatos fatos;
 
   static const String _titulo = 'Fichas de proposta';
   static const TextStyle _estiloTitulo = TextStyle(
@@ -572,6 +632,7 @@ class _Hero extends StatelessWidget {
             final wBotao =
                 medir('Nova proposta', _NovaProposta.estiloRotulo) + 28 + 25;
             final inteiro = wTitulo + 12 + wBotao <= c.maxWidth;
+            // Sem `proposal:create` o botão some, como no web.
             return Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -617,13 +678,14 @@ class _Hero extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(width: 12),
-                _NovaProposta(
-                  accent: accent,
-                  canCreate: canCreate,
-                  rotulo: inteiro ? 'Nova proposta' : 'Nova',
-                  onTap: onCreate,
-                ),
+                if (canCreate) ...[
+                  const SizedBox(width: 12),
+                  _NovaProposta(
+                    accent: accent,
+                    rotulo: inteiro ? 'Nova proposta' : 'Nova',
+                    onTap: onCreate,
+                  ),
+                ],
               ],
             );
           },
@@ -643,22 +705,131 @@ class _Hero extends StatelessWidget {
             color: muted,
           ),
         ),
+        const SizedBox(height: 8),
+        // Fatos do topo do web: escopo, unidades de venda, rascunho.
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            _Fato(icon: LucideIcons.users, texto: fatos.escopo),
+            if (fatos.unidades != null)
+              _Fato(icon: LucideIcons.building2, texto: fatos.unidades!),
+            if (fatos.rascunho)
+              _Fato(
+                icon: LucideIcons.fileClock,
+                texto: 'rascunho em aberto',
+                cor: SaleFormTom.aviso(context).texto,
+              ),
+          ],
+        ),
+        if (st != null) ..._composicao(context, st),
       ],
+    );
+  }
+
+  /// Barra "composição da carteira" (em andamento · finalizadas ·
+  /// canceladas), como a `CompoBar` do web.
+  List<Widget> _composicao(BuildContext context, _Contagem st) {
+    final c = proposalComposicao(
+      total: st.total,
+      processing: st.processing,
+      finalized: st.finalized,
+      canceled: st.canceled,
+    );
+    if (c == null) return const [];
+    final hair = ThemeHelpers.borderLightColor(context);
+    final partes = [
+      (c.andamento, proposalStatusTom(context, ProposalStatus.processing)),
+      (c.finalizadas, proposalStatusTom(context, ProposalStatus.finalized)),
+      (c.canceladas, proposalStatusTom(context, ProposalStatus.canceled)),
+    ];
+    return [
+      const SizedBox(height: 10),
+      Semantics(
+        label: 'Composição da carteira',
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(99),
+          child: SizedBox(
+            height: 6,
+            child: ColoredBox(
+              color: hair,
+              child: LayoutBuilder(
+                builder: (context, box) => Row(
+                  children: [
+                    for (final (frac, tom) in partes)
+                      if (frac > 0)
+                        Container(
+                          width: box.maxWidth * frac,
+                          color: tom.sinal,
+                        ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(height: 4),
+      Text(
+        'composição da carteira',
+        style: TextStyle(
+          fontSize: 11,
+          fontStyle: FontStyle.italic,
+          color: ThemeHelpers.textSecondaryColor(context),
+        ),
+      ),
+    ];
+  }
+}
+
+/// Um fato do topo (ícone + texto curto), sem caixa: a gramática flush.
+class _Fato extends StatelessWidget {
+  const _Fato({required this.icon, required this.texto, this.cor});
+  final IconData icon;
+  final String texto;
+  final Color? cor;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = cor ?? ThemeHelpers.textSecondaryColor(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(99),
+        border: Border.all(color: ThemeHelpers.borderLightColor(context)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: c),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              texto,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                color: c,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
 /// "Nova proposta" no canto do hero: compacto, na cor da marca. Sem
-/// permissão continua à vista com cadeado e diz o porquê ao tocar.
+/// `proposal:create` nem aparece (web).
 class _NovaProposta extends StatelessWidget {
   const _NovaProposta({
     required this.accent,
-    required this.canCreate,
     required this.rotulo,
     required this.onTap,
   });
   final Color accent;
-  final bool canCreate;
   final String rotulo;
   final VoidCallback onTap;
 
@@ -669,14 +840,12 @@ class _NovaProposta extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final muted = ThemeHelpers.textSecondaryColor(context);
-    final cheio = canCreate;
     return Semantics(
       button: true,
-      label: cheio ? 'Nova proposta' : 'Nova proposta (sem permissão)',
+      label: 'Nova proposta',
       excludeSemantics: true,
       child: Material(
-        color: cheio ? accent : Colors.transparent,
+        color: accent,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           onTap: onTap,
@@ -684,30 +853,16 @@ class _NovaProposta extends StatelessWidget {
           child: Container(
             constraints: const BoxConstraints(minHeight: 42),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-            decoration: cheio
-                ? null
-                : BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: ThemeHelpers.borderColor(context),
-                    ),
-                  ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  cheio ? Icons.add_rounded : Icons.lock_outline_rounded,
-                  size: 19,
-                  color: cheio ? Colors.white : muted,
-                ),
+                const Icon(Icons.add_rounded, size: 19, color: Colors.white),
                 const SizedBox(width: 6),
                 Text(
                   rotulo,
                   maxLines: 1,
                   softWrap: false,
-                  style: estiloRotulo.copyWith(
-                    color: cheio ? Colors.white : muted,
-                  ),
+                  style: estiloRotulo.copyWith(color: Colors.white),
                 ),
               ],
             ),
@@ -718,15 +873,17 @@ class _NovaProposta extends StatelessWidget {
   }
 }
 
-/// Busca da lista: o termo só vale ao buscar (teclado ou seta). A ponta
-/// direita diz o estado — seta quando há termo novo, "x" quando há busca
-/// valendo (limpa e recarrega).
+/// Busca da lista: busca sozinha 400 ms depois de parar de digitar (web) e
+/// também ao confirmar (teclado ou seta). A ponta direita diz o estado —
+/// seta quando há termo novo, "x" quando há busca valendo (limpa e
+/// recarrega).
 class _SearchBar extends StatelessWidget {
   const _SearchBar({
     required this.controller,
     required this.accent,
     required this.aplicada,
     required this.onSubmitted,
+    required this.onChanged,
     required this.onClear,
   });
   final TextEditingController controller;
@@ -735,6 +892,7 @@ class _SearchBar extends StatelessWidget {
   /// Termo que está valendo na lista agora.
   final String aplicada;
   final VoidCallback onSubmitted;
+  final ValueChanged<String> onChanged;
   final VoidCallback onClear;
 
   @override
@@ -776,6 +934,7 @@ class _SearchBar extends StatelessWidget {
             context,
           ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
           textInputAction: TextInputAction.search,
+          onChanged: onChanged,
           onSubmitted: (_) {
             FocusScope.of(context).unfocus();
             onSubmitted();

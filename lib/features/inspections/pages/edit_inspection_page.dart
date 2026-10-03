@@ -9,7 +9,7 @@ import '../../../shared/widgets/custom_button.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_helpers.dart';
 import '../../../shared/services/api_service.dart';
-import '../../../shared/utils/masks.dart';
+import '../../../shared/services/module_access_service.dart';
 import '../../../shared/widgets/skeleton_box.dart';
 import '../../documents/widgets/entity_selector.dart';
 import '../models/inspection_model.dart';
@@ -20,10 +20,7 @@ import '../widgets/cpf_cnpj_text_field.dart';
 class EditInspectionPage extends StatefulWidget {
   final String inspectionId;
 
-  const EditInspectionPage({
-    super.key,
-    required this.inspectionId,
-  });
+  const EditInspectionPage({super.key, required this.inspectionId});
 
   @override
   State<EditInspectionPage> createState() => _EditInspectionPageState();
@@ -56,6 +53,7 @@ class _EditInspectionPageState extends State<EditInspectionPage> {
   bool _isLoadingInspection = true;
   bool _isLoadingUsers = false;
   List<Map<String, dynamic>> _users = [];
+
   /// Diagnóstico da falha (API ou exceção) — carrega o código HTTP junto.
   ErrorCause? _errorCause;
 
@@ -108,7 +106,7 @@ class _EditInspectionPageState extends State<EditInspectionPage> {
             _selectedPropertyName = inspection.property?['title']?.toString();
             _selectedInspectorId = inspection.inspectorId;
             _selectedInspectorName = inspection.inspector?['name']?.toString();
-            
+
             if (inspection.value != null) {
               final currencyFormat = NumberFormat.currency(
                 locale: 'pt_BR',
@@ -117,11 +115,13 @@ class _EditInspectionPageState extends State<EditInspectionPage> {
               );
               _valueController.text = currencyFormat.format(inspection.value);
             }
-            
+
             _responsibleNameController.text = inspection.responsibleName ?? '';
-            _responsibleDocumentController.text = inspection.responsibleDocument ?? '';
-            _responsiblePhoneController.text = inspection.responsiblePhone ?? '';
-            
+            _responsibleDocumentController.text =
+                inspection.responsibleDocument ?? '';
+            _responsiblePhoneController.text =
+                inspection.responsiblePhone ?? '';
+
             _errorCause = null;
             _isLoadingInspection = false;
           });
@@ -252,8 +252,8 @@ class _EditInspectionPageState extends State<EditInspectionPage> {
                     child: Text(
                       'Selecionar Vistoriador',
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                   IconButton(
@@ -284,13 +284,11 @@ class _EditInspectionPageState extends State<EditInspectionPage> {
                         ? Text(user['email'].toString())
                         : null,
                     selected: isSelected,
-                    selectedTileColor:
-                        AppColors.primary.primary.withValues(alpha: 0.1),
+                    selectedTileColor: AppColors.primary.primary.withValues(
+                      alpha: 0.1,
+                    ),
                     onTap: () {
-                      Navigator.pop(context, {
-                        'id': userId,
-                        'name': userName,
-                      });
+                      Navigator.pop(context, {'id': userId, 'name': userName});
                     },
                   );
                 },
@@ -382,10 +380,11 @@ class _EditInspectionPageState extends State<EditInspectionPage> {
             : _responsibleNameController.text.trim(),
         responsibleDocument: _responsibleDocumentController.text.trim().isEmpty
             ? null
-            : Masks.unmaskAll(_responsibleDocumentController.text.trim()),
+            : _responsibleDocumentController.text
+                  .trim(), // vistorias-05: com máscara, como a web
         responsiblePhone: _responsiblePhoneController.text.trim().isEmpty
             ? null
-            : Masks.unmaskPhone(_responsiblePhoneController.text.trim()),
+            : _responsiblePhoneController.text.trim(),
         observations: _observationsController.text.trim().isEmpty
             ? null
             : _observationsController.text.trim(),
@@ -437,6 +436,23 @@ class _EditInspectionPageState extends State<EditInspectionPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final dateFormat = DateFormat('dd/MM/yyyy');
+
+    // vistorias-01: sem `inspection:update` o back recusa com 403 (web:
+    // PermissionRoute na rota). Bloqueia antes de a pessoa preencher tudo.
+    if (!ModuleAccessService.instance.hasPermission('inspection:update')) {
+      return const AppScaffold(
+        title: 'Editar Vistoria',
+        body: Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'Você não tem permissão para editar vistorias.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
 
     if (_isLoadingInspection) {
       return AppScaffold(
@@ -619,14 +635,14 @@ class _EditInspectionPageState extends State<EditInspectionPage> {
                       : const Icon(Icons.arrow_drop_down),
                 ),
                 child: Text(
-                  _selectedInspectorName ?? 'Selecione um vistoriador (opcional)',
+                  _selectedInspectorName ??
+                      'Selecione um vistoriador (opcional)',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: _selectedInspectorName != null
                         ? Theme.of(context).colorScheme.onSurface
-                        : Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withValues(alpha: 0.6),
+                        : Theme.of(
+                            context,
+                          ).colorScheme.onSurface.withValues(alpha: 0.6),
                   ),
                 ),
               ),
@@ -730,21 +746,37 @@ class _EditInspectionPageState extends State<EditInspectionPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Título
-          SkeletonText(width: 200, height: 20, margin: const EdgeInsets.only(bottom: 16)),
+          SkeletonText(
+            width: 200,
+            height: 20,
+            margin: const EdgeInsets.only(bottom: 16),
+          ),
           // Campos
-          ...List.generate(8, (index) => Padding(
-            padding: const EdgeInsets.only(bottom: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SkeletonText(width: 120, height: 16, margin: const EdgeInsets.only(bottom: 8)),
-                SkeletonBox(height: 48, borderRadius: 12),
-              ],
+          ...List.generate(
+            8,
+            (index) => Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SkeletonText(
+                    width: 120,
+                    height: 16,
+                    margin: const EdgeInsets.only(bottom: 8),
+                  ),
+                  SkeletonBox(height: 48, borderRadius: 12),
+                ],
+              ),
             ),
-          )),
+          ),
           // Botões
           const SizedBox(height: 16),
-          SkeletonBox(width: double.infinity, height: 48, borderRadius: 12, margin: const EdgeInsets.only(bottom: 12)),
+          SkeletonBox(
+            width: double.infinity,
+            height: 48,
+            borderRadius: 12,
+            margin: const EdgeInsets.only(bottom: 12),
+          ),
           SkeletonBox(width: double.infinity, height: 48, borderRadius: 12),
         ],
       ),

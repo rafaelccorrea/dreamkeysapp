@@ -61,14 +61,6 @@ class ProposalRowRules {
   bool get canCancel => _canUpdate && !_deleted && _processing;
   bool get canDelete => _canDelete && !_deleted;
 
-  /// Proposta aberta (em andamento, não excluída) numa conta que não edita
-  /// propostas: assinaturas e edição aparecem TRAVADAS com o motivo — não
-  /// somem (o card antigo já avisava "envio para assinatura travado").
-  bool get travadaPorPermissao => !_canUpdate && !_deleted && _processing;
-
-  static const String motivoDaTrava =
-      'Sua conta não edita propostas. Peça ao administrador da empresa.';
-
   /// PDF: consolidado quando finalizada; parcial da etapa atual senão.
   int? get etapaDoPdf => finalizada ? null : p.etapa.number;
 
@@ -155,42 +147,98 @@ Future<bool> runProposalRowAction(
   }
 }
 
-Future<void> _openPdf(BuildContext context, PurchaseProposal p, int? etapa) {
+Future<void> _openPdf(
+  BuildContext context,
+  PurchaseProposal p,
+  int? etapa,
+) async {
   final num = p.proposalNumber.trim().isNotEmpty ? p.proposalNumber : p.id;
-  return showProposalPdfSheet(
+  var comAssinado = false;
+  // Já passou de alguma etapa (ou finalizada): pode haver assinado no
+  // Autentique — pergunta se quer só o PDF ou o PDF + assinado (.zip).
+  if (proposalPdfPodeTerAssinado(p)) {
+    final escolha = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.picture_as_pdf_outlined),
+              title: const Text('Só o PDF da proposta'),
+              subtitle: const Text('O documento gerado pelo sistema.'),
+              onTap: () => Navigator.of(ctx).pop(false),
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_zip_outlined),
+              title: const Text('PDF + assinado (.zip)'),
+              subtitle: const Text(
+                'Junto com o(s) documento(s) assinado(s) no Autentique.',
+              ),
+              onTap: () => Navigator.of(ctx).pop(true),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (escolha == null || !context.mounted) return;
+    comAssinado = escolha;
+  }
+  if (!context.mounted) return;
+  await showProposalPdfSheet(
     context,
     proposalId: p.id,
     numero: num,
     etapa: etapa,
+    incluirAutentique: comAssinado,
   );
 }
+
+/// A proposta pode ter documento assinado no Autentique: finalizada ou já
+/// além da etapa 1 (a etapa anterior foi concluída).
+bool proposalPdfPodeTerAssinado(PurchaseProposal p) =>
+    p.status == ProposalStatus.finalized || p.etapa.number > 1;
 
 /// Folha do PDF da proposta nº [numero] (da [etapa], ou consolidado quando
 /// nula) — Compartilhar / Salvar no aparelho. Abrir com
 /// `launchUrl(Uri.file(...))` não funciona no Android nem no iOS.
+///
+/// [incluirAutentique] = `true` pede ao back o PDF gerado + o(s) assinado(s)
+/// do Autentique num .zip (é o que o download do web entrega —
+/// `baixarPdfProposta`, sem `incluirAutentique=false`); sem assinado, o back
+/// devolve só o PDF.
 Future<void> showProposalPdfSheet(
   BuildContext context, {
   required String proposalId,
   required String numero,
   int? etapa,
+  bool incluirAutentique = false,
 }) {
   return showFileDeliverySheet(
     context,
-    title: etapa == null
-        ? 'PDF da proposta nº $numero'
-        : 'PDF da etapa $etapa · proposta nº $numero',
+    title: incluirAutentique
+        ? 'PDF + assinado · proposta nº $numero'
+            '${etapa != null ? ' (etapa $etapa)' : ''}'
+        : etapa == null
+            ? 'PDF da proposta nº $numero'
+            : 'PDF da etapa $etapa · proposta nº $numero',
     expectedType: 'PDF',
     generatingTitle: 'Gerando o PDF da proposta…',
     readyTitle: 'PDF pronto',
     readyNote: (file) => file.extension == 'zip'
-        ? 'Mais de um documento: os PDFs vêm juntos num arquivo .zip.'
-        : null,
+        ? 'O PDF gerado e o(s) assinado(s) no Autentique vêm juntos num .zip.'
+        : incluirAutentique
+            ? 'Ainda não há documento assinado no Autentique: veio só o PDF.'
+            : null,
     shareSubject: 'Proposta nº $numero',
     saveDialogTitle: 'Salvar PDF da proposta',
     load: () async {
       final res = await PurchaseProposalsService.instance.downloadPdf(
         proposalId,
         etapa: etapa,
+        incluirAutentique: incluirAutentique,
       );
       final data = res.data;
       if (!res.success || data == null) {

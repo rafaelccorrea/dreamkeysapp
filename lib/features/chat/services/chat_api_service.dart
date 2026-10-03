@@ -599,7 +599,9 @@ class ChatApiService {
     }
   }
 
-  /// Sair de um grupo
+  /// Sair de um grupo. SÓ grupo: em conversa direta o back responde 400
+  /// ("Esta funcionalidade é apenas para grupos") — para "excluir conversa"
+  /// use [deleteRoomForMe].
   Future<ApiResponse<void>> leaveRoom(String roomId) async {
     try {
       debugPrint('💬 [CHAT_API] Saindo do grupo: $roomId');
@@ -624,6 +626,51 @@ class ChatApiService {
     } catch (e, stackTrace) {
       debugPrint('❌ [CHAT_API] Erro ao sair do grupo: $e');
       debugPrint('📚 [CHAT_API] StackTrace: $stackTrace');
+      return ApiResponse.error(
+        message: 'Erro de conexão: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
+  /// Apagar a conversa só para mim (`POST /chat/rooms/:id/delete-for-me`),
+  /// como o web (`chatApi.deleteRoomForMe`). Serve para QUALQUER tipo de
+  /// sala: em direta/suporte remove só a minha participação; em grupo o back
+  /// trata como "sair do grupo" (com a trava de último administrador).
+  /// O `/leave` é exclusivo de grupo — chamado numa conversa direta dava 400.
+  Future<ApiResponse<void>> deleteRoomForMe(String roomId) {
+    return _postRoomAction(
+      '/chat/rooms/$roomId/delete-for-me',
+      fallbackError: 'Não foi possível apagar a conversa',
+    );
+  }
+
+  /// Apagar o GRUPO para todos (`POST /chat/rooms/:id/delete-for-all`).
+  /// O back só aceita em grupo e para admin/criador; direta e suporte
+  /// respondem 403 — a tela só oferece a ação quando a regra do web permite.
+  Future<ApiResponse<void>> deleteRoomForAll(String roomId) {
+    return _postRoomAction(
+      '/chat/rooms/$roomId/delete-for-all',
+      fallbackError: 'Não foi possível apagar a conversa para todos',
+    );
+  }
+
+  Future<ApiResponse<void>> _postRoomAction(
+    String endpoint, {
+    required String fallbackError,
+  }) async {
+    try {
+      final response = await _apiService.post<dynamic>(endpoint);
+      if (response.success) {
+        return ApiResponse.success(data: null, statusCode: response.statusCode);
+      }
+      return ApiResponse.error(
+        message: response.message ?? fallbackError,
+        statusCode: response.statusCode,
+        data: response.error,
+      );
+    } catch (e) {
+      debugPrint('❌ [CHAT_API] $endpoint: $e');
       return ApiResponse.error(
         message: 'Erro de conexão: ${e.toString()}',
         statusCode: 0,

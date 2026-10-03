@@ -337,7 +337,9 @@ class _EstateFormSectionsState extends State<EstateFormSections> {
             Expanded(
               child: TextFormField(
                 controller: d.cnpj,
-                keyboardType: TextInputType.number,
+                // CNPJ alfanumérico (2026): teclado com letras.
+                keyboardType: TextInputType.visiblePassword,
+                textCapitalization: TextCapitalization.characters,
                 inputFormatters: [CnpjInputFormatter()],
                 decoration: const InputDecoration(
                   labelText: 'CNPJ',

@@ -6,6 +6,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/theme_helpers.dart';
 import '../../../../shared/services/property_service.dart';
 import '../../../../shared/utils/property_finalidade.dart';
+import '../../utils/property_price_display.dart';
 import 'property_details_kit.dart';
 
 final NumberFormat _brl = NumberFormat.currency(
@@ -37,10 +38,11 @@ class PropertyValuesSection extends StatelessWidget {
 
   final Property property;
 
-  /// Há algo para mostrar (preço, taxa ou negociação).
+  /// Há algo para mostrar (preço que vale, taxa ou negociação). Preço "0.00"
+  /// sozinho não abre a seção.
   static bool isVisible(Property property) =>
-      property.salePrice != null ||
-      property.rentPrice != null ||
+      hasApplicablePrice(property.salePrice) ||
+      hasApplicablePrice(property.rentPrice) ||
       _hasExtras(property) ||
       hasNegotiation(property);
 
@@ -87,23 +89,30 @@ class PropertyValuesSection extends StatelessWidget {
         ? AppColors.message.warningTextDarkMode
         : AppColors.message.warningText;
 
+    // "0.00" é "não se aplica" (o lado que a finalidade não anuncia), nunca
+    // "R$ 0". Com um preço que vale, os dois blocos aparecem — venda e
+    // locação lado a lado; sem nenhum, não há bloco de preço.
+    final saleOk = hasApplicablePrice(p.salePrice);
+    final rentOk = hasApplicablePrice(p.rentPrice);
+    final anyPrice = saleOk || rentOk;
+    final muted = ThemeHelpers.textSecondaryColor(context);
     final prices = <Widget>[
-      if (p.salePrice != null)
+      if (anyPrice && p.salePrice != null)
         _PriceBlock(
           label: 'Venda',
-          value: _brl.format(p.salePrice),
-          tone: saleTone,
-          notAdvertised: fora.venda,
+          value: formatPropertyPrice(p.salePrice),
+          tone: saleOk ? saleTone : muted,
+          notAdvertised: saleOk && fora.venda,
           notAdvertisedHint: 'O imóvel não está anunciado para venda — o '
               'valor segue guardado na ficha, mas não entra nas buscas de '
               'compra nem no site.',
         ),
-      if (p.rentPrice != null)
+      if (anyPrice && p.rentPrice != null)
         _PriceBlock(
           label: 'Aluguel',
-          value: _brl.format(p.rentPrice),
-          tone: rentTone,
-          notAdvertised: fora.locacao,
+          value: formatPropertyPrice(p.rentPrice),
+          tone: rentOk ? rentTone : muted,
+          notAdvertised: rentOk && fora.locacao,
           notAdvertisedHint: 'O imóvel não está anunciado para locação — o '
               'valor segue guardado na ficha, mas não entra nas buscas de '
               'aluguel nem no site.',
